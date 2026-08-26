@@ -1,16 +1,21 @@
+using VideoMonitor.Client.Forms;
+using VideoMonitor.Client.Mock;
+using VideoMonitor.Client.Services;
+
 namespace VideoMonitor.Client;
 
 static class Program
 {
-    /// <summary>
-    ///  The main entry point for the application.
-    /// </summary>
     [STAThread]
     static void Main()
     {
-        // To customize application configuration such as set high DPI settings or default font,
-        // see https://aka.ms/applicationconfiguration.
         ApplicationConfiguration.Initialize();
-        Application.Run(new Form1());
-    }    
+        var groups = MockMonitorData.CreateGroups();
+        var switchService = new MonitorSwitchService(
+            groups.Single(group => group.Name == "备用1"),
+            groups.Single(group => group.Name == "Z-1#巷"),
+            groups.Single(group => group.Name == "2#主溜井"));
+
+        Application.Run(new MainForm(switchService, groups, new ScreenService()));
+    }
 }
