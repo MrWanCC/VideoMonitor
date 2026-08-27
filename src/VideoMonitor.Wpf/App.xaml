@@ -4,6 +4,13 @@
              xmlns:local="clr-namespace:VideoMonitor.Wpf"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Colors.xaml" />
+                <ResourceDictionary Source="Themes/Typography.xaml" />
+                <ResourceDictionary Source="Themes/Buttons.xaml" />
+                <ResourceDictionary Source="Themes/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>
