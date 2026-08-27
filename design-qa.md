@@ -38,6 +38,11 @@
 - Post-fix evidence: the full comparison shows matching industrial dark hierarchy and dominant video area; focused comparisons confirm integrated chrome, compact typography, right-tree density, detail panel, and bottom status rhythm.
 - No actionable P0/P1/P2 differences remain within this mock-UI-only phase.
 
+### Iteration 3 — passed
+
+- Follow-up finding: the original 34px collapsed row did not include the panel's 10px vertical margin, leaving only 24px for a 34px header and clipping its content.
+- Fix: collapsed row height is now 44px (34px header + 10px vertical margin). Runtime evidence: `artifacts/screenshots/wpf-detail-collapsed-fixed.png`.
+
 ## Follow-up polish (P3, acceptance-dependent)
 
 - Target uses real mine imagery and mixed error/offline states; implementation intentionally keeps neutral mock video placeholders and existing all-online fake data.
