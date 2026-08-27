@@ -15,7 +15,7 @@
         <converters:TransportModeToTextConverter x:Key="TransportModeTextConverter" />
         <Storyboard x:Key="DrawerOpenStoryboard">
             <DoubleAnimation Storyboard.TargetName="DrawerTranslate" Storyboard.TargetProperty="X"
-                             From="420" To="0" Duration="0:0:0.2">
+                             From="520" To="0" Duration="0:0:0.2">
                 <DoubleAnimation.EasingFunction>
                     <CubicEase EasingMode="EaseOut" />
                 </DoubleAnimation.EasingFunction>
@@ -29,7 +29,7 @@
         </Storyboard>
         <Storyboard x:Key="DrawerCloseStoryboard">
             <DoubleAnimation Storyboard.TargetName="DrawerTranslate" Storyboard.TargetProperty="X"
-                             From="0" To="420" Duration="0:0:0.16">
+                             From="0" To="520" Duration="0:0:0.16">
                 <DoubleAnimation.EasingFunction>
                     <CubicEase EasingMode="EaseIn" />
                 </DoubleAnimation.EasingFunction>
@@ -296,11 +296,11 @@
         <Border x:Name="DrawerShade" Grid.Column="1" Margin="8,0,0,0" Panel.ZIndex="10"
                 Background="#FF000000" Opacity="0" Visibility="Collapsed" IsHitTestVisible="False" />
 
-        <Border x:Name="EditorDrawer" Grid.Column="1" Width="420" HorizontalAlignment="Right" Panel.ZIndex="20"
+        <Border x:Name="EditorDrawer" Grid.Column="1" Width="520" HorizontalAlignment="Right" Panel.ZIndex="20"
                 Background="{StaticResource PanelBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="1,0,0,0" Visibility="Collapsed" IsHitTestVisible="False">
             <Border.RenderTransform>
-                <TranslateTransform x:Name="DrawerTranslate" X="420" />
+                <TranslateTransform x:Name="DrawerTranslate" X="520" />
             </Border.RenderTransform>
             <Grid>
                 <Grid.RowDefinitions>
@@ -315,26 +315,29 @@
                         <Path Width="14" Height="14" Data="{StaticResource IconClose}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform" />
                     </Button>
                 </Grid>
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer x:Name="EditorScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="18,4,18,18">
                         <TextBlock Style="{StaticResource DeviceSectionTitleStyle}" Text="基础信息" />
-                        <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="设备名称 *" />
-                        <TextBox Margin="0,0,0,12" Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.Name, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="所属分组 *" />
-                        <ComboBox Margin="0,0,0,12" Style="{StaticResource IndustrialComboBoxStyle}"
-                                  ItemsSource="{Binding EditableGroups}" SelectedValuePath="Id"
-                                  SelectedValue="{Binding EditDraft.GroupId, Mode=TwoWay}">
-                            <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate>
-                        </ComboBox>
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="设备名称 *" />
+                                <TextBox Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.Name, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="所属分组 *" />
+                                <ComboBox x:Name="GroupSelector" Style="{StaticResource IndustrialComboBoxStyle}"
+                                          ItemsSource="{Binding EditableGroups}" SelectedValuePath="Id"
+                                          SelectedValue="{Binding EditDraft.GroupId, Mode=TwoWay}">
+                                    <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+                        </Grid>
                         <Grid Margin="0,0,0,12">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <StackPanel><TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="厂家"/><TextBox Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.Manufacturer, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
                             <StackPanel Grid.Column="2"><TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="型号"/><TextBox Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.Model, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
                         </Grid>
-                        <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="备注" />
-                        <TextBox Height="58" Margin="0,0,0,16" Padding="10,7" AcceptsReturn="True" TextWrapping="Wrap"
-                                 VerticalContentAlignment="Top" Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.Remark, UpdateSourceTrigger=PropertyChanged}" />
-
                         <Border Height="1" Margin="0,0,0,12" Background="{StaticResource SeparatorBrush}" />
                         <TextBlock Style="{StaticResource DeviceSectionTitleStyle}" Text="接入参数" />
                         <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="设备IP *" />
@@ -344,32 +347,43 @@
                             <StackPanel><TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="SDK端口"/><TextBox Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.SdkPort, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
                             <StackPanel Grid.Column="2"><TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="RTSP端口"/><TextBox Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.RtspPort, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
                         </Grid>
-                        <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="用户名" />
-                        <TextBox Margin="0,0,0,12" Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.Username, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="密码" />
-                        <PasswordBox Margin="0,0,0,16" Style="{StaticResource IndustrialPasswordBoxStyle}"
-                                     behaviors:PasswordBoxBinding.BoundPassword="{Binding EditDraft.Password, Mode=TwoWay}" />
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="用户名" />
+                                <TextBox Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.Username, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="密码" />
+                                <PasswordBox Style="{StaticResource IndustrialPasswordBoxStyle}"
+                                             behaviors:PasswordBoxBinding.BoundPassword="{Binding EditDraft.Password, Mode=TwoWay}" />
+                            </StackPanel>
+                        </Grid>
 
                         <Border Height="1" Margin="0,0,0,12" Background="{StaticResource SeparatorBrush}" />
-                        <TextBlock Style="{StaticResource DeviceSectionTitleStyle}" Text="通道配置" />
+                        <TextBlock Style="{StaticResource DeviceSectionTitleStyle}" Text="通道与传输配置" />
                         <Grid Margin="0,0,0,12">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="94"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <StackPanel><TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="通道号"/><TextBox Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.ChannelNo, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
                             <StackPanel Grid.Column="2"><TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="通道名称"/><TextBox Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.ChannelName, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
                         </Grid>
-                        <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="码流类型" />
-                        <ComboBox Margin="0,0,0,16" Style="{StaticResource IndustrialComboBoxStyle}"
-                                  ItemsSource="{Binding StreamTypes}" SelectedItem="{Binding EditDraft.StreamType}">
-                            <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Converter={StaticResource StreamTypeTextConverter}}"/></DataTemplate></ComboBox.ItemTemplate>
-                        </ComboBox>
-
-                        <Border Height="1" Margin="0,0,0,12" Background="{StaticResource SeparatorBrush}" />
-                        <TextBlock Style="{StaticResource DeviceSectionTitleStyle}" Text="传输配置" />
-                        <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="传输方式" />
-                        <ComboBox Margin="0,0,0,16" Style="{StaticResource IndustrialComboBoxStyle}"
-                                  ItemsSource="{Binding TransportModes}" SelectedItem="{Binding EditDraft.TransportMode}">
-                            <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Converter={StaticResource TransportModeTextConverter}}"/></DataTemplate></ComboBox.ItemTemplate>
-                        </ComboBox>
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="码流类型" />
+                                <ComboBox Style="{StaticResource IndustrialComboBoxStyle}"
+                                          ItemsSource="{Binding StreamTypes}" SelectedItem="{Binding EditDraft.StreamType}">
+                                    <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Converter={StaticResource StreamTypeTextConverter}}"/></DataTemplate></ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="传输方式" />
+                                <ComboBox Style="{StaticResource IndustrialComboBoxStyle}"
+                                          ItemsSource="{Binding TransportModes}" SelectedItem="{Binding EditDraft.TransportMode}">
+                                    <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Converter={StaticResource TransportModeTextConverter}}"/></DataTemplate></ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+                        </Grid>
 
                         <Border Height="1" Margin="0,0,0,12" Background="{StaticResource SeparatorBrush}" />
                         <TextBlock Style="{StaticResource DeviceSectionTitleStyle}" Text="RTSP信息" />

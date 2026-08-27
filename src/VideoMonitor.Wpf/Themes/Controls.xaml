@@ -109,14 +109,21 @@
                                 <ContentPresenter Margin="10,0,34,0" VerticalAlignment="Center"
                                                   Content="{TemplateBinding SelectionBoxItem}"
                                                   ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
-                                                  ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}" />
+                                                  ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}" />
                                 <Path Width="8" Height="8" Margin="0,0,12,0" HorizontalAlignment="Right"
                                       Data="{StaticResource IconChevron}" Stroke="{StaticResource SecondaryTextBrush}"
                                       StrokeThickness="1.5" Stretch="Uniform" RenderTransformOrigin=".5,.5">
                                     <Path.RenderTransform><RotateTransform Angle="90" /></Path.RenderTransform>
                                 </Path>
                                 <ToggleButton Background="Transparent" BorderThickness="0" Focusable="False" ClickMode="Press"
-                                              IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}" />
+                                              IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                    <ToggleButton.Template>
+                                        <ControlTemplate TargetType="ToggleButton">
+                                            <Border Background="Transparent" />
+                                        </ControlTemplate>
+                                    </ToggleButton.Template>
+                                </ToggleButton>
                             </Grid>
                         </Border>
                         <Popup x:Name="PART_Popup" Margin="0,4,0,0" AllowsTransparency="True"
@@ -147,11 +154,30 @@
                     <Setter Property="Padding" Value="10,7" />
                     <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
                     <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
-                    <Style.Triggers>
-                        <Trigger Property="IsHighlighted" Value="True">
-                            <Setter Property="Background" Value="{StaticResource SelectedRowBrush}" />
-                        </Trigger>
-                    </Style.Triggers>
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ComboBoxItem">
+                                <Border x:Name="ItemChrome" Padding="{TemplateBinding Padding}"
+                                        Background="{TemplateBinding Background}">
+                                    <ContentPresenter VerticalAlignment="Center"
+                                                      TextElement.Foreground="{TemplateBinding Foreground}" />
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsHighlighted" Value="True">
+                                        <Setter TargetName="ItemChrome" Property="Background" Value="{StaticResource SelectedRowBrush}" />
+                                    </Trigger>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter TargetName="ItemChrome" Property="Background" Value="{StaticResource SelectedRowBrush}" />
+                                        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+                                    </Trigger>
+                                    <Trigger Property="IsEnabled" Value="False">
+                                        <Setter Property="Opacity" Value="0.55" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
                 </Style>
             </Setter.Value>
         </Setter>

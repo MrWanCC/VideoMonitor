@@ -29,8 +29,8 @@ public sealed class DeviceDrawerAnimationTests
                 var view = new DeviceView { DataContext = viewModel };
                 var host = new Window
                 {
-                    Width = 1600,
-                    Height = 900,
+                    Width = 1920,
+                    Height = 1032,
                     Opacity = 0,
                     ShowInTaskbar = false,
                     WindowStyle = WindowStyle.None,
@@ -41,12 +41,13 @@ public sealed class DeviceDrawerAnimationTests
                 viewModel.AddDeviceCommand.Execute(null);
                 var drawer = Assert.IsType<Border>(view.FindName("EditorDrawer"));
                 var shade = Assert.IsType<Border>(view.FindName("DrawerShade"));
+                var editorScrollViewer = Assert.IsType<ScrollViewer>(view.FindName("EditorScrollViewer"));
                 var translation = Assert.IsType<TranslateTransform>(drawer.RenderTransform);
                 PumpDispatcherUntil(
                     () => translation.X <= 0.5 && shade.Opacity >= 0.12,
                     TimeSpan.FromSeconds(2));
 
-                Assert.Equal(420, drawer.Width);
+                Assert.Equal(520, drawer.Width);
                 Assert.Equal(1, Grid.GetColumn(drawer));
                 Assert.Equal(1, Grid.GetColumnSpan(drawer));
                 Assert.Equal(Visibility.Visible, drawer.Visibility);
@@ -54,6 +55,7 @@ public sealed class DeviceDrawerAnimationTests
                 Assert.InRange(translation.X, -0.5, 0.5);
                 Assert.InRange(shade.Opacity, 0.12, 0.18);
                 Assert.True(shade.IsHitTestVisible);
+                Assert.Equal(Visibility.Collapsed, editorScrollViewer.ComputedVerticalScrollBarVisibility);
 
                 viewModel.CancelEditCommand.Execute(null);
                 Assert.Equal(Visibility.Visible, drawer.Visibility);
@@ -65,7 +67,7 @@ public sealed class DeviceDrawerAnimationTests
 
                 Assert.Equal(Visibility.Collapsed, drawer.Visibility);
                 Assert.False(drawer.IsHitTestVisible);
-                Assert.InRange(translation.X, 419.5, 420.5);
+                Assert.InRange(translation.X, 519.5, 520.5);
                 Assert.Equal(Visibility.Collapsed, shade.Visibility);
                 Assert.False(shade.IsHitTestVisible);
                 host.Close();

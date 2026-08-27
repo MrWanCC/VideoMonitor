@@ -98,7 +98,7 @@ public partial class DeviceView
     private void CompleteDrawerClose()
     {
         _drawerCloseStoryboard.Remove(this);
-        DrawerTranslate.X = 420;
+        DrawerTranslate.X = 520;
         DrawerShade.Opacity = 0;
         EditorDrawer.Visibility = Visibility.Collapsed;
         EditorDrawer.IsHitTestVisible = false;
