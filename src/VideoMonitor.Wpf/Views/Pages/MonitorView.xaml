@@ -19,10 +19,10 @@
                 BorderThickness="1" CornerRadius="5">
             <Grid Margin="12,0">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Path Width="17" Height="17" Data="{StaticResource IconMonitor}" Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1.5" Stretch="Uniform" />
-                    <TextBlock Margin="8,0" Style="{StaticResource SecondaryTextStyle}" Text="溜井监控" />
-                    <Path Width="8" Height="8" Data="{StaticResource IconChevron}" Stroke="{StaticResource MutedTextBrush}" StrokeThickness="1.5" Stretch="Uniform" />
-                    <TextBlock Margin="8,0,0,0" FontSize="{StaticResource FontSizePageTitle}" FontWeight="SemiBold" Text="{Binding CurrentChuteName}" />
+                    <Path Width="17" Height="17" VerticalAlignment="Center" Data="{StaticResource IconMonitor}" Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1.5" Stretch="Uniform" />
+                    <TextBlock Margin="8,0" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" Text="溜井监控" />
+                    <Path Width="8" Height="8" VerticalAlignment="Center" Data="{StaticResource IconChevron}" Stroke="{StaticResource MutedTextBrush}" StrokeThickness="1.5" Stretch="Uniform" />
+                    <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="{StaticResource FontSizePageTitle}" FontWeight="SemiBold" Text="{Binding CurrentChuteName}" />
                 </StackPanel>
             </Grid>
         </Border>
