@@ -26,9 +26,10 @@ public sealed class MonitorViewModel : ObservableObject
 
         switchService.LayoutChanged += OnLayoutChanged;
         Render(switchService.Current);
-        selectedTreeItem = TreeSections
+        var initialGroup = TreeSections
             .SelectMany(section => section.Children)
             .FirstOrDefault(item => item.Name == switchService.Current.MainSlots[0].GroupName);
+        selectedTreeItem = initialGroup?.Children.FirstOrDefault() ?? initialGroup;
         if (selectedTreeItem is not null)
         {
             selectedTreeItem.IsSelected = true;
@@ -42,6 +43,7 @@ public sealed class MonitorViewModel : ObservableObject
     public ObservableCollection<MonitorTreeItemViewModel> TreeSections { get; }
 
     public IRelayCommand<MonitorTreeItemViewModel> SelectGroupCommand { get; }
+
 
     public string CurrentChuteName
     {
@@ -58,11 +60,12 @@ public sealed class MonitorViewModel : ObservableObject
     private static ObservableCollection<MonitorTreeItemViewModel> CreateTree(
         IEnumerable<MonitorGroup> groups)
     {
+        var groupList = groups.ToArray();
         return
         [
-            CreateSection("卸矿站监控", MonitorGroupType.UnloadingStation, groups),
-            CreateSection("溜井监控", MonitorGroupType.Chute, groups),
-            CreateSection("巷道监控", MonitorGroupType.Tunnel, groups)
+            CreateSection("卸矿站监控", MonitorGroupType.UnloadingStation, groupList),
+            CreateSection("溜井监控", MonitorGroupType.Chute, groupList),
+            CreateSection("巷道监控", MonitorGroupType.Tunnel, groupList)
         ];
     }
 
@@ -71,11 +74,29 @@ public sealed class MonitorViewModel : ObservableObject
         MonitorGroupType type,
         IEnumerable<MonitorGroup> groups)
     {
-        return new MonitorTreeItemViewModel(
-            title,
-            children: groups
-                .Where(group => group.Type == type)
-                .Select(group => new MonitorTreeItemViewModel(group.Name, group)));
+        var matchingGroups = groups.Where(group => group.Type == type).ToArray();
+        var children = matchingGroups.Select(group =>
+        {
+            var cameraItems = type == MonitorGroupType.Chute
+                ? group.Cameras.Select(camera => new MonitorTreeItemViewModel(
+                    camera.Name,
+                    group,
+                    status: camera.Status,
+                    isCamera: true))
+                : Enumerable.Empty<MonitorTreeItemViewModel>();
+
+            return new MonitorTreeItemViewModel(
+                group.Name,
+                group,
+                cameraItems,
+                type == MonitorGroupType.Chute ? $"({group.Cameras.Count}/{group.Cameras.Count})" : "",
+                isExpanded: group.Name == "备用1");
+        });
+        var total = type == MonitorGroupType.Chute
+            ? matchingGroups.Sum(group => group.Cameras.Count)
+            : matchingGroups.Length;
+
+        return new MonitorTreeItemViewModel(title, children: children, countText: $"({total}/{total})", isExpanded: true);
     }
 
     private void SelectGroup(MonitorTreeItemViewModel? item)
@@ -90,8 +111,13 @@ public sealed class MonitorViewModel : ObservableObject
             selectedTreeItem.IsSelected = false;
         }
 
-        item.IsSelected = true;
-        selectedTreeItem = item;
+        if (item.HasChildren)
+        {
+            item.IsExpanded = true;
+        }
+
+        selectedTreeItem = item.Children.FirstOrDefault() ?? item;
+        selectedTreeItem.IsSelected = true;
 
         switch (group.Type)
         {

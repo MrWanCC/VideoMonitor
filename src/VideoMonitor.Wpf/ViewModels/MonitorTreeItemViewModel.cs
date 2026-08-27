@@ -7,14 +7,23 @@ namespace VideoMonitor.Wpf.ViewModels;
 public sealed class MonitorTreeItemViewModel : ObservableObject
 {
     private bool isSelected;
+    private bool isExpanded;
     public MonitorTreeItemViewModel(
         string name,
         MonitorGroup? group = null,
-        IEnumerable<MonitorTreeItemViewModel>? children = null)
+        IEnumerable<MonitorTreeItemViewModel>? children = null,
+        string countText = "",
+        CameraStatus status = CameraStatus.Online,
+        bool isCamera = false,
+        bool isExpanded = false)
     {
         Name = name;
         Group = group;
         Children = new ObservableCollection<MonitorTreeItemViewModel>(children ?? []);
+        CountText = countText;
+        Status = status;
+        IsCamera = isCamera;
+        this.isExpanded = isExpanded;
     }
 
     public string Name { get; }
@@ -23,9 +32,23 @@ public sealed class MonitorTreeItemViewModel : ObservableObject
 
     public ObservableCollection<MonitorTreeItemViewModel> Children { get; }
 
+    public string CountText { get; }
+
+    public CameraStatus Status { get; }
+
+    public bool IsCamera { get; }
+
+    public bool HasChildren => Children.Count > 0;
+
     public bool IsSelected
     {
         get => isSelected;
         set => SetProperty(ref isSelected, value);
+    }
+
+    public bool IsExpanded
+    {
+        get => isExpanded;
+        set => SetProperty(ref isExpanded, value);
     }
 }
