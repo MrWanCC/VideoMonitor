@@ -51,14 +51,19 @@
     <Thickness x:Key="Spacing24">24</Thickness>
 
     <sys:Double x:Key="AppHeaderHeight">56</sys:Double>
-    <sys:Double x:Key="NavigationWidth">200</sys:Double>
+    <sys:Double x:Key="NavigationWidth">188</sys:Double>
+    <sys:Double x:Key="SidebarExpandedWidth">188</sys:Double>
+    <sys:Double x:Key="SidebarCollapsedWidth">56</sys:Double>
     <sys:Double x:Key="MonitorTreeWidth">300</sys:Double>
     <sys:Double x:Key="NavigationItemHeight">44</sys:Double>
     <sys:Double x:Key="VideoHeaderHeight">36</sys:Double>
     <sys:Double x:Key="TreeSearchHeight">36</sys:Double>
+    <sys:Double x:Key="PageToolbarHeight">40</sys:Double>
     <sys:Double x:Key="TreeSectionHeight">38</sys:Double>
     <sys:Double x:Key="TreeItemHeight">34</sys:Double>
     <sys:Double x:Key="DetailPanelHeight">132</sys:Double>
+    <sys:Double x:Key="DetailPanelExpandedHeight">104</sys:Double>
+    <sys:Double x:Key="DetailPanelCollapsedHeight">44</sys:Double>
     <sys:Double x:Key="DetailTabHeight">36</sys:Double>
     <sys:Double x:Key="StatusBarHeight">34</sys:Double>
 </ResourceDictionary>

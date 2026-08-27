@@ -5,7 +5,7 @@
         xmlns:controls="clr-namespace:VideoMonitor.Wpf.Controls"
         xmlns:converters="clr-namespace:VideoMonitor.Wpf.Converters"
         xmlns:pages="clr-namespace:VideoMonitor.Wpf.Views.Pages"
-        Title="视频监控平台 / ZLMediaKit" Width="1600" Height="920"
+        Title="罗河铁矿-620视频管理机" Width="1600" Height="920"
         MinWidth="1200" MinHeight="720" WindowStyle="None"
         ResizeMode="CanResize" Background="{StaticResource WindowBackgroundBrush}"
         Foreground="{StaticResource PrimaryTextBrush}">
@@ -16,6 +16,28 @@
     </shell:WindowChrome.WindowChrome>
     <Window.Resources>
         <converters:StringEqualsConverter x:Key="StringEqualsConverter" />
+        <Style x:Key="SidebarTextStyle" TargetType="TextBlock" BasedOn="{StaticResource NavigationTextStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSidebarCollapsed}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="SidebarCollapseIconStyle" TargetType="Path">
+            <Setter Property="Data" Value="{StaticResource IconCollapse}" />
+            <Setter Property="Stroke" Value="{StaticResource SecondaryTextBrush}" />
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+            <Setter Property="RenderTransform">
+                <Setter.Value><RotateTransform Angle="0" /></Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSidebarCollapsed}" Value="True">
+                    <Setter Property="RenderTransform">
+                        <Setter.Value><RotateTransform Angle="180" /></Setter.Value>
+                    </Setter>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
     <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
         <Grid x:Name="ShellGrid" Background="{StaticResource WindowBackgroundBrush}">
@@ -40,9 +62,7 @@
                                   Stroke="{StaticResource PrimaryBlueBrush}" StrokeThickness="1.4" Stretch="Uniform" />
                         </Grid>
                         <TextBlock Margin="10,0,0,0" Style="{StaticResource AppTitleTextStyle}" VerticalAlignment="Center"
-                                   Text="视频监控平台" />
-                        <TextBlock Margin="8,0,0,0" Foreground="{StaticResource SecondaryTextBrush}" FontSize="{StaticResource FontSizePageTitle}"
-                                   VerticalAlignment="Center" Text="/ ZLMediaKit" />
+                                   Text="罗河铁矿-620视频管理机" />
                     </StackPanel>
                     <Border Grid.Column="1" Width="132" Height="34" Margin="22,0,0,0" VerticalAlignment="Center"
                             Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
@@ -73,12 +93,6 @@
                                 shell:WindowChrome.IsHitTestVisibleInChrome="True">
                             <StackPanel><Path Width="19" Height="19" Data="{StaticResource IconFullscreen}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Margin="0,2,0,0" FontSize="{StaticResource FontSizeCaption}" Text="全屏"/></StackPanel>
                         </Button>
-                        <Button ToolTip="布局" Style="{StaticResource HeaderToolButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                            <StackPanel><Path Width="19" Height="19" Data="{StaticResource IconLayout}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Margin="0,2,0,0" FontSize="{StaticResource FontSizeCaption}" Text="布局"/></StackPanel>
-                        </Button>
-                        <Button ToolTip="抓图" Style="{StaticResource HeaderToolButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                            <StackPanel><Path Width="19" Height="19" Data="{StaticResource IconSnapshot}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Margin="0,2,0,0" FontSize="{StaticResource FontSizeCaption}" Text="抓图"/></StackPanel>
-                        </Button>
                         <Button ToolTip="告警" Style="{StaticResource HeaderToolButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                             <Grid><StackPanel><Path Width="19" Height="19" Data="{StaticResource IconAlarm}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Margin="0,2,0,0" FontSize="{StaticResource FontSizeCaption}" Text="告警"/></StackPanel><Border Margin="29,2,0,0" Width="17" Height="17" VerticalAlignment="Top" HorizontalAlignment="Left" Background="{StaticResource DangerRedBrush}" CornerRadius="9"><TextBlock FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center" Text="3"/></Border></Grid>
                         </Button>
@@ -95,28 +109,26 @@
 
             <Grid Grid.Row="1">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition x:Name="NavigationColumn" Width="200" />
+                    <ColumnDefinition x:Name="NavigationColumn" Width="188" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition x:Name="TreeColumn" Width="300" />
                 </Grid.ColumnDefinitions>
-                <Border x:Name="NavigationChrome" Grid.Column="0" Width="{StaticResource NavigationWidth}" Background="{StaticResource SidebarBackgroundBrush}"
+                <Border x:Name="NavigationChrome" Grid.Column="0" Background="{StaticResource SidebarBackgroundBrush}"
                         BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,1,0">
                     <DockPanel Margin="8,10,8,12">
                         <StackPanel DockPanel.Dock="Bottom">
-                            <Button Style="{StaticResource NavigationButtonStyle}">
-                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Path Width="18" Height="18" Data="{StaticResource IconStar}" Stroke="{StaticResource PrimaryBlueBrush}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource NavigationTextStyle}" Text="收藏夹"/><Border Grid.Column="2" Padding="6,2" Background="{StaticResource PrimaryBlueMutedBrush}" CornerRadius="9"><TextBlock Foreground="{StaticResource PrimaryBlueBrush}" FontSize="{StaticResource FontSizeCaption}" Text="12"/></Border></Grid>
-                            </Button>
-                            <Button Style="{StaticResource NavigationButtonStyle}">
-                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="18" Height="18" Data="{StaticResource IconCollapse}" Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource NavigationTextStyle}" Text="收起菜单"/></Grid>
+                            <Button AutomationProperties.AutomationId="ToggleSidebarButton" ToolTip="展开/收起菜单"
+                                    Command="{Binding ToggleSidebarCommand}" Style="{StaticResource NavigationButtonStyle}">
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="18" Height="18" Style="{StaticResource SidebarCollapseIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource SidebarTextStyle}" Text="收起菜单"/></Grid>
                             </Button>
                         </StackPanel>
                         <StackPanel>
-                            <Button Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=实时监控}" Command="{Binding NavigateCommand}" CommandParameter="实时监控" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconCamera}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource NavigationTextStyle}" Text="实时监控"/></Grid></Button>
-                            <Button Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=设备管理}" Command="{Binding NavigateCommand}" CommandParameter="设备管理" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconDevice}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource NavigationTextStyle}" Text="设备管理"/></Grid></Button>
-                            <Button Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=流媒体管理}" Command="{Binding NavigateCommand}" CommandParameter="流媒体管理" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconMedia}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource NavigationTextStyle}" Text="流媒体管理"/></Grid></Button>
-                            <Button Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=录像回放}" Command="{Binding NavigateCommand}" CommandParameter="录像回放" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconPlayback}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource NavigationTextStyle}" Text="录像回放"/></Grid></Button>
-                            <Button Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=告警中心}" Command="{Binding NavigateCommand}" CommandParameter="告警中心" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconAlarm}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource NavigationTextStyle}" Text="告警中心"/></Grid></Button>
-                            <Button Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=系统配置}" Command="{Binding NavigateCommand}" CommandParameter="系统配置" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconSettings}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource NavigationTextStyle}" Text="系统配置"/></Grid></Button>
+                            <Button ToolTip="实时监控" Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=实时监控}" Command="{Binding NavigateCommand}" CommandParameter="实时监控" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconCamera}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource SidebarTextStyle}" Text="实时监控"/></Grid></Button>
+                            <Button ToolTip="设备管理" Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=设备管理}" Command="{Binding NavigateCommand}" CommandParameter="设备管理" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconDevice}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource SidebarTextStyle}" Text="设备管理"/></Grid></Button>
+                            <Button ToolTip="流媒体管理" Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=流媒体管理}" Command="{Binding NavigateCommand}" CommandParameter="流媒体管理" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconMedia}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource SidebarTextStyle}" Text="流媒体管理"/></Grid></Button>
+                            <Button ToolTip="录像回放" Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=录像回放}" Command="{Binding NavigateCommand}" CommandParameter="录像回放" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconPlayback}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource SidebarTextStyle}" Text="录像回放"/></Grid></Button>
+                            <Button ToolTip="告警中心" Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=告警中心}" Command="{Binding NavigateCommand}" CommandParameter="告警中心" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconAlarm}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource SidebarTextStyle}" Text="告警中心"/></Grid></Button>
+                            <Button ToolTip="系统配置" Tag="{Binding SelectedNavigation, Converter={StaticResource StringEqualsConverter}, ConverterParameter=系统配置}" Command="{Binding NavigateCommand}" CommandParameter="系统配置" Style="{StaticResource NavigationButtonStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Path Width="19" Height="19" Data="{StaticResource IconSettings}" Style="{StaticResource NavigationIconStyle}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Grid.Column="1" Style="{StaticResource SidebarTextStyle}" Text="系统配置"/></Grid></Button>
                         </StackPanel>
                     </DockPanel>
                 </Border>

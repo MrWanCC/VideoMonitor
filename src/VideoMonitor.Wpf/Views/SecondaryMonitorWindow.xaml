@@ -4,7 +4,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:controls="clr-namespace:VideoMonitor.Wpf.Controls"
         xmlns:converters="clr-namespace:VideoMonitor.Wpf.Converters"
-        Title="卸矿站监控（副屏）" Width="1440" Height="540" MinWidth="900" MinHeight="540" MaxHeight="540"
+        Title="罗河铁矿-620视频管理机 - 卸矿站监控（副屏）" Width="1440" Height="540" MinWidth="900" MinHeight="540" MaxHeight="540"
         WindowStyle="None" ResizeMode="CanResize" Background="{StaticResource WindowBackgroundBrush}"
         Foreground="{StaticResource PrimaryTextBrush}">
     <shell:WindowChrome.WindowChrome>

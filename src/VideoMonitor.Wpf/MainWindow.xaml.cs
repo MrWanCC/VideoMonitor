@@ -6,6 +6,8 @@ namespace VideoMonitor.Wpf;
 
 public partial class MainWindow
 {
+    private const double SidebarExpandedWidth = 188d;
+    private const double SidebarCollapsedWidth = 56d;
     private readonly MainViewModel viewModel;
     private System.Windows.WindowStyle savedWindowStyle;
     private System.Windows.ResizeMode savedResizeMode;
@@ -20,6 +22,7 @@ public partial class MainWindow
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         Closed += (_, _) => viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        ApplySidebarState();
     }
 
     protected override void OnPreviewKeyDown(System.Windows.Input.KeyEventArgs e)
@@ -36,18 +39,27 @@ public partial class MainWindow
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(MainViewModel.IsMonitorFullscreen))
+        if (e.PropertyName == nameof(MainViewModel.IsSidebarCollapsed))
         {
+            if (!fullscreenApplied)
+            {
+                ApplySidebarState();
+            }
+
             return;
         }
 
-        if (viewModel.IsMonitorFullscreen)
+        if (e.PropertyName == nameof(MainViewModel.IsMonitorFullscreen))
         {
-            EnterMonitorFullscreen();
-        }
-        else
-        {
-            ExitMonitorFullscreen();
+            if (viewModel.IsMonitorFullscreen)
+            {
+                viewModel.Monitor.ExitSingleTileModeCommand.Execute(null);
+                EnterMonitorFullscreen();
+            }
+            else
+            {
+                ExitMonitorFullscreen();
+            }
         }
     }
 
@@ -97,7 +109,7 @@ public partial class MainWindow
 
         HeaderRow.Height = new GridLength(56);
         FooterRow.Height = new GridLength(36);
-        NavigationColumn.Width = new GridLength(200);
+        ApplySidebarState();
         TreeColumn.Width = new GridLength(300);
         HeaderChrome.Visibility = Visibility.Visible;
         NavigationChrome.Visibility = Visibility.Visible;
@@ -106,6 +118,12 @@ public partial class MainWindow
         MonitorContent.SetFullscreen(false);
         WindowState = savedWindowState;
         fullscreenApplied = false;
+    }
+
+    private void ApplySidebarState()
+    {
+        var width = viewModel.IsSidebarCollapsed ? SidebarCollapsedWidth : SidebarExpandedWidth;
+        NavigationColumn.Width = new GridLength(width);
     }
 
     private void MinimizeWindow(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
