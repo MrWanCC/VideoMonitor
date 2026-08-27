@@ -68,7 +68,8 @@
                             <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="12" Text="当前站点:" />
                             <TextBlock Margin="7,0,0,0" FontWeight="SemiBold" Text="卸矿站" />
                         </StackPanel>
-                        <Button Command="{Binding ToggleFullscreenCommand}" ToolTip="全屏" Style="{StaticResource HeaderToolButtonStyle}"
+                        <Button AutomationProperties.AutomationId="MonitorFullscreenButton" AutomationProperties.Name="全屏"
+                                Command="{Binding ToggleFullscreenCommand}" ToolTip="全屏" Style="{StaticResource HeaderToolButtonStyle}"
                                 shell:WindowChrome.IsHitTestVisibleInChrome="True">
                             <StackPanel><Path Width="17" Height="17" Data="{StaticResource IconFullscreen}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Margin="0,2,0,0" FontSize="10" Text="全屏"/></StackPanel>
                         </Button>

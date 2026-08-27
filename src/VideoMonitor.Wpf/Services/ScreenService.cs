@@ -16,11 +16,10 @@ public sealed class ScreenService
         var dpi = VisualTreeHelper.GetDpi(window);
 
         window.WindowStartupLocation = WindowStartupLocation.Manual;
-        window.Left = primary.Left / dpi.DpiScaleX + 32;
-        window.Top = primary.Top / dpi.DpiScaleY + 24;
-        window.Width = Math.Min(1600, primary.Width / dpi.DpiScaleX - 64);
-        window.Height = Math.Min(920, primary.Height / dpi.DpiScaleY - 48);
-        window.WindowState = WindowState.Maximized;
+        window.Left = primary.Left / dpi.DpiScaleX;
+        window.Top = primary.Top / dpi.DpiScaleY;
+        window.Width = primary.Width / dpi.DpiScaleX;
+        window.Height = primary.Height / dpi.DpiScaleY;
     }
 
     public void PlaceSecondaryWindow(WpfWindow window)
