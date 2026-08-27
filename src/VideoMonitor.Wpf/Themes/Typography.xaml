@@ -4,14 +4,14 @@
     <FontFamily x:Key="AppFontFamily">Microsoft YaHei UI</FontFamily>
     <sys:Double x:Key="FontSizeApplicationTitle">18</sys:Double>
     <sys:Double x:Key="FontSizePageTitle">16</sys:Double>
-    <sys:Double x:Key="FontSizeNavigation">14</sys:Double>
+    <sys:Double x:Key="FontSizeNavigation">15</sys:Double>
     <sys:Double x:Key="FontSizeVideoTitle">14</sys:Double>
-    <sys:Double x:Key="FontSizeTreeSection">14</sys:Double>
-    <sys:Double x:Key="FontSizeTreeItem">13</sys:Double>
+    <sys:Double x:Key="FontSizeTreeSection">15</sys:Double>
+    <sys:Double x:Key="FontSizeTreeItem">14</sys:Double>
     <sys:Double x:Key="FontSizeBody">13</sys:Double>
     <sys:Double x:Key="FontSizeAuxiliary">12</sys:Double>
     <sys:Double x:Key="FontSizeCaption">11</sys:Double>
-    <sys:Double x:Key="FontSizeStatus">12</sys:Double>
+    <sys:Double x:Key="FontSizeStatus">12.5</sys:Double>
     <Style TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
         <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />

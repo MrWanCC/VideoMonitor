@@ -97,7 +97,7 @@
                                     <ToggleButton IsChecked="{Binding IsExpanded, Mode=TwoWay}" Style="{StaticResource ChevronToggleStyle}"/>
                                     <StackPanel Margin="26,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
                                         <TextBlock Style="{StaticResource TreeSectionTextStyle}" Text="{Binding Name}"/>
-                                        <TextBlock Margin="8,0,0,0" Foreground="{StaticResource MutedTextBrush}" FontSize="{StaticResource FontSizeCaption}" Text="{Binding CountText}"/>
+                                        <TextBlock Margin="8,0,0,0" Foreground="{StaticResource MutedTextBrush}" FontSize="{StaticResource FontSizeAuxiliary}" Text="{Binding CountText}"/>
                                     </StackPanel>
                                     <ItemsControl Grid.Row="1" ItemsSource="{Binding Children}"
                                                   Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibilityConverter}}">
@@ -111,7 +111,7 @@
                                                         <TextBlock Grid.Column="1" Style="{StaticResource TreeItemTextStyle}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Text="{Binding Name}"/>
                                                         <StackPanel Grid.Column="2" Margin="10,0,4,0" Orientation="Horizontal" VerticalAlignment="Center">
                                                             <Ellipse Width="8" Height="8" Margin="0,0,7,0" Fill="{Binding Status, Converter={StaticResource StatusBrushConverter}}"/>
-                                                            <TextBlock Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}" FontSize="{StaticResource FontSizeCaption}" Text="在线"/>
+                                                            <TextBlock Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}" FontSize="{StaticResource FontSizeAuxiliary}" Text="在线"/>
                                                         </StackPanel>
                                                     </Grid>
                                                 </Button>

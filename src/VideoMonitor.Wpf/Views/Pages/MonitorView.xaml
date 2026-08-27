@@ -57,19 +57,19 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Stretch">
-                        <Grid Margin="0,0,18,0">
+                        <Grid Margin="0,0,20,0">
                             <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBlueBrush}" Text="设备信息" />
                             <Border Height="2" VerticalAlignment="Bottom" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="1" />
                         </Grid>
-                        <TextBlock Margin="0,0,18,0" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="告警信息" />
-                        <TextBlock Margin="0,0,18,0" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="录像计划" />
+                        <TextBlock Margin="0,0,20,0" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="告警信息" />
+                        <TextBlock Margin="0,0,20,0" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="录像计划" />
                         <TextBlock VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="存储信息" />
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Margin="24,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel Grid.Column="1" Margin="28,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}">
                             <Run Text="当前溜井：" /><Run Text="{Binding CurrentChuteName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" />
                         </TextBlock>
-                        <TextBlock Margin="18,0,0,0" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}">
+                        <TextBlock Margin="20,0,0,0" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}">
                             <Run Text="当前巷道：" /><Run Text="{Binding CurrentTunnelName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" />
                         </TextBlock>
                     </StackPanel>
@@ -94,7 +94,7 @@
                         <TextBlock Margin="0,4,0,0" Style="{StaticResource MutedTextStyle}" Text="IP 地址" />
                         <TextBlock Margin="0,2,0,0" Foreground="{StaticResource SecondaryTextBrush}" Text="192.168.17.5" />
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                    <StackPanel Grid.Column="1" Margin="20,0,0,0">
                         <TextBlock Style="{StaticResource MutedTextStyle}" Text="通道 / 在线状态" />
                         <StackPanel Margin="0,2,0,0" Orientation="Horizontal">
                             <TextBlock FontWeight="SemiBold" Text="{Binding MainTiles[0].ChannelNumber, StringFormat=通道{0}}" />
@@ -106,7 +106,7 @@
                             <Run Text="{Binding MainTiles[0].Bitrate, Mode=OneWay}" /><Run Text="  ·  1920×1080" />
                         </TextBlock>
                     </StackPanel>
-                    <StackPanel Grid.Column="2" Margin="16,0,0,0">
+                    <StackPanel Grid.Column="2" Margin="20,0,0,0">
                         <TextBlock Style="{StaticResource MutedTextStyle}" Text="码流类型" />
                         <TextBlock Margin="0,2,0,0" FontWeight="SemiBold" Text="{Binding MainTiles[0].StreamType}" />
                         <TextBlock Margin="0,4,0,0" Style="{StaticResource MutedTextStyle}" Text="更新时间" />

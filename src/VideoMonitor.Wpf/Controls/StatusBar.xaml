@@ -15,14 +15,14 @@
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Style="{StaticResource StatusTextStyle}" Text="CPU：23%" />
-                <Border Width="52" Height="6" Margin="8,0,0,0" Background="{StaticResource SeparatorBrush}" CornerRadius="3">
-                    <Border Width="20" HorizontalAlignment="Left" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="3" />
+                <Border Width="52" Height="7" Margin="8,0,0,0" Background="{StaticResource SeparatorBrush}" CornerRadius="3.5">
+                    <Border Width="20" HorizontalAlignment="Left" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="3.5" />
                 </Border>
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Style="{StaticResource StatusTextStyle}" Text="内存：42%" />
-                <Border Width="52" Height="6" Margin="8,0,0,0" Background="{StaticResource SeparatorBrush}" CornerRadius="3">
-                    <Border Width="24" HorizontalAlignment="Left" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="3" />
+                <Border Width="52" Height="7" Margin="8,0,0,0" Background="{StaticResource SeparatorBrush}" CornerRadius="3.5">
+                    <Border Width="24" HorizontalAlignment="Left" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="3.5" />
                 </Border>
             </StackPanel>
             <TextBlock Grid.Column="3" Style="{StaticResource StatusTextStyle}" Text="上行：8.6 Mbps" />

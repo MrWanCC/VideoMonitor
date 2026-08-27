@@ -14,7 +14,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="3,0,0,0" CornerRadius="4">
+                    <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="2,0,0,0" CornerRadius="4">
                         <ContentPresenter Margin="{TemplateBinding Padding}"
                                           HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                           VerticalAlignment="Center" />
