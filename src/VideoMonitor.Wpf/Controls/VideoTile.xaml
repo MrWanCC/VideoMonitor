@@ -94,7 +94,7 @@
                                    HorizontalAlignment="Center"
                                    Style="{StaticResource MutedTextStyle}">
                             <Run Text="CH " />
-                            <Run Text="{Binding ChannelNumber}" />
+                            <Run Text="{Binding ChannelNumber, Mode=OneWay}" />
                         </TextBlock>
                     </StackPanel>
                 </Grid>
