@@ -8,9 +8,8 @@ namespace VideoMonitor.Wpf.Views.Pages;
 
 public partial class MonitorView
 {
-    private const double ExpandedDetailHeight = 132;
+    private const double ExpandedDetailHeight = 104;
     private const double CollapsedDetailHeight = 44;
-    private bool detailExpanded = true;
     private IReadOnlyList<VideoTile> tileControls = [];
 
     public MonitorView()
@@ -31,15 +30,7 @@ public partial class MonitorView
         DetailPanel.Visibility = fullscreen ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
         DetailRow.Height = fullscreen
             ? new System.Windows.GridLength(0)
-            : new System.Windows.GridLength(detailExpanded ? ExpandedDetailHeight : CollapsedDetailHeight);
-    }
-
-    private void ToggleDetailPanel(object sender, System.Windows.RoutedEventArgs e)
-    {
-        detailExpanded = !detailExpanded;
-        DetailRow.Height = new System.Windows.GridLength(
-            detailExpanded ? ExpandedDetailHeight : CollapsedDetailHeight);
-        ((System.Windows.Media.RotateTransform)DetailChevron.RenderTransform).Angle = detailExpanded ? 90 : -90;
+            : GetDetailPanelHeight();
     }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -55,6 +46,7 @@ public partial class MonitorView
         }
 
         ApplySingleTileLayout();
+        ApplyDetailPanelState();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -63,6 +55,11 @@ public partial class MonitorView
             or nameof(MonitorViewModel.SelectedVideoSlot))
         {
             ApplySingleTileLayout();
+        }
+
+        if (e.PropertyName == nameof(MonitorViewModel.IsDetailPanelCollapsed))
+        {
+            ApplyDetailPanelState();
         }
     }
 
@@ -115,5 +112,19 @@ public partial class MonitorView
             Grid.SetColumnSpan(tile, 1);
             System.Windows.Controls.Panel.SetZIndex(tile, 0);
         }
+    }
+
+    private void ApplyDetailPanelState()
+    {
+        if (DetailPanel.Visibility == Visibility.Visible)
+        {
+            DetailRow.Height = GetDetailPanelHeight();
+        }
+    }
+
+    private GridLength GetDetailPanelHeight()
+    {
+        var collapsed = DataContext is MonitorViewModel { IsDetailPanelCollapsed: true };
+        return new GridLength(collapsed ? CollapsedDetailHeight : ExpandedDetailHeight);
     }
 }
