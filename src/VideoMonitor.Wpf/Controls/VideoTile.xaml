@@ -1,0 +1,119 @@
+<UserControl x:Class="VideoMonitor.Wpf.Controls.VideoTile"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:VideoMonitor.Wpf.Converters"
+             MinWidth="240"
+             MinHeight="190"
+             SnapsToDevicePixels="True">
+    <UserControl.Resources>
+        <converters:CameraStatusToTextConverter x:Key="StatusTextConverter" />
+        <converters:CameraStatusToBrushConverter x:Key="StatusBrushConverter" />
+    </UserControl.Resources>
+
+    <Border Margin="5"
+            Style="{StaticResource CardBorderStyle}"
+            ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="48" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="38" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Margin="14,0,10,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="34" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding CameraName}"
+                               Style="{StaticResource CardTitleTextStyle}"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Margin="0,2,0,0"
+                               Text="{Binding GroupName}"
+                               Style="{StaticResource MutedTextStyle}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1"
+                            Margin="10,0,2,0"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Ellipse Width="7"
+                             Height="7"
+                             Margin="0,0,6,0"
+                             Fill="{Binding Status, Converter={StaticResource StatusBrushConverter}}" />
+                    <TextBlock VerticalAlignment="Center"
+                               Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}"
+                               FontSize="11"
+                               Text="{Binding Status, Converter={StaticResource StatusTextConverter}}" />
+                </StackPanel>
+                <Button Grid.Column="2"
+                        Style="{StaticResource IconButtonStyle}"
+                        Content="•••"
+                        ToolTip="控制占位" />
+            </Grid>
+
+            <Border Grid.Row="1"
+                    Margin="10,0"
+                    Background="{StaticResource VideoBackgroundBrush}"
+                    BorderBrush="{StaticResource SeparatorBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                <Grid>
+                    <Rectangle Margin="24"
+                               Stroke="{StaticResource BorderHighlightBrush}"
+                               StrokeThickness="1"
+                               StrokeDashArray="2 7"
+                               Opacity="0.28" />
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Border Width="54"
+                                Height="38"
+                                Margin="0,0,0,10"
+                                BorderBrush="{StaticResource BorderHighlightBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4">
+                            <Grid>
+                                <Ellipse Width="15"
+                                         Height="15"
+                                         Stroke="{StaticResource PrimaryBlueBrush}"
+                                         StrokeThickness="1.5" />
+                                <Rectangle Width="23"
+                                           Height="1"
+                                           Fill="{StaticResource PrimaryBlueBrush}" />
+                                <Rectangle Width="1"
+                                           Height="23"
+                                           Fill="{StaticResource PrimaryBlueBrush}" />
+                            </Grid>
+                        </Border>
+                        <TextBlock HorizontalAlignment="Center"
+                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Text="模拟视频画面" />
+                        <TextBlock Margin="0,5,0,0"
+                                   HorizontalAlignment="Center"
+                                   Style="{StaticResource MutedTextStyle}">
+                            <Run Text="CH " />
+                            <Run Text="{Binding ChannelNumber}" />
+                        </TextBlock>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="2" Margin="14,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Width="5" Height="5" Fill="{StaticResource PrimaryBlueBrush}" />
+                    <TextBlock Margin="7,0,0,0" Style="{StaticResource MutedTextStyle}" Text="{Binding Bitrate}" />
+                </StackPanel>
+                <TextBlock Grid.Column="1"
+                           VerticalAlignment="Center"
+                           Style="{StaticResource MutedTextStyle}"
+                           Text="{Binding StreamType}" />
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>
