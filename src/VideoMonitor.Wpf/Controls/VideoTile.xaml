@@ -33,7 +33,6 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock VerticalAlignment="Center" Style="{StaticResource CardTitleTextStyle}"
                            TextTrimming="CharacterEllipsis">
@@ -41,34 +40,12 @@
                     <Run Text=" · 通道" />
                     <Run Text="{Binding ChannelNumber, Mode=OneWay}" />
                 </TextBlock>
-                <StackPanel Grid.Column="1" Margin="12,0,10,0" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Grid.Column="1" Margin="12,0,6,0" Orientation="Horizontal" VerticalAlignment="Center">
                     <Ellipse Width="8" Height="8" Margin="0,0,7,0"
                              Fill="{Binding Status, Converter={StaticResource StatusBrushConverter}}" />
                     <TextBlock Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}"
                                FontSize="{StaticResource FontSizeAuxiliary}"
                                Text="{Binding Status, Converter={StaticResource StatusTextConverter}}" />
-                </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal">
-                    <Button ToolTip="抓图" Style="{StaticResource IconButtonStyle}">
-                        <Path Width="17" Height="17" Data="{StaticResource IconSnapshot}"
-                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              StrokeThickness="1.6" Stretch="Uniform" />
-                    </Button>
-                    <Button ToolTip="声音" Style="{StaticResource IconButtonStyle}">
-                        <Path Width="17" Height="17" Data="{StaticResource IconSound}"
-                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              StrokeThickness="1.6" Stretch="Uniform" />
-                    </Button>
-                    <Button ToolTip="更多" Style="{StaticResource IconButtonStyle}">
-                        <Path Width="17" Height="17" Data="{StaticResource IconMore}"
-                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              Stretch="Uniform" />
-                    </Button>
-                    <Button ToolTip="单画面全屏（预留）" Style="{StaticResource IconButtonStyle}">
-                        <Path Width="17" Height="17" Data="{StaticResource IconFullscreen}"
-                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              StrokeThickness="1.6" Stretch="Uniform" />
-                    </Button>
                 </StackPanel>
             </Grid>
 

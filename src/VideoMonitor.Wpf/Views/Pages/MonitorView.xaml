@@ -37,10 +37,10 @@
         <Grid Grid.Row="1" Margin="-4,0,-4,2">
             <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="*" /></Grid.RowDefinitions>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-            <controls:VideoTile Grid.Row="0" Grid.Column="0" DataContext="{Binding MainTiles[0]}" />
-            <controls:VideoTile Grid.Row="0" Grid.Column="1" DataContext="{Binding MainTiles[1]}" />
-            <controls:VideoTile Grid.Row="1" Grid.Column="0" DataContext="{Binding MainTiles[2]}" />
-            <controls:VideoTile Grid.Row="1" Grid.Column="1" DataContext="{Binding MainTiles[3]}" />
+            <controls:VideoTile x:Name="MainTile1" Grid.Row="0" Grid.Column="0" DataContext="{Binding MainTiles[0]}" MouseDoubleClick="OnVideoTileMouseDoubleClick" />
+            <controls:VideoTile x:Name="MainTile2" Grid.Row="0" Grid.Column="1" DataContext="{Binding MainTiles[1]}" MouseDoubleClick="OnVideoTileMouseDoubleClick" />
+            <controls:VideoTile x:Name="MainTile3" Grid.Row="1" Grid.Column="0" DataContext="{Binding MainTiles[2]}" MouseDoubleClick="OnVideoTileMouseDoubleClick" />
+            <controls:VideoTile x:Name="MainTile4" Grid.Row="1" Grid.Column="1" DataContext="{Binding MainTiles[3]}" MouseDoubleClick="OnVideoTileMouseDoubleClick" />
         </Grid>
 
         <Border x:Name="DetailPanel" Grid.Row="2" Margin="0,2,0,6" Style="{StaticResource PanelBorderStyle}">
