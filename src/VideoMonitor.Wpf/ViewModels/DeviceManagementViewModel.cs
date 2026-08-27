@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Net;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VideoMonitor.Core.Models;
@@ -18,6 +19,10 @@ public sealed class DeviceManagementViewModel : ObservableObject
     private bool isDialogOpen;
     private DeviceDialogMode dialogMode;
     private string dialogMessage = string.Empty;
+    private CameraDevice? selectedDevice;
+    private bool isEditPanelOpen;
+    private bool isEditing;
+    private string validationMessage = string.Empty;
 
     public DeviceManagementViewModel(
         IEnumerable<DeviceGroup> groups,
@@ -27,6 +32,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
         allDevices = new ObservableCollection<CameraDevice>(devices);
         Devices = [];
         GroupSections = [];
+        EditDraft = new DeviceEditDraftViewModel();
 
         SelectGroupCommand = new RelayCommand<DeviceGroup>(SelectGroup);
         BeginAddGroupCommand = new RelayCommand<DeviceGroup>(BeginAddGroup);
@@ -36,6 +42,11 @@ public sealed class DeviceManagementViewModel : ObservableObject
         DeleteGroupCommand = new RelayCommand<DeviceGroup>(DeleteGroup);
         ConfirmDialogCommand = new RelayCommand(ConfirmDialog);
         CancelDialogCommand = new RelayCommand(ClearDialog);
+        AddDeviceCommand = new RelayCommand(AddDevice);
+        EditDeviceCommand = new RelayCommand<CameraDevice>(EditDevice);
+        DeleteDeviceCommand = new RelayCommand<CameraDevice>(DeleteDevice);
+        SaveDeviceCommand = new RelayCommand(SaveDevice);
+        CancelEditCommand = new RelayCommand(CancelEdit);
 
         selectedGroup = Groups.FirstOrDefault(group => group.Name == "备用1" && group.ParentId is not null)
             ?? Groups.Where(group => group.ParentId is not null).OrderBy(group => group.Sort).FirstOrDefault();
@@ -48,6 +59,17 @@ public sealed class DeviceManagementViewModel : ObservableObject
     public ObservableCollection<DeviceGroupTreeItemViewModel> GroupSections { get; }
 
     public ObservableCollection<CameraDevice> Devices { get; }
+
+    public DeviceEditDraftViewModel EditDraft { get; }
+
+    public IEnumerable<DeviceGroup> EditableGroups => Groups
+        .Where(group => group.ParentId is not null && group.Enabled)
+        .OrderBy(group => Groups.First(root => root.Id == group.ParentId).Sort)
+        .ThenBy(group => group.Sort);
+
+    public IReadOnlyList<StreamType> StreamTypes { get; } = Enum.GetValues<StreamType>();
+
+    public IReadOnlyList<TransportMode> TransportModes { get; } = Enum.GetValues<TransportMode>();
 
     public IRelayCommand<DeviceGroup> SelectGroupCommand { get; }
 
@@ -68,6 +90,16 @@ public sealed class DeviceManagementViewModel : ObservableObject
     public IRelayCommand ConfirmDialogCommand { get; }
 
     public IRelayCommand CancelDialogCommand { get; }
+
+    public IRelayCommand AddDeviceCommand { get; }
+
+    public IRelayCommand<CameraDevice> EditDeviceCommand { get; }
+
+    public IRelayCommand<CameraDevice> DeleteDeviceCommand { get; }
+
+    public IRelayCommand SaveDeviceCommand { get; }
+
+    public IRelayCommand CancelEditCommand { get; }
 
     public DeviceGroup? SelectedGroup
     {
@@ -128,6 +160,40 @@ public sealed class DeviceManagementViewModel : ObservableObject
     {
         get => dialogMessage;
         private set => SetProperty(ref dialogMessage, value);
+    }
+
+    public CameraDevice? SelectedDevice
+    {
+        get => selectedDevice;
+        private set => SetProperty(ref selectedDevice, value);
+    }
+
+    public bool IsEditPanelOpen
+    {
+        get => isEditPanelOpen;
+        private set => SetProperty(ref isEditPanelOpen, value);
+    }
+
+    public bool IsEditing
+    {
+        get => isEditing;
+        private set
+        {
+            if (SetProperty(ref isEditing, value))
+            {
+                OnPropertyChanged(nameof(EditorTitle));
+            }
+        }
+    }
+
+    public string EditorTitle => IsEditing && SelectedDevice is not null
+        ? $"编辑设备：{SelectedDevice.Name}"
+        : "新增设备";
+
+    public string ValidationMessage
+    {
+        get => validationMessage;
+        private set => SetProperty(ref validationMessage, value);
     }
 
     private void SelectGroup(DeviceGroup? group)
@@ -331,5 +397,188 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 });
             GroupSections.Add(new DeviceGroupTreeItemViewModel(root, children));
         }
+
+        OnPropertyChanged(nameof(EditableGroups));
+    }
+
+    private void AddDevice()
+    {
+        if (SelectedGroup?.ParentId is null)
+        {
+            return;
+        }
+
+        SelectedDevice = null;
+        IsEditing = false;
+        EditDraft.ResetForAdd(SelectedGroup.Id);
+        ValidationMessage = string.Empty;
+        IsEditPanelOpen = true;
+    }
+
+    private void EditDevice(CameraDevice? device)
+    {
+        if (device is null)
+        {
+            return;
+        }
+
+        SelectedDevice = device;
+        IsEditing = true;
+        EditDraft.Load(device);
+        ValidationMessage = string.Empty;
+        IsEditPanelOpen = true;
+        OnPropertyChanged(nameof(EditorTitle));
+    }
+
+    private void SaveDevice()
+    {
+        if (!TryValidateDraft(out var groupId, out var sdkPort, out var rtspPort, out var channelNo))
+        {
+            return;
+        }
+
+        if (IsEditing && SelectedDevice is not null)
+        {
+            ApplyDraft(SelectedDevice, groupId, sdkPort, rtspPort, channelNo);
+        }
+        else
+        {
+            var device = new CameraDevice { Id = Guid.NewGuid() };
+            ApplyDraft(device, groupId, sdkPort, rtspPort, channelNo);
+            allDevices.Add(device);
+        }
+
+        CloseEditor();
+        RefreshDevices();
+    }
+
+    private bool TryValidateDraft(
+        out Guid groupId,
+        out int sdkPort,
+        out int rtspPort,
+        out int channelNo)
+    {
+        groupId = Guid.Empty;
+        sdkPort = 0;
+        rtspPort = 0;
+        channelNo = 0;
+
+        if (string.IsNullOrWhiteSpace(EditDraft.Name))
+        {
+            ValidationMessage = "请输入设备名称。";
+            return false;
+        }
+
+        var group = EditDraft.GroupId is { } selectedGroupId
+            ? Groups.FirstOrDefault(item => item.Id == selectedGroupId && item.ParentId is not null && item.Enabled)
+            : null;
+        if (group is null)
+        {
+            ValidationMessage = "请选择所属分组。";
+            return false;
+        }
+
+        if (!IPAddress.TryParse(EditDraft.IpAddress.Trim(), out _))
+        {
+            ValidationMessage = "请输入有效的设备IP地址。";
+            return false;
+        }
+
+        if (!int.TryParse(EditDraft.SdkPort, out sdkPort) || sdkPort is < 1 or > 65535)
+        {
+            ValidationMessage = "SDK端口必须在1到65535之间。";
+            return false;
+        }
+
+        if (!int.TryParse(EditDraft.RtspPort, out rtspPort) || rtspPort is < 1 or > 65535)
+        {
+            ValidationMessage = "RTSP端口必须在1到65535之间。";
+            return false;
+        }
+
+        if (!int.TryParse(EditDraft.ChannelNo, out channelNo) || channelNo <= 0)
+        {
+            ValidationMessage = "通道号必须大于0。";
+            return false;
+        }
+
+        groupId = group.Id;
+        ValidationMessage = string.Empty;
+        return true;
+    }
+
+    private void ApplyDraft(
+        CameraDevice device,
+        Guid groupId,
+        int sdkPort,
+        int rtspPort,
+        int channelNo)
+    {
+        device.Name = EditDraft.Name.Trim();
+        device.GroupId = groupId;
+        device.IpAddress = EditDraft.IpAddress.Trim();
+        device.SdkPort = sdkPort;
+        device.RtspPort = rtspPort;
+        device.Username = EditDraft.Username.Trim();
+        device.Password = EditDraft.Password;
+        device.Manufacturer = EditDraft.Manufacturer.Trim();
+        device.Model = EditDraft.Model.Trim();
+        device.Remark = EditDraft.Remark.Trim();
+        device.TransportMode = EditDraft.TransportMode;
+        device.Enabled = true;
+
+        var channel = device.Channels.FirstOrDefault();
+        if (channel is null)
+        {
+            channel = new CameraChannel
+            {
+                Id = Guid.NewGuid(),
+                DeviceId = device.Id,
+                Enabled = true
+            };
+            device.Channels.Add(channel);
+        }
+
+        channel.ChannelNo = channelNo;
+        channel.ChannelName = string.IsNullOrWhiteSpace(EditDraft.ChannelName)
+            ? $"通道{channelNo}"
+            : EditDraft.ChannelName.Trim();
+        channel.StreamType = EditDraft.StreamType;
+        channel.StreamId = string.IsNullOrWhiteSpace(channel.StreamId)
+            ? $"camera-{device.Id:N}-channel-{channelNo}"
+            : channel.StreamId;
+    }
+
+    private void CancelEdit() => CloseEditor();
+
+    private void CloseEditor()
+    {
+        IsEditPanelOpen = false;
+        IsEditing = false;
+        SelectedDevice = null;
+        ValidationMessage = string.Empty;
+        OnPropertyChanged(nameof(EditorTitle));
+    }
+
+    private void DeleteDevice(CameraDevice? device)
+    {
+        if (device is null)
+        {
+            return;
+        }
+
+        ShowDialog(
+            DeviceDialogMode.Confirmation,
+            $"确定删除设备“{device.Name}”吗？",
+            () =>
+            {
+                allDevices.Remove(device);
+                if (ReferenceEquals(SelectedDevice, device))
+                {
+                    CloseEditor();
+                }
+
+                RefreshDevices();
+            });
     }
 }
