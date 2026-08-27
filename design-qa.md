@@ -43,6 +43,11 @@
 - Follow-up finding: the original 34px collapsed row did not include the panel's 10px vertical margin, leaving only 24px for a 34px header and clipping its content.
 - Fix: collapsed row height is now 44px (34px header + 10px vertical margin). Runtime evidence: `artifacts/screenshots/wpf-detail-collapsed-fixed.png`.
 
+### Iteration 4 — passed
+
+- Follow-up finding: the detail labels and bold values used separate TextBlocks with different font sizes, producing a visible baseline offset.
+- Fix: each label/value pair now shares one TextBlock with inline Runs. Runtime evidence: `artifacts/screenshots/wpf-detail-header-aligned.png`.
+
 ## Follow-up polish (P3, acceptance-dependent)
 
 - Target uses real mine imagery and mixed error/offline states; implementation intentionally keeps neutral mock video placeholders and existing all-online fake data.
