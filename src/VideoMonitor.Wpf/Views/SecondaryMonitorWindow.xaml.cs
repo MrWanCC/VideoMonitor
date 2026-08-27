@@ -4,6 +4,10 @@ namespace VideoMonitor.Wpf.Views;
 
 public partial class SecondaryMonitorWindow
 {
+    private const double RestoredHeight = 540d;
+    private System.Windows.ResizeMode restoredResizeMode;
+    private System.Windows.Rect restoredBounds;
+
     public SecondaryMonitorWindow(SecondaryMonitorViewModel viewModel)
     {
         InitializeComponent();
@@ -16,6 +20,29 @@ public partial class SecondaryMonitorWindow
     }
 
     private void MinimizeWindow(object sender, System.Windows.RoutedEventArgs e) => WindowState = System.Windows.WindowState.Minimized;
+
+    private void MaximizeWindow(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (WindowState == System.Windows.WindowState.Maximized)
+        {
+            WindowState = System.Windows.WindowState.Normal;
+            MinHeight = RestoredHeight;
+            MaxHeight = RestoredHeight;
+            ResizeMode = restoredResizeMode;
+            Left = restoredBounds.Left;
+            Top = restoredBounds.Top;
+            Width = restoredBounds.Width;
+            Height = RestoredHeight;
+            return;
+        }
+
+        restoredResizeMode = ResizeMode;
+        restoredBounds = new System.Windows.Rect(Left, Top, Width, Height);
+        MinHeight = 0;
+        MaxHeight = double.PositiveInfinity;
+        ResizeMode = System.Windows.ResizeMode.CanResize;
+        WindowState = System.Windows.WindowState.Maximized;
+    }
 
     private void CloseWindow(object sender, System.Windows.RoutedEventArgs e) => Close();
 }

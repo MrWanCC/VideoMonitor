@@ -4,7 +4,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:controls="clr-namespace:VideoMonitor.Wpf.Controls"
         xmlns:converters="clr-namespace:VideoMonitor.Wpf.Converters"
-        Title="罗河铁矿-620视频管理机 - 卸矿站监控（副屏）" Width="1440" Height="540" MinWidth="900" MinHeight="540" MaxHeight="540"
+        Title="罗河铁矿-620视频管理机 - 卸矿站监控" Width="1440" Height="540" MinWidth="900" MinHeight="540" MaxHeight="540"
         WindowStyle="None" ResizeMode="CanResize" Background="{StaticResource WindowBackgroundBrush}"
         Foreground="{StaticResource PrimaryTextBrush}">
     <shell:WindowChrome.WindowChrome>
@@ -25,7 +25,7 @@
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <Path Width="26" Height="26" Data="{StaticResource IconLogo}" Fill="{StaticResource PrimaryBlueMutedBrush}"
                               Stroke="{StaticResource PrimaryBlueBrush}" StrokeThickness="1.4" Stretch="Uniform" />
-                        <TextBlock Margin="10,0,20,0" FontSize="{StaticResource FontSizePageTitle}" FontWeight="SemiBold" Text="罗河铁矿-620视频管理机 · 卸矿站监控（副屏）" />
+                        <TextBlock Margin="10,0,20,0" FontSize="{StaticResource FontSizePageTitle}" FontWeight="SemiBold" Text="罗河铁矿-620视频管理机 · 卸矿站监控" />
                         <Button Margin="0,0,8,0" Tag="{Binding CurrentGroupName, Converter={StaticResource StringEqualsConverter}, ConverterParameter=2#主溜井}"
                                 Command="{Binding SwitchGroupCommand}" CommandParameter="2#主溜井" Content="2#主溜井"
                                 Style="{StaticResource SecondaryButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True" />
@@ -37,10 +37,14 @@
                         <StackPanel Margin="0,0,16,0" Orientation="Horizontal" VerticalAlignment="Center">
                             <Ellipse Width="8" Height="8" Fill="{StaticResource OnlineGreenBrush}" />
                             <TextBlock Margin="8,0,0,0" Foreground="{StaticResource SecondaryTextBrush}"
-                                       FontSize="{StaticResource FontSizeAuxiliary}" Text="副屏运行正常" />
+                                       FontSize="{StaticResource FontSizeAuxiliary}" Text="系统运行正常" />
                         </StackPanel>
                         <Button Click="MinimizeWindow" Style="{StaticResource WindowButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                             <Path Width="15" Height="15" Data="{StaticResource IconMinimize}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.3" Stretch="Uniform" />
+                        </Button>
+                        <Button AutomationProperties.AutomationId="SecondaryMaximizeButton" Click="MaximizeWindow"
+                                ToolTip="最大化/还原" Style="{StaticResource WindowButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                            <Path Width="14" Height="14" Data="{StaticResource IconMaximize}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.3" Stretch="Uniform" />
                         </Button>
                         <Button Click="CloseWindow" Style="{StaticResource CloseWindowButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                             <Path Width="14" Height="14" Data="{StaticResource IconClose}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.3" Stretch="Uniform" />
