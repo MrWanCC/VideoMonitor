@@ -95,7 +95,7 @@
                         <ColumnDefinition Width="1.15*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="1.15*" />
                     </Grid.ColumnDefinitions>
                     <StackPanel VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal"><TextBlock Width="54" Style="{StaticResource MutedTextStyle}" Text="摄像头"/><TextBlock FontWeight="SemiBold"><Run Text="{Binding SelectedVideoSlot.GroupName}"/><Run Text=" · 通道"/><Run Text="{Binding SelectedVideoSlot.ChannelNumber}"/></TextBlock></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock Width="54" Style="{StaticResource MutedTextStyle}" Text="摄像头"/><TextBlock FontWeight="SemiBold"><Run Text="{Binding SelectedVideoSlot.GroupName, Mode=OneWay}"/><Run Text=" · 通道"/><Run Text="{Binding SelectedVideoSlot.ChannelNumber, Mode=OneWay}"/></TextBlock></StackPanel>
                         <StackPanel Margin="0,8,0,0" Orientation="Horizontal"><TextBlock Width="54" Style="{StaticResource MutedTextStyle}" Text="IP 地址"/><TextBlock Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding SelectedVideoSlot.IpAddress}"/></StackPanel>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Margin="20,0,0,0" VerticalAlignment="Center">

@@ -25,7 +25,7 @@
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <Path Width="26" Height="26" Data="{StaticResource IconLogo}" Fill="{StaticResource PrimaryBlueMutedBrush}"
                               Stroke="{StaticResource PrimaryBlueBrush}" StrokeThickness="1.4" Stretch="Uniform" />
-                        <TextBlock Margin="10,0,20,0" FontSize="{StaticResource FontSizePageTitle}" FontWeight="SemiBold" Text="卸矿站监控（副屏）" />
+                        <TextBlock Margin="10,0,20,0" FontSize="{StaticResource FontSizePageTitle}" FontWeight="SemiBold" Text="罗河铁矿-620视频管理机 · 卸矿站监控（副屏）" />
                         <Button Margin="0,0,8,0" Tag="{Binding CurrentGroupName, Converter={StaticResource StringEqualsConverter}, ConverterParameter=2#主溜井}"
                                 Command="{Binding SwitchGroupCommand}" CommandParameter="2#主溜井" Content="2#主溜井"
                                 Style="{StaticResource SecondaryButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True" />
