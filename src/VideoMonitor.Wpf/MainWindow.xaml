@@ -25,7 +25,7 @@
                 <RowDefinition x:Name="FooterRow" Height="36" />
             </Grid.RowDefinitions>
 
-            <Border x:Name="HeaderChrome" Grid.Row="0" Background="{StaticResource BackgroundPanel}"
+            <Border x:Name="HeaderChrome" Grid.Row="0" Background="{StaticResource PanelBackgroundBrush}"
                     BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
                 <Grid Margin="14,0,0,0">
                     <Grid.ColumnDefinitions>

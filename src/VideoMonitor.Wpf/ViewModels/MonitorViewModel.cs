@@ -26,6 +26,13 @@ public sealed class MonitorViewModel : ObservableObject
 
         switchService.LayoutChanged += OnLayoutChanged;
         Render(switchService.Current);
+        selectedTreeItem = TreeSections
+            .SelectMany(section => section.Children)
+            .FirstOrDefault(item => item.Name == switchService.Current.MainSlots[0].GroupName);
+        if (selectedTreeItem is not null)
+        {
+            selectedTreeItem.IsSelected = true;
+        }
     }
 
     public IReadOnlyList<MonitorGroup> Groups { get; }

@@ -20,6 +20,7 @@ public sealed class ScreenService
         window.Top = primary.Top / dpi.DpiScaleY + 24;
         window.Width = Math.Min(1600, primary.Width / dpi.DpiScaleX - 64);
         window.Height = Math.Min(920, primary.Height / dpi.DpiScaleY - 48);
+        window.WindowState = WindowState.Maximized;
     }
 
     public void PlaceSecondaryWindow(WpfWindow window)
