@@ -1,10 +1,12 @@
 using System.Collections.ObjectModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using VideoMonitor.Core.Models;
 
 namespace VideoMonitor.Wpf.ViewModels;
 
-public sealed class MonitorTreeItemViewModel
+public sealed class MonitorTreeItemViewModel : ObservableObject
 {
+    private bool isSelected;
     public MonitorTreeItemViewModel(
         string name,
         MonitorGroup? group = null,
@@ -20,4 +22,10 @@ public sealed class MonitorTreeItemViewModel
     public MonitorGroup? Group { get; }
 
     public ObservableCollection<MonitorTreeItemViewModel> Children { get; }
+
+    public bool IsSelected
+    {
+        get => isSelected;
+        set => SetProperty(ref isSelected, value);
+    }
 }

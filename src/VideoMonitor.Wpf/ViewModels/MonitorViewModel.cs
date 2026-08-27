@@ -11,6 +11,7 @@ public sealed class MonitorViewModel : ObservableObject
     private readonly MonitorSwitchService switchService;
     private string currentChuteName = string.Empty;
     private string currentTunnelName = string.Empty;
+    private MonitorTreeItemViewModel? selectedTreeItem;
 
     public MonitorViewModel(
         MonitorSwitchService switchService,
@@ -76,6 +77,14 @@ public sealed class MonitorViewModel : ObservableObject
         {
             return;
         }
+
+        if (selectedTreeItem is not null)
+        {
+            selectedTreeItem.IsSelected = false;
+        }
+
+        item.IsSelected = true;
+        selectedTreeItem = item;
 
         switch (group.Type)
         {
