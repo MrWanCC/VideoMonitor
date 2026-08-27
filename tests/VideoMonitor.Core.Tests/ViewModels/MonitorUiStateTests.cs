@@ -37,7 +37,10 @@ public sealed class MonitorUiStateTests
     public void ToggleSidebar_DoesNotChangeCurrentMonitorGroups()
     {
         var (monitor, service) = CreateFixture();
-        var main = new MainViewModel(monitor);
+        var deviceData = MockDeviceData.Create();
+        var main = new MainViewModel(
+            monitor,
+            new DeviceManagementViewModel(deviceData.Groups, deviceData.Devices));
         var before = Snapshot(monitor, service);
 
         main.ToggleSidebarCommand.Execute(null);

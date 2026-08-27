@@ -16,6 +16,7 @@
     </shell:WindowChrome.WindowChrome>
     <Window.Resources>
         <converters:StringEqualsConverter x:Key="StringEqualsConverter" />
+        <converters:NavigationVisibilityConverter x:Key="NavigationVisibilityConverter" />
         <Style x:Key="SidebarTextStyle" TargetType="TextBlock" BasedOn="{StaticResource NavigationTextStyle}">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsSidebarCollapsed}" Value="True">
@@ -140,8 +141,13 @@
                         </StackPanel>
                     </DockPanel>
                 </Border>
-                <pages:MonitorView x:Name="MonitorContent" Grid.Column="1" Margin="8,0" DataContext="{Binding Monitor}" />
-                <controls:MonitorTree x:Name="TreeChrome" Grid.Column="2" Width="{StaticResource MonitorTreeWidth}" DataContext="{Binding Monitor}" />
+                <pages:MonitorView x:Name="MonitorContent" Grid.Column="1" Margin="8,0" DataContext="{Binding Monitor}"
+                                   Visibility="{Binding SelectedNavigation, Converter={StaticResource NavigationVisibilityConverter}, ConverterParameter=实时监控}" />
+                <controls:MonitorTree x:Name="TreeChrome" Grid.Column="2" Width="{StaticResource MonitorTreeWidth}" DataContext="{Binding Monitor}"
+                                      Visibility="{Binding SelectedNavigation, Converter={StaticResource NavigationVisibilityConverter}, ConverterParameter=实时监控}" />
+                <pages:DeviceView x:Name="DeviceContent" Grid.Column="1" Grid.ColumnSpan="2" Margin="8,0,8,0"
+                                  DataContext="{Binding DeviceManagement}"
+                                  Visibility="{Binding SelectedNavigation, Converter={StaticResource NavigationVisibilityConverter}, ConverterParameter=设备管理}" />
             </Grid>
             <controls:StatusBar x:Name="FooterChrome" Grid.Row="2" />
         </Grid>

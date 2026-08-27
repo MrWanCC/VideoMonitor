@@ -9,15 +9,20 @@ public sealed class MainViewModel : ObservableObject
     private bool isMonitorFullscreen;
     private bool isSidebarCollapsed;
 
-    public MainViewModel(MonitorViewModel monitor)
+    public MainViewModel(
+        MonitorViewModel monitor,
+        DeviceManagementViewModel deviceManagement)
     {
         Monitor = monitor;
+        DeviceManagement = deviceManagement;
         NavigateCommand = new RelayCommand<string>(Navigate);
         ToggleFullscreenCommand = new RelayCommand(() => IsMonitorFullscreen = !IsMonitorFullscreen);
         ToggleSidebarCommand = new RelayCommand(() => IsSidebarCollapsed = !IsSidebarCollapsed);
     }
 
     public MonitorViewModel Monitor { get; }
+
+    public DeviceManagementViewModel DeviceManagement { get; }
 
     public IRelayCommand<string> NavigateCommand { get; }
 

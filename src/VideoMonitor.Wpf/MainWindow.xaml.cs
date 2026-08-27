@@ -78,7 +78,6 @@ public partial class MainWindow
 
         HeaderChrome.Visibility = Visibility.Collapsed;
         NavigationChrome.Visibility = Visibility.Collapsed;
-        TreeChrome.Visibility = Visibility.Collapsed;
         FooterChrome.Visibility = Visibility.Collapsed;
         HeaderRow.Height = new GridLength(0);
         FooterRow.Height = new GridLength(0);
@@ -113,7 +112,6 @@ public partial class MainWindow
         TreeColumn.Width = new GridLength(300);
         HeaderChrome.Visibility = Visibility.Visible;
         NavigationChrome.Visibility = Visibility.Visible;
-        TreeChrome.Visibility = Visibility.Visible;
         FooterChrome.Visibility = Visibility.Visible;
         MonitorContent.SetFullscreen(false);
         WindowState = savedWindowState;

@@ -18,7 +18,9 @@ public partial class App
             groups.Single(group => group.Name == "Z-1#巷"),
             groups.Single(group => group.Name == "2#主溜井"));
         var monitorViewModel = new MonitorViewModel(switchService, groups);
-        var mainViewModel = new MainViewModel(monitorViewModel);
+        var deviceData = MockDeviceData.Create();
+        var deviceManagementViewModel = new DeviceManagementViewModel(deviceData.Groups, deviceData.Devices);
+        var mainViewModel = new MainViewModel(monitorViewModel, deviceManagementViewModel);
         var secondaryViewModel = new SecondaryMonitorViewModel(switchService, groups);
         var screenService = new ScreenService();
         var mainWindow = new MainWindow(mainViewModel);
