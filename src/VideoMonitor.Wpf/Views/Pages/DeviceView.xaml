@@ -289,8 +289,10 @@
                         <TextBox Margin="0,0,0,12" Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.Name, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="所属分组 *" />
                         <ComboBox Margin="0,0,0,12" Style="{StaticResource IndustrialComboBoxStyle}"
-                                  ItemsSource="{Binding EditableGroups}" DisplayMemberPath="Name" SelectedValuePath="Id"
-                                  SelectedValue="{Binding EditDraft.GroupId, Mode=TwoWay}" />
+                                  ItemsSource="{Binding EditableGroups}" SelectedValuePath="Id"
+                                  SelectedValue="{Binding EditDraft.GroupId, Mode=TwoWay}">
+                            <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate>
+                        </ComboBox>
                         <Grid Margin="0,0,0,12">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <StackPanel><TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="厂家"/><TextBox Style="{StaticResource IndustrialTextBoxStyle}" Text="{Binding EditDraft.Manufacturer, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
