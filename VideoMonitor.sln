@@ -3,13 +3,15 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{73303C14-6A26-4D50-968C-25F4A0673D79}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{94660C38-EA08-472F-89C2-136847F699FD}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VideoMonitor.Client", "src\VideoMonitor.Client\VideoMonitor.Client.csproj", "{6C55116E-206A-4ECA-B18E-BAA7AB6DCEB2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VideoMonitor.Core", "src\VideoMonitor.Core\VideoMonitor.Core.csproj", "{7610830A-E3D0-4B17-87A7-43C565487E3E}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C077A432-4611-41CA-93CF-5266D6AF65B5}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VideoMonitor.Wpf", "src\VideoMonitor.Wpf\VideoMonitor.Wpf.csproj", "{05B9D77F-DA38-4A17-B146-EF0BE31434CD}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VideoMonitor.Client.Tests", "tests\VideoMonitor.Client.Tests\VideoMonitor.Client.Tests.csproj", "{FE176C52-D331-4395-8955-1741E251D7DC}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{8B6E392F-1F29-42C4-AFDA-2BD90BA32EF8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VideoMonitor.Core.Tests", "tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj", "{14824D23-7903-401C-BAB8-4A4FA81DD7C8}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -20,17 +22,22 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{6C55116E-206A-4ECA-B18E-BAA7AB6DCEB2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6C55116E-206A-4ECA-B18E-BAA7AB6DCEB2}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6C55116E-206A-4ECA-B18E-BAA7AB6DCEB2}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6C55116E-206A-4ECA-B18E-BAA7AB6DCEB2}.Release|Any CPU.Build.0 = Release|Any CPU
-		{FE176C52-D331-4395-8955-1741E251D7DC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{FE176C52-D331-4395-8955-1741E251D7DC}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{FE176C52-D331-4395-8955-1741E251D7DC}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{FE176C52-D331-4395-8955-1741E251D7DC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7610830A-E3D0-4B17-87A7-43C565487E3E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7610830A-E3D0-4B17-87A7-43C565487E3E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7610830A-E3D0-4B17-87A7-43C565487E3E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7610830A-E3D0-4B17-87A7-43C565487E3E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{05B9D77F-DA38-4A17-B146-EF0BE31434CD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{05B9D77F-DA38-4A17-B146-EF0BE31434CD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{05B9D77F-DA38-4A17-B146-EF0BE31434CD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{05B9D77F-DA38-4A17-B146-EF0BE31434CD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{14824D23-7903-401C-BAB8-4A4FA81DD7C8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{14824D23-7903-401C-BAB8-4A4FA81DD7C8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{14824D23-7903-401C-BAB8-4A4FA81DD7C8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{14824D23-7903-401C-BAB8-4A4FA81DD7C8}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{6C55116E-206A-4ECA-B18E-BAA7AB6DCEB2} = {73303C14-6A26-4D50-968C-25F4A0673D79}
-		{FE176C52-D331-4395-8955-1741E251D7DC} = {C077A432-4611-41CA-93CF-5266D6AF65B5}
+		{7610830A-E3D0-4B17-87A7-43C565487E3E} = {94660C38-EA08-472F-89C2-136847F699FD}
+		{05B9D77F-DA38-4A17-B146-EF0BE31434CD} = {94660C38-EA08-472F-89C2-136847F699FD}
+		{14824D23-7903-401C-BAB8-4A4FA81DD7C8} = {8B6E392F-1F29-42C4-AFDA-2BD90BA32EF8}
 	EndGlobalSection
 EndGlobal
