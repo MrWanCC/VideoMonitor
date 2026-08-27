@@ -46,7 +46,7 @@ public sealed class ScreenService
         }
         else
         {
-            window.WindowStyle = WindowStyle.SingleBorderWindow;
+            window.WindowStyle = WindowStyle.None;
             window.ResizeMode = ResizeMode.CanResizeWithGrip;
             window.Left = target.Left / dpi.DpiScaleX + 80;
             window.Top = target.Top / dpi.DpiScaleY + 80;
