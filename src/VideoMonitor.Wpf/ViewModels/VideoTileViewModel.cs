@@ -11,6 +11,7 @@ public sealed class VideoTileViewModel : ObservableObject
     private CameraStatus status = CameraStatus.Offline;
     private string bitrate = "-- Mbps";
     private string streamType = "--";
+    private string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
     public string CameraName
     {
@@ -48,6 +49,12 @@ public sealed class VideoTileViewModel : ObservableObject
         private set => SetProperty(ref streamType, value);
     }
 
+    public string Timestamp
+    {
+        get => timestamp;
+        private set => SetProperty(ref timestamp, value);
+    }
+
     public void Update(CameraInfo camera)
     {
         ArgumentNullException.ThrowIfNull(camera);
@@ -57,5 +64,6 @@ public sealed class VideoTileViewModel : ObservableObject
         Status = camera.Status;
         Bitrate = camera.Bitrate;
         StreamType = camera.StreamType;
+        Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
     }
 }
