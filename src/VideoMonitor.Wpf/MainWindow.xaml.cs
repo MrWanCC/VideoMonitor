@@ -95,10 +95,10 @@ public partial class MainWindow
         Width = savedBounds.Width;
         Height = savedBounds.Height;
 
-        HeaderRow.Height = new GridLength(64);
-        FooterRow.Height = new GridLength(30);
-        NavigationColumn.Width = new GridLength(208);
-        TreeColumn.Width = new GridLength(304);
+        HeaderRow.Height = new GridLength(56);
+        FooterRow.Height = new GridLength(36);
+        NavigationColumn.Width = new GridLength(200);
+        TreeColumn.Width = new GridLength(300);
         HeaderChrome.Visibility = Visibility.Visible;
         NavigationChrome.Visibility = Visibility.Visible;
         TreeChrome.Visibility = Visibility.Visible;
@@ -107,4 +107,11 @@ public partial class MainWindow
         WindowState = savedWindowState;
         fullscreenApplied = false;
     }
+
+    private void MinimizeWindow(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    private void MaximizeWindow(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void CloseWindow(object sender, RoutedEventArgs e) => Close();
 }
