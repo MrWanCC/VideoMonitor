@@ -21,7 +21,7 @@ public sealed class CameraStatusToTextConverter : IValueConverter
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
-        Binding.DoNothing;
+        System.Windows.Data.Binding.DoNothing;
 }
 
 public sealed class CameraStatusToBrushConverter : IValueConverter
@@ -37,9 +37,10 @@ public sealed class CameraStatusToBrushConverter : IValueConverter
             }
             : "OfflineGrayBrush";
 
-        return Application.Current.TryFindResource(resourceKey) as Brush ?? Brushes.Gray;
+        return System.Windows.Application.Current.TryFindResource(resourceKey) as System.Windows.Media.Brush
+            ?? System.Windows.Media.Brushes.Gray;
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
-        Binding.DoNothing;
+        System.Windows.Data.Binding.DoNothing;
 }

@@ -9,5 +9,5 @@ public sealed class StringEqualsConverter : IValueConverter
         string.Equals(value as string, parameter as string, StringComparison.Ordinal);
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
-        Binding.DoNothing;
+        System.Windows.Data.Binding.DoNothing;
 }
