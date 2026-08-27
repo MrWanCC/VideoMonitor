@@ -13,6 +13,10 @@ public sealed class VideoTileViewModel : ObservableObject
     private string streamType = "--";
     private string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
+    public string IpAddress => "192.168.17.5";
+
+    public string Resolution => "1920×1080";
+
     public string CameraName
     {
         get => cameraName;

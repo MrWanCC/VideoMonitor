@@ -12,6 +12,9 @@ public sealed class MonitorViewModel : ObservableObject
     private string currentChuteName = string.Empty;
     private string currentTunnelName = string.Empty;
     private MonitorTreeItemViewModel? selectedTreeItem;
+    private bool isSingleTileMode;
+    private bool isDetailPanelCollapsed;
+    private VideoTileViewModel selectedVideoSlot = null!;
 
     public MonitorViewModel(
         MonitorSwitchService switchService,
@@ -23,6 +26,10 @@ public sealed class MonitorViewModel : ObservableObject
             Enumerable.Range(0, 4).Select(_ => new VideoTileViewModel()));
         TreeSections = CreateTree(groups);
         SelectGroupCommand = new RelayCommand<MonitorTreeItemViewModel>(SelectGroup);
+        ToggleSingleTileCommand = new RelayCommand<VideoTileViewModel>(ToggleSingleTile);
+        ExitSingleTileModeCommand = new RelayCommand(() => IsSingleTileMode = false);
+        ToggleDetailPanelCommand = new RelayCommand(() => IsDetailPanelCollapsed = !IsDetailPanelCollapsed);
+        SelectedVideoSlot = MainTiles[0];
 
         switchService.LayoutChanged += OnLayoutChanged;
         Render(switchService.Current);
@@ -44,6 +51,12 @@ public sealed class MonitorViewModel : ObservableObject
 
     public IRelayCommand<MonitorTreeItemViewModel> SelectGroupCommand { get; }
 
+    public IRelayCommand<VideoTileViewModel> ToggleSingleTileCommand { get; }
+
+    public IRelayCommand ExitSingleTileModeCommand { get; }
+
+    public IRelayCommand ToggleDetailPanelCommand { get; }
+
 
     public string CurrentChuteName
     {
@@ -55,6 +68,24 @@ public sealed class MonitorViewModel : ObservableObject
     {
         get => currentTunnelName;
         private set => SetProperty(ref currentTunnelName, value);
+    }
+
+    public bool IsSingleTileMode
+    {
+        get => isSingleTileMode;
+        private set => SetProperty(ref isSingleTileMode, value);
+    }
+
+    public bool IsDetailPanelCollapsed
+    {
+        get => isDetailPanelCollapsed;
+        private set => SetProperty(ref isDetailPanelCollapsed, value);
+    }
+
+    public VideoTileViewModel SelectedVideoSlot
+    {
+        get => selectedVideoSlot;
+        private set => SetProperty(ref selectedVideoSlot, value);
     }
 
     private static ObservableCollection<MonitorTreeItemViewModel> CreateTree(
@@ -110,6 +141,23 @@ public sealed class MonitorViewModel : ObservableObject
                 switchService.SwitchUnloadingGroup(group);
                 break;
         }
+    }
+
+    private void ToggleSingleTile(VideoTileViewModel? slot)
+    {
+        if (slot is null || !MainTiles.Contains(slot))
+        {
+            return;
+        }
+
+        if (IsSingleTileMode && ReferenceEquals(SelectedVideoSlot, slot))
+        {
+            IsSingleTileMode = false;
+            return;
+        }
+
+        SelectedVideoSlot = slot;
+        IsSingleTileMode = true;
     }
 
     private void OnLayoutChanged(object? sender, MonitorLayoutSnapshot snapshot) => Render(snapshot);

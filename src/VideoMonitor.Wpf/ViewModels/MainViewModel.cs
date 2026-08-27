@@ -7,12 +7,14 @@ public sealed class MainViewModel : ObservableObject
 {
     private string selectedNavigation = "实时监控";
     private bool isMonitorFullscreen;
+    private bool isSidebarCollapsed;
 
     public MainViewModel(MonitorViewModel monitor)
     {
         Monitor = monitor;
         NavigateCommand = new RelayCommand<string>(Navigate);
         ToggleFullscreenCommand = new RelayCommand(() => IsMonitorFullscreen = !IsMonitorFullscreen);
+        ToggleSidebarCommand = new RelayCommand(() => IsSidebarCollapsed = !IsSidebarCollapsed);
     }
 
     public MonitorViewModel Monitor { get; }
@@ -20,6 +22,8 @@ public sealed class MainViewModel : ObservableObject
     public IRelayCommand<string> NavigateCommand { get; }
 
     public IRelayCommand ToggleFullscreenCommand { get; }
+
+    public IRelayCommand ToggleSidebarCommand { get; }
 
     public string SelectedNavigation
     {
@@ -31,6 +35,12 @@ public sealed class MainViewModel : ObservableObject
     {
         get => isMonitorFullscreen;
         set => SetProperty(ref isMonitorFullscreen, value);
+    }
+
+    public bool IsSidebarCollapsed
+    {
+        get => isSidebarCollapsed;
+        private set => SetProperty(ref isSidebarCollapsed, value);
     }
 
     private void Navigate(string? navigation)
