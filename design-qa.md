@@ -54,6 +54,10 @@
 - Fix: chute groups now expose collapsible camera rows, actual online counts, compact separators, left-aligned Geometry chevrons, and a blue-black selected channel row. Runtime evidence: `artifacts/screenshots/wpf-monitor-tree-refined.png`; normalized side-by-side evidence: `artifacts/screenshots/qa-monitor-tree-comparison.png`.
 - Intentional data difference: the target mock shows 4-channel/25-channel groups, while this project specification defines five 3-channel chute groups. The implementation therefore reports the truthful mock count `(15/15)`.
 
+### Iteration 6 — passed
+
+- User-directed simplification: removed the per-chute channel expansion level. Chute groups are now direct selectable rows; clicking one still drives the original three-camera group switch. Runtime evidence: `artifacts/screenshots/wpf-monitor-tree-flat.png`.
+
 ## Follow-up polish (P3, acceptance-dependent)
 
 - Target uses real mine imagery and mixed error/offline states; implementation intentionally keeps neutral mock video placeholders and existing all-online fake data.

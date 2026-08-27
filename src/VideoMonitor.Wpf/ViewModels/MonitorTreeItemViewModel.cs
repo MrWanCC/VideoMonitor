@@ -14,7 +14,6 @@ public sealed class MonitorTreeItemViewModel : ObservableObject
         IEnumerable<MonitorTreeItemViewModel>? children = null,
         string countText = "",
         CameraStatus status = CameraStatus.Online,
-        bool isCamera = false,
         bool isExpanded = false)
     {
         Name = name;
@@ -22,7 +21,6 @@ public sealed class MonitorTreeItemViewModel : ObservableObject
         Children = new ObservableCollection<MonitorTreeItemViewModel>(children ?? []);
         CountText = countText;
         Status = status;
-        IsCamera = isCamera;
         this.isExpanded = isExpanded;
     }
 
@@ -35,8 +33,6 @@ public sealed class MonitorTreeItemViewModel : ObservableObject
     public string CountText { get; }
 
     public CameraStatus Status { get; }
-
-    public bool IsCamera { get; }
 
     public bool HasChildren => Children.Count > 0;
 

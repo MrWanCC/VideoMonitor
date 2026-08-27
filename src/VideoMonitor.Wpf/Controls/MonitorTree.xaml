@@ -100,46 +100,18 @@
                                                   Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibilityConverter}}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Grid>
-                                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                                    <Button Command="{Binding DataContext.SelectGroupCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                            CommandParameter="{Binding}" Style="{StaticResource TreeRowButtonStyle}">
-                                                        <Grid>
-                                                            <Grid.ColumnDefinitions><ColumnDefinition Width="22"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                            <Ellipse Width="6" Height="6" Fill="{StaticResource MutedTextBrush}">
-                                                                <Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasChildren}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Ellipse.Style>
-                                                            </Ellipse>
-                                                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Text="{Binding Name}"/>
-                                                            <TextBlock Grid.Column="2" Margin="7,0,3,0" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Text="{Binding CountText}"/>
-                                                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                                                <StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding HasChildren}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></StackPanel.Style>
-                                                                <Ellipse Width="7" Height="7" Margin="0,0,6,0" Fill="{Binding Status, Converter={StaticResource StatusBrushConverter}}"/>
-                                                                <TextBlock Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}" FontSize="11" Text="在线"/>
-                                                            </StackPanel>
-                                                        </Grid>
-                                                    </Button>
-                                                    <ToggleButton Panel.ZIndex="2" Visibility="{Binding HasChildren, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                                  IsChecked="{Binding IsExpanded, Mode=TwoWay}" Style="{StaticResource ChevronToggleStyle}"/>
-                                                    <ItemsControl Grid.Row="1" Margin="22,0,0,2" ItemsSource="{Binding Children}"
-                                                                  Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibilityConverter}}">
-                                                        <ItemsControl.ItemTemplate>
-                                                            <DataTemplate>
-                                                                <Button Command="{Binding DataContext.SelectGroupCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                                        CommandParameter="{Binding}" Style="{StaticResource TreeRowButtonStyle}">
-                                                                    <Grid>
-                                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="22"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                                        <Path Width="12" Height="12" Data="{StaticResource IconCamera}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" Stretch="Uniform"/>
-                                                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
-                                                                        <StackPanel Grid.Column="2" Margin="8,0,3,0" Orientation="Horizontal" VerticalAlignment="Center">
-                                                                            <Ellipse Width="7" Height="7" Margin="0,0,6,0" Fill="{Binding Status, Converter={StaticResource StatusBrushConverter}}"/>
-                                                                            <TextBlock Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}" FontSize="11" Text="在线"/>
-                                                                        </StackPanel>
-                                                                    </Grid>
-                                                                </Button>
-                                                            </DataTemplate>
-                                                        </ItemsControl.ItemTemplate>
-                                                    </ItemsControl>
-                                                </Grid>
+                                                <Button Command="{Binding DataContext.SelectGroupCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                        CommandParameter="{Binding}" Style="{StaticResource TreeRowButtonStyle}">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="22"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <Ellipse Width="6" Height="6" Fill="{StaticResource MutedTextBrush}"/>
+                                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Text="{Binding Name}"/>
+                                                        <StackPanel Grid.Column="2" Margin="8,0,3,0" Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <Ellipse Width="7" Height="7" Margin="0,0,6,0" Fill="{Binding Status, Converter={StaticResource StatusBrushConverter}}"/>
+                                                            <TextBlock Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}" FontSize="11" Text="在线"/>
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Button>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>

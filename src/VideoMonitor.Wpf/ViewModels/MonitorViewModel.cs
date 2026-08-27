@@ -29,7 +29,7 @@ public sealed class MonitorViewModel : ObservableObject
         var initialGroup = TreeSections
             .SelectMany(section => section.Children)
             .FirstOrDefault(item => item.Name == switchService.Current.MainSlots[0].GroupName);
-        selectedTreeItem = initialGroup?.Children.FirstOrDefault() ?? initialGroup;
+        selectedTreeItem = initialGroup;
         if (selectedTreeItem is not null)
         {
             selectedTreeItem.IsSelected = true;
@@ -75,23 +75,7 @@ public sealed class MonitorViewModel : ObservableObject
         IEnumerable<MonitorGroup> groups)
     {
         var matchingGroups = groups.Where(group => group.Type == type).ToArray();
-        var children = matchingGroups.Select(group =>
-        {
-            var cameraItems = type == MonitorGroupType.Chute
-                ? group.Cameras.Select(camera => new MonitorTreeItemViewModel(
-                    camera.Name,
-                    group,
-                    status: camera.Status,
-                    isCamera: true))
-                : Enumerable.Empty<MonitorTreeItemViewModel>();
-
-            return new MonitorTreeItemViewModel(
-                group.Name,
-                group,
-                cameraItems,
-                type == MonitorGroupType.Chute ? $"({group.Cameras.Count}/{group.Cameras.Count})" : "",
-                isExpanded: group.Name == "备用1");
-        });
+        var children = matchingGroups.Select(group => new MonitorTreeItemViewModel(group.Name, group));
         var total = type == MonitorGroupType.Chute
             ? matchingGroups.Sum(group => group.Cameras.Count)
             : matchingGroups.Length;
@@ -111,12 +95,7 @@ public sealed class MonitorViewModel : ObservableObject
             selectedTreeItem.IsSelected = false;
         }
 
-        if (item.HasChildren)
-        {
-            item.IsExpanded = true;
-        }
-
-        selectedTreeItem = item.Children.FirstOrDefault() ?? item;
+        selectedTreeItem = item;
         selectedTreeItem.IsSelected = true;
 
         switch (group.Type)
