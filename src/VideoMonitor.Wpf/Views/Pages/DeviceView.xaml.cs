@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using VideoMonitor.Wpf.ViewModels;
 
@@ -9,9 +10,15 @@ namespace VideoMonitor.Wpf.Views.Pages;
 
 public partial class DeviceView
 {
+    private readonly Storyboard _drawerOpenStoryboard;
+    private readonly Storyboard _drawerCloseStoryboard;
+
     public DeviceView()
     {
         InitializeComponent();
+        _drawerOpenStoryboard = (Storyboard)Resources["DrawerOpenStoryboard"];
+        _drawerCloseStoryboard = (Storyboard)Resources["DrawerCloseStoryboard"];
+        _drawerCloseStoryboard.Completed += OnDrawerCloseStoryboardCompleted;
         DataContextChanged += OnDataContextChanged;
         Unloaded += (_, _) => DetachViewModel(DataContext as DeviceManagementViewModel);
     }
@@ -24,7 +31,7 @@ public partial class DeviceView
             viewModel.PropertyChanged += OnViewModelPropertyChanged;
         }
 
-        ApplyDrawerLayout();
+        ApplyDrawerState(animate: false);
     }
 
     private void DetachViewModel(DeviceManagementViewModel? viewModel)
@@ -39,32 +46,73 @@ public partial class DeviceView
     {
         if (e.PropertyName == nameof(DeviceManagementViewModel.IsEditPanelOpen))
         {
-            Dispatcher.BeginInvoke(ApplyDrawerLayout, DispatcherPriority.Loaded);
+            Dispatcher.BeginInvoke(() => ApplyDrawerState(animate: true), DispatcherPriority.Loaded);
         }
     }
 
-    private void OnDeviceLayoutSizeChanged(object sender, SizeChangedEventArgs e) => ApplyDrawerLayout();
-
-    private void ApplyDrawerLayout()
+    private void ApplyDrawerState(bool animate)
     {
         var isOpen = DataContext is DeviceManagementViewModel { IsEditPanelOpen: true };
-        if (!isOpen)
+        if (isOpen)
         {
-            DrawerColumn.Width = new GridLength(0);
+            _drawerCloseStoryboard.Remove(this);
+            EditorDrawer.Visibility = Visibility.Visible;
+            EditorDrawer.IsHitTestVisible = true;
+            DrawerShade.Visibility = Visibility.Visible;
+            DrawerShade.IsHitTestVisible = true;
+
+            if (animate)
+            {
+                _drawerOpenStoryboard.Begin(this, HandoffBehavior.SnapshotAndReplace, isControllable: true);
+            }
+            else
+            {
+                DrawerTranslate.X = 0;
+                DrawerShade.Opacity = 0.15;
+            }
+
             return;
         }
 
-        if (ActualWidth >= 1360)
+        _drawerOpenStoryboard.Remove(this);
+        if (animate && EditorDrawer.Visibility == Visibility.Visible)
         {
-            DrawerColumn.Width = new GridLength(380);
-            Grid.SetColumn(EditorDrawer, 2);
-            System.Windows.Controls.Panel.SetZIndex(EditorDrawer, 0);
+            _drawerCloseStoryboard.Begin(this, HandoffBehavior.SnapshotAndReplace, isControllable: true);
         }
         else
         {
-            DrawerColumn.Width = new GridLength(0);
-            Grid.SetColumn(EditorDrawer, 1);
-            System.Windows.Controls.Panel.SetZIndex(EditorDrawer, 20);
+            CompleteDrawerClose();
+        }
+    }
+
+    private void OnDrawerCloseStoryboardCompleted(object? sender, EventArgs e)
+    {
+        if (DataContext is DeviceManagementViewModel { IsEditPanelOpen: true })
+        {
+            return;
+        }
+
+        CompleteDrawerClose();
+    }
+
+    private void CompleteDrawerClose()
+    {
+        _drawerCloseStoryboard.Remove(this);
+        DrawerTranslate.X = 420;
+        DrawerShade.Opacity = 0;
+        EditorDrawer.Visibility = Visibility.Collapsed;
+        EditorDrawer.IsHitTestVisible = false;
+        DrawerShade.Visibility = Visibility.Collapsed;
+        DrawerShade.IsHitTestVisible = false;
+    }
+
+    private void OnDeviceViewPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape &&
+            DataContext is DeviceManagementViewModel { IsEditPanelOpen: true } viewModel)
+        {
+            viewModel.CancelEditCommand.Execute(null);
+            e.Handled = true;
         }
     }
 

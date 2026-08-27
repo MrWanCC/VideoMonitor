@@ -3,7 +3,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:behaviors="clr-namespace:VideoMonitor.Wpf.Behaviors"
              xmlns:converters="clr-namespace:VideoMonitor.Wpf.Converters"
-             xmlns:vm="clr-namespace:VideoMonitor.Wpf.ViewModels">
+             xmlns:vm="clr-namespace:VideoMonitor.Wpf.ViewModels"
+             PreviewKeyDown="OnDeviceViewPreviewKeyDown">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <converters:CameraStatusToTextConverter x:Key="StatusTextConverter" />
@@ -12,6 +13,34 @@
         <converters:FirstChannelStreamConverter x:Key="FirstChannelStreamConverter" />
         <converters:StreamTypeToTextConverter x:Key="StreamTypeTextConverter" />
         <converters:TransportModeToTextConverter x:Key="TransportModeTextConverter" />
+        <Storyboard x:Key="DrawerOpenStoryboard">
+            <DoubleAnimation Storyboard.TargetName="DrawerTranslate" Storyboard.TargetProperty="X"
+                             From="420" To="0" Duration="0:0:0.2">
+                <DoubleAnimation.EasingFunction>
+                    <CubicEase EasingMode="EaseOut" />
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="DrawerShade" Storyboard.TargetProperty="Opacity"
+                             From="0" To="0.15" Duration="0:0:0.2">
+                <DoubleAnimation.EasingFunction>
+                    <CubicEase EasingMode="EaseOut" />
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+        </Storyboard>
+        <Storyboard x:Key="DrawerCloseStoryboard">
+            <DoubleAnimation Storyboard.TargetName="DrawerTranslate" Storyboard.TargetProperty="X"
+                             From="0" To="420" Duration="0:0:0.16">
+                <DoubleAnimation.EasingFunction>
+                    <CubicEase EasingMode="EaseIn" />
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+            <DoubleAnimation Storyboard.TargetName="DrawerShade" Storyboard.TargetProperty="Opacity"
+                             From="0.15" To="0" Duration="0:0:0.16">
+                <DoubleAnimation.EasingFunction>
+                    <CubicEase EasingMode="EaseIn" />
+                </DoubleAnimation.EasingFunction>
+            </DoubleAnimation>
+        </Storyboard>
         <Style x:Key="DeviceFieldLabelStyle" TargetType="TextBlock">
             <Setter Property="Margin" Value="0,0,0,6" />
             <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
@@ -25,12 +54,10 @@
         </Style>
     </UserControl.Resources>
 
-    <Grid x:Name="DeviceLayout" Background="{StaticResource WindowBackgroundBrush}"
-          SizeChanged="OnDeviceLayoutSizeChanged">
+    <Grid x:Name="DeviceLayout" Background="{StaticResource WindowBackgroundBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="250" />
             <ColumnDefinition Width="*" />
-            <ColumnDefinition x:Name="DrawerColumn" Width="0" />
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0" Style="{StaticResource PanelBorderStyle}">
@@ -266,9 +293,15 @@
             </Grid>
         </Border>
 
-        <Border x:Name="EditorDrawer" Grid.Column="2" Width="380" HorizontalAlignment="Right"
+        <Border x:Name="DrawerShade" Grid.Column="1" Margin="8,0,0,0" Panel.ZIndex="10"
+                Background="#FF000000" Opacity="0" Visibility="Collapsed" IsHitTestVisible="False" />
+
+        <Border x:Name="EditorDrawer" Grid.Column="1" Width="420" HorizontalAlignment="Right" Panel.ZIndex="20"
                 Background="{StaticResource PanelBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="1,0,0,0" Visibility="{Binding IsEditPanelOpen, Converter={StaticResource BoolToVisibilityConverter}}">
+                BorderThickness="1,0,0,0" Visibility="Collapsed" IsHitTestVisible="False">
+            <Border.RenderTransform>
+                <TranslateTransform x:Name="DrawerTranslate" X="420" />
+            </Border.RenderTransform>
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="54" />
@@ -359,7 +392,7 @@
             </Grid>
         </Border>
 
-        <Grid Grid.ColumnSpan="3" Panel.ZIndex="50" Background="#B807111D"
+        <Grid Grid.ColumnSpan="2" Panel.ZIndex="50" Background="#B807111D"
               Visibility="{Binding IsDialogOpen, Converter={StaticResource BoolToVisibilityConverter}}">
             <Border Width="420" Padding="24" HorizontalAlignment="Center" VerticalAlignment="Center"
                     Background="{StaticResource PanelBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
