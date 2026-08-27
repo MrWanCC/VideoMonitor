@@ -1,11 +1,38 @@
-<UserControl x:Class="VideoMonitor.Wpf.Controls.StatusBar" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+<UserControl x:Class="VideoMonitor.Wpf.Controls.StatusBar"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Height="{StaticResource StatusBarHeight}" VerticalAlignment="Center">
     <Border Background="{StaticResource SidebarBackgroundBrush}" BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
-        <Grid Margin="16,0"><Grid.ColumnDefinitions><ColumnDefinition Width="1.45*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="1.25*"/><ColumnDefinition Width="1.1*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Style="{StaticResource MutedTextStyle}" Text="系统时间："/><TextBlock x:Name="ClockText" Foreground="{StaticResource SecondaryTextBrush}" FontSize="11"/></StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Style="{StaticResource MutedTextStyle}" Text="CPU：23%"/><Border Width="48" Height="4" Margin="8,0,0,0" Background="{StaticResource SeparatorBrush}" CornerRadius="2"><Border Width="18" HorizontalAlignment="Left" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="2"/></Border></StackPanel>
-            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Style="{StaticResource MutedTextStyle}" Text="内存：42%"/><Border Width="48" Height="4" Margin="8,0,0,0" Background="{StaticResource SeparatorBrush}" CornerRadius="2"><Border Width="23" HorizontalAlignment="Left" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="2"/></Border></StackPanel>
-            <TextBlock Grid.Column="3" VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="上行：8.6 Mbps"/><TextBlock Grid.Column="4" VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="下行：32.4 Mbps"/><TextBlock Grid.Column="5" VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="ZLMediaKit：v2024.04.15"/><TextBlock Grid.Column="6" VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="运行时间：2天 06:12"/>
-            <StackPanel Grid.Column="7" Orientation="Horizontal" VerticalAlignment="Center"><Path Width="16" Height="16" Data="{StaticResource IconShield}" Stroke="{StaticResource OnlineGreenBrush}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Margin="7,0,0,0" Foreground="{StaticResource OnlineGreenBrush}" FontSize="11" Text="安全运行中"/></StackPanel>
+        <Grid Margin="16,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.45*" /><ColumnDefinition Width="1.05*" /><ColumnDefinition Width="1.05*" />
+                <ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="1.3*" />
+                <ColumnDefinition Width="1.1*" /><ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Style="{StaticResource StatusTextStyle}" Foreground="{StaticResource MutedTextBrush}" Text="系统时间：" />
+                <TextBlock x:Name="ClockText" Style="{StaticResource StatusTextStyle}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Style="{StaticResource StatusTextStyle}" Text="CPU：23%" />
+                <Border Width="52" Height="6" Margin="8,0,0,0" Background="{StaticResource SeparatorBrush}" CornerRadius="3">
+                    <Border Width="20" HorizontalAlignment="Left" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="3" />
+                </Border>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Style="{StaticResource StatusTextStyle}" Text="内存：42%" />
+                <Border Width="52" Height="6" Margin="8,0,0,0" Background="{StaticResource SeparatorBrush}" CornerRadius="3">
+                    <Border Width="24" HorizontalAlignment="Left" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="3" />
+                </Border>
+            </StackPanel>
+            <TextBlock Grid.Column="3" Style="{StaticResource StatusTextStyle}" Text="上行：8.6 Mbps" />
+            <TextBlock Grid.Column="4" Style="{StaticResource StatusTextStyle}" Text="下行：32.4 Mbps" />
+            <TextBlock Grid.Column="5" Style="{StaticResource StatusTextStyle}" Text="ZLMediaKit：v2024.04.15" />
+            <TextBlock Grid.Column="6" Style="{StaticResource StatusTextStyle}" Text="运行时间：2天 06:12" />
+            <StackPanel Grid.Column="7" Orientation="Horizontal" VerticalAlignment="Center">
+                <Path Width="17" Height="17" Data="{StaticResource IconShield}" Stroke="{StaticResource OnlineGreenBrush}" StrokeThickness="1.5" Stretch="Uniform" />
+                <TextBlock Margin="8,0,0,0" Foreground="{StaticResource OnlineGreenBrush}" FontSize="{StaticResource FontSizeStatus}" Text="安全运行中" />
+            </StackPanel>
         </Grid>
     </Border>
 </UserControl>

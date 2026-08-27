@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
     <Color x:Key="BackgroundMain">#07111D</Color>
     <Color x:Key="BackgroundSidebar">#091522</Color>
     <Color x:Key="BackgroundPanel">#0B1724</Color>
@@ -29,7 +30,7 @@
     <SolidColorBrush x:Key="PrimaryHoverBrush" Color="{StaticResource PrimaryHover}" />
     <SolidColorBrush x:Key="SelectedBlueBrush" Color="{StaticResource PrimarySelected}" />
     <SolidColorBrush x:Key="PrimaryBlueMutedBrush" Color="#331687FF" />
-    <SolidColorBrush x:Key="SelectedRowBrush" Color="#401687FF" />
+    <SolidColorBrush x:Key="SelectedRowBrush" Color="#2A1687FF" />
     <SolidColorBrush x:Key="OverlayBrush" Color="#CC07111D" />
     <SolidColorBrush x:Key="OnlineGreenBrush" Color="{StaticResource Online}" />
     <SolidColorBrush x:Key="WarningOrangeBrush" Color="{StaticResource Warning}" />
@@ -43,8 +44,21 @@
     <CornerRadius x:Key="RadiusCard">6</CornerRadius>
     <CornerRadius x:Key="RadiusSmall">4</CornerRadius>
     <Thickness x:Key="BorderThin">1</Thickness>
+    <Thickness x:Key="Spacing4">4</Thickness>
     <Thickness x:Key="Spacing8">8</Thickness>
     <Thickness x:Key="Spacing12">12</Thickness>
     <Thickness x:Key="Spacing16">16</Thickness>
     <Thickness x:Key="Spacing24">24</Thickness>
+
+    <sys:Double x:Key="AppHeaderHeight">56</sys:Double>
+    <sys:Double x:Key="NavigationWidth">200</sys:Double>
+    <sys:Double x:Key="MonitorTreeWidth">300</sys:Double>
+    <sys:Double x:Key="NavigationItemHeight">44</sys:Double>
+    <sys:Double x:Key="VideoHeaderHeight">36</sys:Double>
+    <sys:Double x:Key="TreeSearchHeight">36</sys:Double>
+    <sys:Double x:Key="TreeSectionHeight">38</sys:Double>
+    <sys:Double x:Key="TreeItemHeight">34</sys:Double>
+    <sys:Double x:Key="DetailPanelHeight">132</sys:Double>
+    <sys:Double x:Key="DetailTabHeight">36</sys:Double>
+    <sys:Double x:Key="StatusBarHeight">34</sys:Double>
 </ResourceDictionary>

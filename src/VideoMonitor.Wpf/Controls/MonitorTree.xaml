@@ -6,14 +6,16 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <converters:CameraStatusToBrushConverter x:Key="StatusBrushConverter"/>
         <Style x:Key="TreeRowButtonStyle" TargetType="Button">
-            <Setter Property="Height" Value="32"/>
-            <Setter Property="Margin" Value="0,1"/>
-            <Setter Property="Padding" Value="8,0"/>
+            <Setter Property="Height" Value="{StaticResource TreeItemHeight}"/>
+            <Setter Property="Margin" Value="0,2"/>
+            <Setter Property="Padding" Value="10,0"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderBrush" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="2,0,0,0"/>
+            <Setter Property="BorderThickness" Value="3,0,0,0"/>
+            <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}"/>
+            <Setter Property="FontSize" Value="{StaticResource FontSizeTreeItem}"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -30,7 +32,7 @@
                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                 <Setter TargetName="Chrome" Property="Background" Value="{StaticResource SelectedRowBrush}"/>
                                 <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}"/>
-                                <Setter Property="Foreground" Value="{StaticResource PrimaryBlueBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}"/>
                             </DataTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -39,7 +41,7 @@
         </Style>
         <Style x:Key="ChevronToggleStyle" TargetType="ToggleButton">
             <Setter Property="Width" Value="22"/>
-            <Setter Property="Height" Value="30"/>
+            <Setter Property="Height" Value="{StaticResource TreeSectionHeight}"/>
             <Setter Property="HorizontalAlignment" Value="Left"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -68,33 +70,34 @@
 
     <Border Background="{StaticResource PanelBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0">
         <Grid>
-            <Grid.RowDefinitions><RowDefinition Height="52"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <Grid Margin="12,9,12,7">
+            <Grid.RowDefinitions><RowDefinition Height="56"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <Grid Height="{StaticResource TreeSearchHeight}" Margin="12,10">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="38"/></Grid.ColumnDefinitions>
                 <Border Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
                     <Grid Margin="10,0"><Grid.ColumnDefinitions><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <Path Width="15" Height="15" Data="{StaticResource IconSearch}" Stroke="{StaticResource MutedTextBrush}" StrokeThickness="1.5" Stretch="Uniform"/>
+                        <Path Width="17" Height="17" Data="{StaticResource IconSearch}" Stroke="{StaticResource MutedTextBrush}" StrokeThickness="1.5" Stretch="Uniform"/>
                         <TextBox Grid.Column="1" Margin="6,0,0,0" VerticalContentAlignment="Center"
                                  Foreground="{StaticResource SecondaryTextBrush}" Background="Transparent" BorderThickness="0"
-                                 CaretBrush="{StaticResource PrimaryBlueBrush}" FontSize="12" Text="搜索摄像头名称/IP"/>
+                                 CaretBrush="{StaticResource PrimaryBlueBrush}" FontFamily="{StaticResource AppFontFamily}"
+                                 FontSize="{StaticResource FontSizeAuxiliary}" Text="搜索摄像头名称/IP"/>
                     </Grid>
                 </Border>
                 <Button Grid.Column="1" Margin="7,0,0,0" Style="{StaticResource IconButtonStyle}" ToolTip="筛选">
-                    <Path Width="15" Height="15" Data="{StaticResource IconFilter}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform"/>
+                    <Path Width="17" Height="17" Data="{StaticResource IconFilter}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform"/>
                 </Button>
             </Grid>
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                <ItemsControl Margin="10,0,10,12" ItemsSource="{Binding TreeSections}">
+                <ItemsControl Margin="12,0,12,12" ItemsSource="{Binding TreeSections}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <Border Margin="0,0,0,6" Padding="0,0,0,5" BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
                                 <Grid>
-                                    <Grid.RowDefinitions><RowDefinition Height="36"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="38"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                     <ToggleButton IsChecked="{Binding IsExpanded, Mode=TwoWay}" Style="{StaticResource ChevronToggleStyle}"/>
-                                    <StackPanel Margin="24,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
-                                        <TextBlock FontSize="13" FontWeight="SemiBold" Text="{Binding Name}"/>
-                                        <TextBlock Margin="7,0,0,0" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Text="{Binding CountText}"/>
+                                    <StackPanel Margin="26,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource TreeSectionTextStyle}" Text="{Binding Name}"/>
+                                        <TextBlock Margin="8,0,0,0" Foreground="{StaticResource MutedTextBrush}" FontSize="{StaticResource FontSizeCaption}" Text="{Binding CountText}"/>
                                     </StackPanel>
                                     <ItemsControl Grid.Row="1" ItemsSource="{Binding Children}"
                                                   Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibilityConverter}}">
@@ -103,12 +106,12 @@
                                                 <Button Command="{Binding DataContext.SelectGroupCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
                                                         CommandParameter="{Binding}" Style="{StaticResource TreeRowButtonStyle}">
                                                     <Grid>
-                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="22"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                        <Ellipse Width="6" Height="6" Fill="{StaticResource MutedTextBrush}"/>
-                                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Text="{Binding Name}"/>
-                                                        <StackPanel Grid.Column="2" Margin="8,0,3,0" Orientation="Horizontal" VerticalAlignment="Center">
-                                                            <Ellipse Width="7" Height="7" Margin="0,0,6,0" Fill="{Binding Status, Converter={StaticResource StatusBrushConverter}}"/>
-                                                            <TextBlock Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}" FontSize="11" Text="在线"/>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <Ellipse Width="7" Height="7" Fill="{StaticResource MutedTextBrush}"/>
+                                                        <TextBlock Grid.Column="1" Style="{StaticResource TreeItemTextStyle}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Text="{Binding Name}"/>
+                                                        <StackPanel Grid.Column="2" Margin="10,0,4,0" Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <Ellipse Width="8" Height="8" Margin="0,0,7,0" Fill="{Binding Status, Converter={StaticResource StatusBrushConverter}}"/>
+                                                            <TextBlock Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}" FontSize="{StaticResource FontSizeCaption}" Text="在线"/>
                                                         </StackPanel>
                                                     </Grid>
                                                 </Button>
