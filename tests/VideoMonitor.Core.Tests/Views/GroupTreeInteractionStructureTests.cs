@@ -16,6 +16,26 @@ public sealed class GroupTreeInteractionStructureTests
     }
 
     [Fact]
+    public void DeviceView_ContextMenuUsesDarkMenuItemTemplateWithoutDefaultIconGutter()
+    {
+        var xaml = ReadXaml(
+            "Views",
+            "Pages",
+            "DeviceView.xaml");
+        var menuStart = xaml.IndexOf("<ContextMenu ", StringComparison.Ordinal);
+        var menuEnd = xaml.IndexOf("</ContextMenu>", menuStart, StringComparison.Ordinal);
+
+        Assert.True(menuStart >= 0 && menuEnd > menuStart);
+        var contextMenu = xaml[menuStart..menuEnd];
+
+        Assert.Contains("<ContextMenu.Resources>", contextMenu);
+        Assert.Contains("<Style TargetType=\"MenuItem\">", contextMenu);
+        Assert.Contains("ContentSource=\"Header\"", contextMenu);
+        Assert.Contains("TextElement.Foreground=\"{TemplateBinding Foreground}\"", contextMenu);
+        Assert.Contains("IsHighlighted", contextMenu);
+    }
+
+    [Fact]
     public void DeviceView_GroupRowUsesHoverStyleOnlyWhenNotSelected()
     {
         var xaml = ReadXaml(
