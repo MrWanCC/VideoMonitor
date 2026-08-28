@@ -23,7 +23,7 @@
             </Style.Triggers>
         </Style>
         <ControlTemplate x:Key="VideoOverlayTemplate" TargetType="ContentControl">
-            <Grid IsHitTestVisible="False">
+            <Grid Background="#02000000">
                 <Border Margin="10" Padding="7,4" HorizontalAlignment="Left" VerticalAlignment="Top"
                         Background="{StaticResource OverlayBrush}" CornerRadius="3">
                     <TextBlock FontSize="{StaticResource FontSizeAuxiliary}"
@@ -88,7 +88,8 @@
                                 </Style.Triggers>
                             </Style>
                         </vlc:VideoView.Style>
-                        <ContentControl Template="{StaticResource VideoOverlayTemplate}" />
+                        <ContentControl Template="{StaticResource VideoOverlayTemplate}"
+                                        MouseDoubleClick="OnVideoSurfaceDoubleClick" />
                     </vlc:VideoView>
 
                     <Grid>

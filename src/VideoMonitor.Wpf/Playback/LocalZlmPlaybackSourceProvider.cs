@@ -79,6 +79,27 @@ public sealed class LocalZlmPlaybackSourceProvider : IPlaybackSourceProvider
             .ConfigureAwait(false);
         if (!add.IsSuccess || string.IsNullOrWhiteSpace(add.Data?.Key))
         {
+            if (IsCameraTimeout(add.Message))
+            {
+                throw new PlaybackSourceException(
+                    PlaybackFailureStage.ZlmStreamRegistrationTimeout,
+                    "拉流失败",
+                    "摄像头RTSP连接超时");
+            }
+
+            if (IsExistingProxy(add.Message))
+            {
+                if (await WaitForStreamAsync(streamId, cancellationToken).ConfigureAwait(false))
+                {
+                    return CreateSource(channel.Id, streamId, null, ownsProxy: false);
+                }
+
+                throw new PlaybackSourceException(
+                    PlaybackFailureStage.ZlmStreamRegistrationTimeout,
+                    "拉流失败",
+                    "已有ZLMediaKit代理未能注册媒体流");
+            }
+
             throw new PlaybackSourceException(
                 PlaybackFailureStage.ZlmProxyRegistrationFailed,
                 "ZLMediaKit拉流失败",
@@ -232,5 +253,13 @@ public sealed class LocalZlmPlaybackSourceProvider : IPlaybackSourceProvider
             && string.Equals(stream.Vhost, zlmOptions.Vhost, StringComparison.Ordinal)
             && string.Equals(stream.App, zlmOptions.App, StringComparison.Ordinal)
             && string.Equals(stream.Stream, streamId, StringComparison.Ordinal)) == true;
+
+    private static bool IsExistingProxy(string? message) =>
+        message?.Contains(
+            "This stream already exists",
+            StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool IsCameraTimeout(string? message) =>
+        message?.Contains("rtsp timeout", StringComparison.OrdinalIgnoreCase) == true;
 
 }

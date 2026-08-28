@@ -43,7 +43,13 @@ public sealed class ZlmClient
                 ["url"] = sourceUri.ToString(),
                 ["rtp_type"] = "0",
                 ["timeout_sec"] = "5",
-                ["retry_count"] = "1"
+                ["retry_count"] = "1",
+                ["enable_rtsp"] = "1",
+                ["enable_rtmp"] = "0",
+                ["enable_hls"] = "0",
+                ["enable_hls_fmp4"] = "0",
+                ["enable_ts"] = "0",
+                ["enable_fmp4"] = "0"
             },
             cancellationToken);
     }

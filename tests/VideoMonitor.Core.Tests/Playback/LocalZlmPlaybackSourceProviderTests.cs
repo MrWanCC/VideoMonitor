@@ -104,6 +104,48 @@ public sealed class LocalZlmPlaybackSourceProviderTests
     }
 
     [Fact]
+    public async Task Prepare_WhenCameraRtspTimesOut_ReportsCameraTimeout()
+    {
+        var handler = Responses(
+            ServerOk(),
+            EmptyMediaList(),
+            """{"code":-1,"msg":"play rtsp timeout"}""");
+        var provider = CreateProvider(handler);
+
+        var exception = await Assert.ThrowsAsync<PlaybackSourceException>(() =>
+            provider.PrepareAsync(Device(), Channel(), CancellationToken.None));
+
+        Assert.Equal(PlaybackFailureStage.ZlmStreamRegistrationTimeout, exception.Stage);
+        Assert.Equal("拉流失败", exception.Title);
+        Assert.Equal("摄像头RTSP连接超时", exception.Detail);
+    }
+
+    [Fact]
+    public async Task Prepare_WhenProxyAlreadyExists_WaitsAndReusesWithoutOwnership()
+    {
+        var handler = Responses(
+            ServerOk(),
+            EmptyMediaList(),
+            """{"code":-1,"msg":"This stream already exists"}""",
+            MediaListWith(TargetStreamId));
+        var provider = CreateProvider(handler);
+
+        var source = await provider.PrepareAsync(
+            Device(),
+            Channel(),
+            CancellationToken.None);
+
+        Assert.False(source.OwnsProxy);
+        Assert.Null(source.ProxyKey);
+
+        await provider.ReleaseAsync(source, CancellationToken.None);
+
+        Assert.DoesNotContain(
+            handler.Requests,
+            request => request.AbsolutePath.EndsWith("/delStreamProxy"));
+    }
+
+    [Fact]
     public async Task Prepare_WhenMediaNeverRegisters_TimesOutAndCleansOwnedProxy()
     {
         var handler = Responses(

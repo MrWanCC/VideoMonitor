@@ -24,6 +24,12 @@ public sealed class ZlmClientTests
         Assert.Contains("stream=stream_1", handler.LastRequestUri.Query);
         Assert.Contains("rtp_type=0", handler.LastRequestUri.Query);
         Assert.Contains("retry_count=1", handler.LastRequestUri.Query);
+        Assert.Contains("enable_rtsp=1", handler.LastRequestUri.Query);
+        Assert.Contains("enable_rtmp=0", handler.LastRequestUri.Query);
+        Assert.Contains("enable_hls=0", handler.LastRequestUri.Query);
+        Assert.Contains("enable_hls_fmp4=0", handler.LastRequestUri.Query);
+        Assert.Contains("enable_ts=0", handler.LastRequestUri.Query);
+        Assert.Contains("enable_fmp4=0", handler.LastRequestUri.Query);
     }
 
     [Fact]
