@@ -41,6 +41,12 @@ public sealed class LocalConfigurationLoaderTests
         Assert.Equal("192.0.2.10", configuration.Zlm.RtspHost);
         Assert.Equal("192.0.2.20", configuration.Device!.IpAddress);
         Assert.Equal("camera001", configuration.Device.LocalIdentifier);
+        Assert.Equal(
+            Guid.Parse("50000000-0000-0000-0000-000000000001"),
+            configuration.Device.DeviceId);
+        Assert.Equal(
+            Guid.Parse("60000000-0000-0000-0000-000000000001"),
+            configuration.Device.ChannelId);
         Assert.Equal(StreamType.Main, configuration.Device.StreamType);
         Assert.DoesNotContain("SourceUrl", directory.Read("local-device.json"));
     }
@@ -94,6 +100,8 @@ public sealed class LocalConfigurationLoaderTests
             "local-device.json",
             """
             {
+              "DeviceId": "50000000-0000-0000-0000-000000000001",
+              "ChannelId": "60000000-0000-0000-0000-000000000001",
               "LocalIdentifier": "camera001",
               "IpAddress": "192.0.2.20",
               "RtspPort": 554,

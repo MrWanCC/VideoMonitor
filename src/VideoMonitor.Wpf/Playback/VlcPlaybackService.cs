@@ -45,6 +45,8 @@ public sealed class VlcPlaybackService : IPlaybackEngine, IDisposable
             throw new PlaybackEngineException("LibVLC拒绝启动播放。");
         }
 
+        mediaPlayer.AspectRatio = "19:10";
+
         return new PlaybackSession(source, media, mediaPlayer);
     }
 

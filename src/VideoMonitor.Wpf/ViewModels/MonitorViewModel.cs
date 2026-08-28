@@ -8,19 +8,22 @@ namespace VideoMonitor.Wpf.ViewModels;
 
 public sealed class MonitorViewModel : ObservableObject
 {
+    private readonly IDeviceCatalog deviceCatalog;
     private readonly MonitorSwitchService switchService;
     private string currentChuteName = string.Empty;
     private string currentTunnelName = string.Empty;
     private MonitorTreeItemViewModel? selectedTreeItem;
     private bool isSingleTileMode;
-    private bool isDetailPanelCollapsed;
+    private bool isDetailPanelCollapsed = true;
     private VideoTileViewModel selectedVideoSlot = null!;
 
     public MonitorViewModel(
         MonitorSwitchService switchService,
-        IReadOnlyList<MonitorGroup> groups)
+        IReadOnlyList<MonitorGroup> groups,
+        IDeviceCatalog deviceCatalog)
     {
         this.switchService = switchService;
+        this.deviceCatalog = deviceCatalog ?? throw new ArgumentNullException(nameof(deviceCatalog));
         Groups = groups;
         MainTiles = new ObservableCollection<VideoTileViewModel>(
             Enumerable.Range(0, 4).Select(_ => new VideoTileViewModel()));
@@ -32,6 +35,7 @@ public sealed class MonitorViewModel : ObservableObject
         SelectedVideoSlot = MainTiles[0];
 
         switchService.LayoutChanged += OnLayoutChanged;
+        deviceCatalog.Changed += OnCatalogChanged;
         Render(switchService.Current);
         var initialGroup = TreeSections
             .SelectMany(section => section.Children)
@@ -162,11 +166,16 @@ public sealed class MonitorViewModel : ObservableObject
 
     private void OnLayoutChanged(object? sender, MonitorLayoutSnapshot snapshot) => Render(snapshot);
 
+    private void OnCatalogChanged(object? sender, EventArgs e) => Render(switchService.Current);
+
     private void Render(MonitorLayoutSnapshot snapshot)
     {
         for (var index = 0; index < MainTiles.Count; index++)
         {
-            MainTiles[index].Update(snapshot.MainSlots[index]);
+            var camera = snapshot.MainSlots[index];
+            var device = deviceCatalog.GetDevice(camera.DeviceId);
+            var channel = device?.Channels.SingleOrDefault(item => item.Id == camera.ChannelId);
+            MainTiles[index].Update(camera, device, channel);
         }
 
         CurrentChuteName = snapshot.MainSlots[0].GroupName;

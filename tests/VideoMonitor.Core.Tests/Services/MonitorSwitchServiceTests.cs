@@ -6,7 +6,7 @@ namespace VideoMonitor.Core.Tests.Services;
 
 public sealed class MonitorSwitchServiceTests
 {
-    private readonly IReadOnlyList<MonitorGroup> groups = MockMonitorData.CreateGroups();
+    private readonly IReadOnlyList<MonitorGroup> groups = CreateGroups();
 
     [Fact]
     public void SwitchChuteGroup_ReplacesSlotsOneToThree_AndKeepsSlotFour()
@@ -52,6 +52,13 @@ public sealed class MonitorSwitchServiceTests
 
     private MonitorSwitchService CreateService() => new(
         Group("备用1"), Group("Z-1#巷"), Group("2#主溜井"));
+
+    private static IReadOnlyList<MonitorGroup> CreateGroups()
+    {
+        var data = MockDeviceData.Create();
+        var catalog = new InMemoryDeviceCatalog(data.Groups, data.Devices);
+        return MonitorCatalogProjection.CreateGroups(catalog);
+    }
 
     private MonitorGroup Group(string name) => groups.Single(group => group.Name == name);
 }

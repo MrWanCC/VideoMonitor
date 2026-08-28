@@ -40,13 +40,28 @@ public sealed class MonitorUiStateTests
         var deviceData = MockDeviceData.Create();
         var main = new MainViewModel(
             monitor,
-            new DeviceManagementViewModel(deviceData.Groups, deviceData.Devices));
+            new DeviceManagementViewModel(
+                new InMemoryDeviceCatalog(deviceData.Groups, deviceData.Devices)));
         var before = Snapshot(monitor, service);
 
         main.ToggleSidebarCommand.Execute(null);
 
-        Assert.True(main.IsSidebarCollapsed);
+        Assert.False(main.IsSidebarCollapsed);
         Assert.Equal(before, Snapshot(monitor, service));
+    }
+
+    [Fact]
+    public void MainView_DefaultsSidebarCollapsed()
+    {
+        var (monitor, _) = CreateFixture();
+        var deviceData = MockDeviceData.Create();
+        var main = new MainViewModel(
+            monitor,
+            new DeviceManagementViewModel(
+                new InMemoryDeviceCatalog(deviceData.Groups, deviceData.Devices)));
+
+        Assert.True(main.IsSidebarCollapsed);
+        Assert.Equal("实时监控", main.SelectedNavigation);
     }
 
     [Fact]
@@ -57,19 +72,29 @@ public sealed class MonitorUiStateTests
 
         monitor.ToggleDetailPanelCommand.Execute(null);
 
-        Assert.True(monitor.IsDetailPanelCollapsed);
+        Assert.False(monitor.IsDetailPanelCollapsed);
         Assert.Equal(before, Snapshot(monitor, service));
+    }
+
+    [Fact]
+    public void MonitorView_DefaultsDetailPanelCollapsed()
+    {
+        var (monitor, _) = CreateFixture();
+
+        Assert.True(monitor.IsDetailPanelCollapsed);
     }
 
     private static (MonitorViewModel ViewModel, MonitorSwitchService Service) CreateFixture()
     {
-        var groups = MockMonitorData.CreateGroups();
+        var data = MockDeviceData.Create();
+        var catalog = new InMemoryDeviceCatalog(data.Groups, data.Devices);
+        var groups = MonitorCatalogProjection.CreateGroups(catalog);
         var service = new MonitorSwitchService(
             Group(groups, "备用1"),
             Group(groups, "Z-1#巷"),
             Group(groups, "2#主溜井"));
 
-        return (new MonitorViewModel(service, groups), service);
+        return (new MonitorViewModel(service, groups, catalog), service);
     }
 
     private static string Snapshot(MonitorViewModel viewModel, MonitorSwitchService service)

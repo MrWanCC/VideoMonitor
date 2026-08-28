@@ -2,6 +2,7 @@ namespace VideoMonitor.Wpf.Playback;
 
 public enum PlaybackFailureStage
 {
+    DeviceConfigurationInvalid,
     ZlmUnavailable,
     ZlmProxyRegistrationFailed,
     ZlmStreamRegistrationTimeout,

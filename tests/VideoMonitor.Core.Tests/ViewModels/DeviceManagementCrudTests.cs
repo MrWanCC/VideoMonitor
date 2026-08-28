@@ -1,4 +1,5 @@
 using VideoMonitor.Core.Mock;
+using VideoMonitor.Core.Services;
 using VideoMonitor.Wpf.ViewModels;
 
 namespace VideoMonitor.Core.Tests.ViewModels;
@@ -32,6 +33,24 @@ public sealed class DeviceManagementCrudTests
         viewModel.SaveDeviceCommand.Execute(null);
 
         Assert.Equal("已编辑设备", original.Name);
+    }
+
+    [Fact]
+    public void EditDevice_SaveUpdatesSharedCatalogObject()
+    {
+        var data = MockDeviceData.Create();
+        var catalog = new InMemoryDeviceCatalog(data.Groups, data.Devices);
+        var viewModel = new DeviceManagementViewModel(catalog);
+        viewModel.SelectGroupCommand.Execute(
+            viewModel.Groups.Single(group => group.Name == "西401溜井"));
+        var original = viewModel.Devices[0];
+        viewModel.EditDeviceCommand.Execute(original);
+        viewModel.EditDraft.IpAddress = "192.0.2.20";
+
+        viewModel.SaveDeviceCommand.Execute(null);
+
+        Assert.Equal("192.0.2.20", catalog.GetDevice(original.Id)!.IpAddress);
+        Assert.Same(original, catalog.GetDevice(original.Id));
     }
 
     [Fact]
@@ -80,7 +99,8 @@ public sealed class DeviceManagementCrudTests
     private static DeviceManagementViewModel CreateViewModel(string selectedGroup)
     {
         var data = MockDeviceData.Create();
-        var viewModel = new DeviceManagementViewModel(data.Groups, data.Devices);
+        var viewModel = new DeviceManagementViewModel(
+            new InMemoryDeviceCatalog(data.Groups, data.Devices));
         viewModel.SelectGroupCommand.Execute(
             viewModel.Groups.Single(group => group.Name == selectedGroup));
         return viewModel;

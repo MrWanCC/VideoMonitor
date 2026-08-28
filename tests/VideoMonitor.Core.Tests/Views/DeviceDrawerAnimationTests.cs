@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using VideoMonitor.Core.Mock;
+using VideoMonitor.Core.Services;
 using VideoMonitor.Wpf;
 using VideoMonitor.Wpf.ViewModels;
 using VideoMonitor.Wpf.Views.Pages;
@@ -25,7 +26,8 @@ public sealed class DeviceDrawerAnimationTests
                 var application = new App();
                 application.InitializeComponent();
                 var data = MockDeviceData.Create();
-                var viewModel = new DeviceManagementViewModel(data.Groups, data.Devices);
+                var viewModel = new DeviceManagementViewModel(
+                    new InMemoryDeviceCatalog(data.Groups, data.Devices));
                 var view = new DeviceView { DataContext = viewModel };
                 var host = new Window
                 {

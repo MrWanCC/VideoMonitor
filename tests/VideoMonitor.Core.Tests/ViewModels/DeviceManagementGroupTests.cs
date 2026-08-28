@@ -1,4 +1,5 @@
 using VideoMonitor.Core.Mock;
+using VideoMonitor.Core.Services;
 using VideoMonitor.Wpf.ViewModels;
 
 namespace VideoMonitor.Core.Tests.ViewModels;
@@ -60,8 +61,12 @@ public sealed class DeviceManagementGroupTests
     [Fact]
     public void DeleteEmptyGroup_RequiresConfirmation()
     {
-        var viewModel = CreateViewModel("西402溜井");
-        var group = viewModel.SelectedGroup!;
+        var viewModel = CreateViewModel();
+        var root = viewModel.Groups.Single(item => item.Name == "溜井监控");
+        viewModel.BeginAddGroupCommand.Execute(root);
+        viewModel.EditingGroupName = "临时空分组";
+        viewModel.CommitGroupEditCommand.Execute(null);
+        var group = viewModel.Groups.Single(item => item.Name == "临时空分组");
 
         viewModel.DeleteGroupCommand.Execute(group);
 
@@ -88,7 +93,8 @@ public sealed class DeviceManagementGroupTests
     private static DeviceManagementViewModel CreateViewModel(string? selectedGroup = null)
     {
         var data = MockDeviceData.Create();
-        var viewModel = new DeviceManagementViewModel(data.Groups, data.Devices);
+        var viewModel = new DeviceManagementViewModel(
+            new InMemoryDeviceCatalog(data.Groups, data.Devices));
         if (selectedGroup is not null)
         {
             viewModel.SelectGroupCommand.Execute(

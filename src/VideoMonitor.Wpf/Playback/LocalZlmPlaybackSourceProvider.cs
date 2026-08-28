@@ -1,4 +1,5 @@
 using VideoMonitor.Core.Models;
+using VideoMonitor.Core.Services;
 using VideoMonitor.Infrastructure.Hikvision;
 using VideoMonitor.Infrastructure.ZLMediaKit;
 using VideoMonitor.Wpf.Configuration;
@@ -12,22 +13,22 @@ namespace VideoMonitor.Wpf.Playback;
 /// </summary>
 public sealed class LocalZlmPlaybackSourceProvider : IPlaybackSourceProvider
 {
+    private readonly IDeviceCatalog deviceCatalog;
     private readonly ZlmClient zlmClient;
     private readonly ZlmOptions zlmOptions;
-    private readonly LocalDeviceOptions localDevice;
     private readonly TimeSpan registrationTimeout;
     private readonly TimeSpan pollInterval;
 
     public LocalZlmPlaybackSourceProvider(
+        IDeviceCatalog deviceCatalog,
         ZlmClient zlmClient,
         ZlmOptions zlmOptions,
-        LocalDeviceOptions localDevice,
         TimeSpan registrationTimeout,
         TimeSpan pollInterval)
     {
+        this.deviceCatalog = deviceCatalog ?? throw new ArgumentNullException(nameof(deviceCatalog));
         this.zlmClient = zlmClient ?? throw new ArgumentNullException(nameof(zlmClient));
         this.zlmOptions = zlmOptions ?? throw new ArgumentNullException(nameof(zlmOptions));
-        this.localDevice = localDevice ?? throw new ArgumentNullException(nameof(localDevice));
         this.registrationTimeout = registrationTimeout >= TimeSpan.Zero
             ? registrationTimeout
             : throw new ArgumentOutOfRangeException(nameof(registrationTimeout));
@@ -44,10 +45,9 @@ public sealed class LocalZlmPlaybackSourceProvider : IPlaybackSourceProvider
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(channel);
 
-        var runtimeDevice = CreateRuntimeDevice(device);
-        var runtimeChannel = CreateRuntimeChannel(channel, runtimeDevice.Id);
-        var streamId = StreamIdGenerator.Generate(runtimeDevice, runtimeChannel);
-        var cameraUri = HikvisionRtspUrlBuilder.Build(runtimeDevice, runtimeChannel);
+        var (latestDevice, latestChannel) = ResolveLatest(device, channel);
+        var streamId = StreamIdGenerator.Generate(latestDevice, latestChannel);
+        var cameraUri = HikvisionRtspUrlBuilder.Build(latestDevice, latestChannel);
 
         var server = await zlmClient.CheckServerAsync(cancellationToken).ConfigureAwait(false);
         if (!server.IsSuccess)
@@ -71,7 +71,7 @@ public sealed class LocalZlmPlaybackSourceProvider : IPlaybackSourceProvider
 
         if (ContainsTargetStream(existing.Data, streamId))
         {
-            return CreateSource(channel.Id, streamId, null, ownsProxy: false);
+            return CreateSource(latestChannel.Id, streamId, null, ownsProxy: false);
         }
 
         var add = await zlmClient
@@ -91,7 +91,7 @@ public sealed class LocalZlmPlaybackSourceProvider : IPlaybackSourceProvider
             {
                 if (await WaitForStreamAsync(streamId, cancellationToken).ConfigureAwait(false))
                 {
-                    return CreateSource(channel.Id, streamId, null, ownsProxy: false);
+                    return CreateSource(latestChannel.Id, streamId, null, ownsProxy: false);
                 }
 
                 throw new PlaybackSourceException(
@@ -111,7 +111,7 @@ public sealed class LocalZlmPlaybackSourceProvider : IPlaybackSourceProvider
         {
             if (await WaitForStreamAsync(streamId, cancellationToken).ConfigureAwait(false))
             {
-                return CreateSource(channel.Id, streamId, proxyKey, ownsProxy: true);
+                return CreateSource(latestChannel.Id, streamId, proxyKey, ownsProxy: true);
             }
         }
         catch (PlaybackSourceException)
@@ -203,32 +203,26 @@ public sealed class LocalZlmPlaybackSourceProvider : IPlaybackSourceProvider
         }
     }
 
-    private CameraDevice CreateRuntimeDevice(CameraDevice source) => new()
+    private (CameraDevice Device, CameraChannel Channel) ResolveLatest(
+        CameraDevice requestedDevice,
+        CameraChannel requestedChannel)
     {
-        Id = source.Id,
-        Name = source.Name,
-        GroupId = source.GroupId,
-        IpAddress = localDevice.IpAddress,
-        SdkPort = source.SdkPort,
-        RtspPort = localDevice.RtspPort,
-        Username = localDevice.Username,
-        Password = localDevice.Password,
-        Manufacturer = source.Manufacturer,
-        Model = source.Model,
-        Status = source.Status,
-        Enabled = source.Enabled,
-        Remark = source.Remark
-    };
+        var device = deviceCatalog.GetDevice(requestedDevice.Id)
+            ?? throw new PlaybackSourceException(
+                PlaybackFailureStage.DeviceConfigurationInvalid,
+                "设备配置无效",
+                "目标设备不存在。");
+        var channel = device.Channels.SingleOrDefault(item => item.Id == requestedChannel.Id);
+        if (channel is null)
+        {
+            throw new PlaybackSourceException(
+                PlaybackFailureStage.DeviceConfigurationInvalid,
+                "设备配置无效",
+                "目标通道不存在。");
+        }
 
-    private CameraChannel CreateRuntimeChannel(CameraChannel source, Guid deviceId) => new()
-    {
-        Id = source.Id,
-        DeviceId = deviceId,
-        ChannelNo = localDevice.ChannelNo,
-        ChannelName = source.ChannelName,
-        StreamType = localDevice.StreamType,
-        Enabled = source.Enabled
-    };
+        return (device, channel);
+    }
 
     private PlaybackSource CreateSource(
         Guid channelId,

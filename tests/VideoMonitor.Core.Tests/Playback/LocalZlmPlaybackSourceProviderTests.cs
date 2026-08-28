@@ -1,10 +1,13 @@
 using System.Net;
 using System.Text.Json;
+using VideoMonitor.Core.Mock;
 using VideoMonitor.Core.Models;
+using VideoMonitor.Core.Services;
 using VideoMonitor.Core.Tests.Infrastructure;
 using VideoMonitor.Infrastructure.ZLMediaKit;
 using VideoMonitor.Wpf.Configuration;
 using VideoMonitor.Wpf.Playback;
+using VideoMonitor.Wpf.ViewModels;
 
 namespace VideoMonitor.Core.Tests.Playback;
 
@@ -41,6 +44,35 @@ public sealed class LocalZlmPlaybackSourceProviderTests
         Assert.DoesNotContain(
             handler.Requests,
             request => request.AbsolutePath.EndsWith("/delStreamProxy"));
+    }
+
+    [Fact]
+    public async Task Prepare_UsesLatestDeviceManagementConfigurationFromCatalog()
+    {
+        var handler = Responses(
+            ServerOk(),
+            EmptyMediaList(),
+            AddProxy("owned-key"),
+            MediaListWith(TargetStreamId));
+        var catalog = CreateCatalog();
+        var provider = CreateProvider(handler, catalog);
+        var management = new DeviceManagementViewModel(catalog);
+        management.SelectGroupCommand.Execute(
+            management.Groups.Single(group => group.Name == "西401溜井"));
+        var selected = Assert.Single(management.Devices);
+        management.EditDeviceCommand.Execute(selected);
+        management.EditDraft.IpAddress = "192.0.2.20";
+        management.EditDraft.RtspPort = "8554";
+        management.SaveDeviceCommand.Execute(null);
+
+        await provider.PrepareAsync(Device(), Channel(), CancellationToken.None);
+
+        Assert.Equal("192.0.2.20", catalog.GetDevice(DeviceId)!.IpAddress);
+        Assert.Equal(8554, catalog.GetDevice(DeviceId)!.RtspPort);
+        var addRequest = Assert.Single(
+            handler.Requests.Where(request => request.AbsolutePath.EndsWith("/addStreamProxy")));
+        Assert.Contains("192.0.2.20", addRequest.Query);
+        Assert.Contains("8554", addRequest.Query);
     }
 
     [Fact]
@@ -226,6 +258,7 @@ public sealed class LocalZlmPlaybackSourceProviderTests
 
     private static LocalZlmPlaybackSourceProvider CreateProvider(
         StubHttpMessageHandler handler,
+        IDeviceCatalog? catalog = null,
         TimeSpan? registrationTimeout = null,
         TimeSpan? pollInterval = null)
     {
@@ -239,20 +272,32 @@ public sealed class LocalZlmPlaybackSourceProviderTests
             RtspPort = 554
         };
         return new LocalZlmPlaybackSourceProvider(
+            catalog ?? CreateCatalog(),
             new ZlmClient(new HttpClient(handler), options),
             options,
-            new LocalDeviceOptions
-            {
-                LocalIdentifier = "camera001",
-                IpAddress = "192.0.2.20",
-                RtspPort = 554,
-                Username = "admin",
-                Password = "camera-password",
-                ChannelNo = 1,
-                StreamType = StreamType.Main
-            },
             registrationTimeout ?? TimeSpan.FromSeconds(1),
             pollInterval ?? TimeSpan.Zero);
+    }
+
+    private static IDeviceCatalog CreateCatalog()
+    {
+        var root = new DeviceGroup
+        {
+            Id = Guid.Parse("10000000-0000-0000-0000-000000000002"),
+            Name = "溜井监控",
+            Enabled = true
+        };
+        var group = new DeviceGroup
+        {
+            Id = Guid.Parse("30000000-0000-0000-0000-000000000003"),
+            Name = "西401溜井",
+            ParentId = root.Id,
+            Enabled = true
+        };
+        var device = Device();
+        device.GroupId = group.Id;
+        device.Channels.Add(Channel());
+        return new InMemoryDeviceCatalog([root, group], [device]);
     }
 
     private static CameraDevice Device() => new()

@@ -31,21 +31,34 @@ public partial class App
         }
 
         var singleCameraEnabled = playbackConfiguration?.SingleCameraTest.Enabled == true;
-        var groups = MockMonitorData.CreateGroups();
+        var deviceData = MockDeviceData.Create();
+        var deviceCatalog = new InMemoryDeviceCatalog(deviceData.Groups, deviceData.Devices);
+        if (singleCameraEnabled && playbackConfiguration?.Device is { } configuredDevice)
+        {
+            try
+            {
+                LocalDeviceCatalogOverride.Apply(deviceCatalog, configuredDevice);
+            }
+            catch (InvalidOperationException exception)
+            {
+                playbackConfigurationError = exception.Message;
+            }
+        }
+
+        var groups = MonitorCatalogProjection.CreateGroups(deviceCatalog);
         var switchService = new MonitorSwitchService(
             groups.Single(group => group.Name ==
                 (singleCameraEnabled ? "西401溜井" : "备用1")),
             groups.Single(group => group.Name == "Z-1#巷"),
             groups.Single(group => group.Name == "2#主溜井"));
-        var monitorViewModel = new MonitorViewModel(switchService, groups);
-        var deviceData = MockDeviceData.Create();
-        var deviceManagementViewModel = new DeviceManagementViewModel(deviceData.Groups, deviceData.Devices);
+        var monitorViewModel = new MonitorViewModel(switchService, groups, deviceCatalog);
+        var deviceManagementViewModel = new DeviceManagementViewModel(deviceCatalog);
         var screenService = new ScreenService();
         var mainViewModel = new MainViewModel(
             monitorViewModel,
             deviceManagementViewModel,
             screenService.HasSecondaryScreen);
-        var secondaryViewModel = new SecondaryMonitorViewModel(switchService, groups);
+        var secondaryViewModel = new SecondaryMonitorViewModel(switchService, groups, deviceCatalog);
         var mainWindow = new MainWindow(mainViewModel);
         var secondaryWindow = new SecondaryMonitorWindow(secondaryViewModel);
         var playbackCancellation = new CancellationTokenSource();
@@ -57,12 +70,13 @@ public partial class App
         var playbackStopped = false;
 
         if (singleCameraEnabled
+            && playbackConfigurationError is null
             && playbackConfiguration?.Device is { } localDevice)
         {
             try
             {
                 playbackSelection = SingleCameraPlaybackComposition.SelectDevice(
-                    deviceData,
+                    deviceCatalog,
                     localDevice);
                 zlmHttpClient = new HttpClient
                 {
@@ -70,9 +84,9 @@ public partial class App
                 };
                 var zlmClient = new ZlmClient(zlmHttpClient, playbackConfiguration.Zlm);
                 var provider = new LocalZlmPlaybackSourceProvider(
+                    deviceCatalog,
                     zlmClient,
                     playbackConfiguration.Zlm,
-                    localDevice,
                     TimeSpan.FromSeconds(6),
                     TimeSpan.FromMilliseconds(250));
                 vlcPlaybackService = new VlcPlaybackService();

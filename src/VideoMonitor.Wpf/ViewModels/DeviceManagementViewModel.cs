@@ -3,12 +3,13 @@ using System.Net;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VideoMonitor.Core.Models;
+using VideoMonitor.Core.Services;
 
 namespace VideoMonitor.Wpf.ViewModels;
 
 public sealed class DeviceManagementViewModel : ObservableObject
 {
-    private readonly ObservableCollection<CameraDevice> allDevices;
+    private readonly IDeviceCatalog catalog;
     private Guid? pendingNewGroupId;
     private Action? pendingDialogAction;
     private DeviceGroup? selectedGroup;
@@ -24,12 +25,10 @@ public sealed class DeviceManagementViewModel : ObservableObject
     private bool isEditing;
     private string validationMessage = string.Empty;
 
-    public DeviceManagementViewModel(
-        IEnumerable<DeviceGroup> groups,
-        IEnumerable<CameraDevice> devices)
+    public DeviceManagementViewModel(IDeviceCatalog catalog)
     {
-        Groups = new ObservableCollection<DeviceGroup>(groups);
-        allDevices = new ObservableCollection<CameraDevice>(devices);
+        this.catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
+        Groups = [];
         Devices = [];
         GroupSections = [];
         EditDraft = new DeviceEditDraftViewModel();
@@ -48,10 +47,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
         SaveDeviceCommand = new RelayCommand(SaveDevice);
         CancelEditCommand = new RelayCommand(CancelEdit);
 
-        selectedGroup = Groups.FirstOrDefault(group => group.Name == "备用1" && group.ParentId is not null)
-            ?? Groups.Where(group => group.ParentId is not null).OrderBy(group => group.Sort).FirstOrDefault();
-        RebuildGroupSections();
-        RefreshDevices();
+        catalog.Changed += OnCatalogChanged;
+        RefreshCatalogView();
     }
 
     public ObservableCollection<DeviceGroup> Groups { get; }
@@ -213,7 +210,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
 
         var keyword = SearchKeyword.Trim();
-        foreach (var device in allDevices.Where(device =>
+        foreach (var device in catalog.GetDevices(SelectedGroup.Id).Where(device =>
                      device.GroupId == SelectedGroup.Id
                      && (keyword.Length == 0
                          || device.Name.Contains(keyword, StringComparison.OrdinalIgnoreCase)
@@ -238,7 +235,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
             Sort = Groups.Where(item => item.ParentId == root.Id).Select(item => item.Sort).DefaultIfEmpty().Max() + 1,
             Enabled = true
         };
-        Groups.Add(group);
+        catalog.AddGroup(group);
         pendingNewGroupId = group.Id;
         EditingGroupId = group.Id;
         EditingGroupName = string.Empty;
@@ -297,7 +294,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
 
         group.Name = name;
-        SelectedGroup = group;
+        catalog.UpdateGroup(group);
+        SelectedGroup = Groups.First(item => item.Id == group.Id);
         ClearGroupEditState();
         RebuildGroupSections();
     }
@@ -306,11 +304,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
     {
         if (pendingNewGroupId is { } pendingId)
         {
-            var pending = Groups.FirstOrDefault(group => group.Id == pendingId);
-            if (pending is not null)
-            {
-                Groups.Remove(pending);
-            }
+            catalog.DeleteGroup(pendingId);
         }
 
         ClearGroupEditState();
@@ -324,7 +318,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
             return;
         }
 
-        if (allDevices.Any(device => device.GroupId == group.Id))
+        if (catalog.GetDevices(group.Id).Count > 0)
         {
             ShowDialog(
                 DeviceDialogMode.Information,
@@ -338,7 +332,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
             $"确定删除分组“{group.Name}”吗？",
             () =>
             {
-                Groups.Remove(group);
+                catalog.DeleteGroup(group.Id);
                 if (SelectedGroup?.Id == group.Id)
                 {
                     selectedGroup = Groups.FirstOrDefault(item => item.Name == "备用1" && item.ParentId is not null)
@@ -439,13 +433,15 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
         if (IsEditing && SelectedDevice is not null)
         {
-            ApplyDraft(SelectedDevice, groupId, sdkPort, rtspPort, channelNo);
+            var updated = Clone(SelectedDevice);
+            ApplyDraft(updated, groupId, sdkPort, rtspPort, channelNo);
+            catalog.UpdateDevice(updated);
         }
         else
         {
             var device = new CameraDevice { Id = Guid.NewGuid() };
             ApplyDraft(device, groupId, sdkPort, rtspPort, channelNo);
-            allDevices.Add(device);
+            catalog.AddDevice(device);
         }
 
         CloseEditor();
@@ -572,7 +568,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
             $"确定删除设备“{device.Name}”吗？",
             () =>
             {
-                allDevices.Remove(device);
+                catalog.DeleteDevice(device.Id);
                 if (ReferenceEquals(SelectedDevice, device))
                 {
                     CloseEditor();
@@ -580,5 +576,62 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
                 RefreshDevices();
             });
+    }
+
+    private void OnCatalogChanged(object? sender, EventArgs e) => RefreshCatalogView();
+
+    private void RefreshCatalogView()
+    {
+        var selectedGroupId = selectedGroup?.Id;
+        Groups.Clear();
+        foreach (var group in catalog.GetGroups())
+        {
+            Groups.Add(group);
+        }
+
+        selectedGroup = selectedGroupId is { } id
+            ? Groups.FirstOrDefault(group => group.Id == id)
+            : null;
+        selectedGroup ??= Groups.FirstOrDefault(group => group.Name == "备用1" && group.ParentId is not null)
+            ?? Groups.Where(group => group.ParentId is not null).OrderBy(group => group.Sort).FirstOrDefault();
+        OnPropertyChanged(nameof(SelectedGroup));
+        RebuildGroupSections();
+        RefreshDevices();
+    }
+
+    private static CameraDevice Clone(CameraDevice source)
+    {
+        var clone = new CameraDevice
+        {
+            Id = source.Id,
+            Name = source.Name,
+            GroupId = source.GroupId,
+            IpAddress = source.IpAddress,
+            SdkPort = source.SdkPort,
+            RtspPort = source.RtspPort,
+            Username = source.Username,
+            Password = source.Password,
+            Manufacturer = source.Manufacturer,
+            Model = source.Model,
+            TransportMode = source.TransportMode,
+            Status = source.Status,
+            Enabled = source.Enabled,
+            Remark = source.Remark
+        };
+        foreach (var channel in source.Channels)
+        {
+            clone.Channels.Add(new CameraChannel
+            {
+                Id = channel.Id,
+                DeviceId = channel.DeviceId,
+                ChannelNo = channel.ChannelNo,
+                ChannelName = channel.ChannelName,
+                StreamType = channel.StreamType,
+                StreamId = channel.StreamId,
+                Enabled = channel.Enabled
+            });
+        }
+
+        return clone;
     }
 }
