@@ -111,11 +111,33 @@
                                     <ItemsControl ItemsSource="{Binding Children}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Border x:Name="GroupRow" Height="36" Margin="8,1,0,1"
+                                                <Button x:Name="GroupRow" Height="36" Margin="8,1,0,1"
                                                         Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
-                                                        CornerRadius="5"
-                                                        Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                                                    <Border.ContextMenu>
+                                                        Cursor="Hand"
+                                                        Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        Command="{Binding Tag.SelectGroupCommand, RelativeSource={RelativeSource Self}}"
+                                                        CommandParameter="{Binding Group}">
+                                                    <Button.Style>
+                                                        <Style TargetType="Button">
+                                                            <Setter Property="Padding" Value="0" />
+                                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                                                            <Setter Property="Template">
+                                                                <Setter.Value>
+                                                                    <ControlTemplate TargetType="Button">
+                                                                        <Border Background="{TemplateBinding Background}"
+                                                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                                                CornerRadius="5">
+                                                                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                                                                        </Border>
+                                                                    </ControlTemplate>
+                                                                </Setter.Value>
+                                                            </Setter>
+                                                        </Style>
+                                                    </Button.Style>
+                                                    <Button.ContextMenu>
                                                         <ContextMenu Background="{StaticResource PanelBackgroundBrush}"
                                                                      BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
                                                             <MenuItem Header="重命名"
@@ -125,11 +147,8 @@
                                                                       Command="{Binding PlacementTarget.Tag.DeleteGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                                       CommandParameter="{Binding PlacementTarget.DataContext.Group, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                                         </ContextMenu>
-                                                    </Border.ContextMenu>
+                                                    </Button.ContextMenu>
                                                     <Grid Margin="10,0,5,0">
-                                                        <Button Background="Transparent" BorderThickness="0" Cursor="Hand"
-                                                                Command="{Binding DataContext.SelectGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                                CommandParameter="{Binding Group}" />
                                                         <Grid Margin="5,0,0,0" IsHitTestVisible="False">
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="15" />
@@ -146,7 +165,7 @@
                                                                  Visibility="Collapsed" Loaded="OnGroupEditorLoaded"
                                                                  KeyDown="OnGroupEditorKeyDown" LostFocus="OnGroupEditorLostFocus" />
                                                     </Grid>
-                                                </Border>
+                                                </Button>
                                                 <DataTemplate.Triggers>
                                                     <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                                         <Setter TargetName="GroupRow" Property="Background" Value="{StaticResource SelectedRowBrush}" />
