@@ -5,3 +5,5 @@
 TestResults/
 *.user
 *.suo
+src/VideoMonitor.Wpf/appsettings.Development.json
+src/VideoMonitor.Wpf/local-device.json

@@ -1,0 +1,9 @@
+{
+  "LocalIdentifier": "camera001",
+  "IpAddress": "192.0.2.20",
+  "RtspPort": 554,
+  "Username": "admin",
+  "Password": "CHANGE_ME",
+  "ChannelNo": 1,
+  "StreamType": "Main"
+}

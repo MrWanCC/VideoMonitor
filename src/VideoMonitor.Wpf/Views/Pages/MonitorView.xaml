@@ -1,0 +1,117 @@
+<UserControl x:Class="VideoMonitor.Wpf.Views.Pages.MonitorView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:VideoMonitor.Wpf.Controls"
+             xmlns:converters="clr-namespace:VideoMonitor.Wpf.Converters">
+    <UserControl.Resources>
+        <converters:CameraStatusToTextConverter x:Key="StatusTextConverter" />
+        <converters:CameraStatusToBrushConverter x:Key="StatusBrushConverter" />
+    </UserControl.Resources>
+    <Grid Background="{StaticResource WindowBackgroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition x:Name="MonitorHeaderRow" Height="48" />
+            <RowDefinition Height="*" />
+            <RowDefinition x:Name="DetailRow" Height="104" />
+        </Grid.RowDefinitions>
+
+        <Border x:Name="MonitorHeader" Height="{StaticResource PageToolbarHeight}" VerticalAlignment="Center"
+                Background="{StaticResource PanelBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1" CornerRadius="5">
+            <Grid Margin="12,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Path Width="17" Height="17" VerticalAlignment="Center" Data="{StaticResource IconMonitor}" Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1.5" Stretch="Uniform" />
+                    <TextBlock Margin="8,0" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" Text="溜井监控" />
+                    <Path Width="8" Height="8" VerticalAlignment="Center" Data="{StaticResource IconChevron}" Stroke="{StaticResource MutedTextBrush}" StrokeThickness="1.5" Stretch="Uniform" />
+                    <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="{StaticResource FontSizePageTitle}" FontWeight="SemiBold" Text="{Binding CurrentChuteName}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="-4,0,-4,2">
+            <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+            <controls:VideoTile x:Name="MainTile1" Grid.Row="0" Grid.Column="0" DataContext="{Binding MainTiles[0]}" MouseDoubleClick="OnVideoTileMouseDoubleClick" />
+            <controls:VideoTile x:Name="MainTile2" Grid.Row="0" Grid.Column="1" DataContext="{Binding MainTiles[1]}" MouseDoubleClick="OnVideoTileMouseDoubleClick" />
+            <controls:VideoTile x:Name="MainTile3" Grid.Row="1" Grid.Column="0" DataContext="{Binding MainTiles[2]}" MouseDoubleClick="OnVideoTileMouseDoubleClick" />
+            <controls:VideoTile x:Name="MainTile4" Grid.Row="1" Grid.Column="1" DataContext="{Binding MainTiles[3]}" MouseDoubleClick="OnVideoTileMouseDoubleClick" />
+        </Grid>
+
+        <Border x:Name="DetailPanel" Grid.Row="2" Margin="0,2,0,6" Style="{StaticResource PanelBorderStyle}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="36" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid Height="{StaticResource DetailTabHeight}" Margin="12,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBlueBrush}" Text="当前监控信息" />
+                    <StackPanel Grid.Column="1" Margin="24,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}">
+                            <Run Text="当前溜井：" /><Run Text="{Binding CurrentChuteName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" />
+                        </TextBlock>
+                        <TextBlock Margin="20,0,0,0" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}">
+                            <Run Text="当前巷道：" /><Run Text="{Binding CurrentTunnelName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" />
+                        </TextBlock>
+                        <TextBlock Margin="20,0,0,0" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}">
+                            <Run Text="当前画面：" /><Run Text="{Binding SelectedVideoSlot.GroupName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" /><Run Text=" · 通道" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" /><Run Text="{Binding SelectedVideoSlot.ChannelNumber, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" />
+                        </TextBlock>
+                    </StackPanel>
+                    <Button Grid.Column="2" AutomationProperties.AutomationId="ToggleDetailPanelButton"
+                            Command="{Binding ToggleDetailPanelCommand}" Style="{StaticResource IconButtonStyle}" ToolTip="折叠/展开当前监控信息">
+                        <Path Width="12" Height="12" Data="{StaticResource IconChevron}"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="1.5" Stretch="Uniform" RenderTransformOrigin=".5,.5">
+                            <Path.Style>
+                                <Style TargetType="Path">
+                                    <Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="90" /></Setter.Value></Setter>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsDetailPanelCollapsed}" Value="True">
+                                            <Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="-90" /></Setter.Value></Setter>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Path.Style>
+                        </Path>
+                    </Button>
+                </Grid>
+
+                <Grid Grid.Row="1" Margin="12,2">
+                    <Grid.Style>
+                        <Style TargetType="Grid">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsDetailPanelCollapsed}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Grid.Style>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.15*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="1.15*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="摄像头"/><TextBlock Grid.Column="1" VerticalAlignment="Center" FontWeight="SemiBold"><Run Text="{Binding SelectedVideoSlot.GroupName, Mode=OneWay}"/><Run Text=" · 通道"/><Run Text="{Binding SelectedVideoSlot.ChannelNumber, Mode=OneWay}"/></TextBlock></Grid>
+                        <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="IP 地址"/><TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding SelectedVideoSlot.IpAddress}"/></Grid>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Margin="20,0,0,0" VerticalAlignment="Center">
+                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="状态"/><StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Ellipse Width="8" Height="8" Margin="0,0,7,0" Fill="{Binding SelectedVideoSlot.Status, Converter={StaticResource StatusBrushConverter}}"/><TextBlock VerticalAlignment="Center" Foreground="{Binding SelectedVideoSlot.Status, Converter={StaticResource StatusBrushConverter}}" Text="{Binding SelectedVideoSlot.Status, Converter={StaticResource StatusTextConverter}}"/></StackPanel></Grid>
+                        <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="码流"/><TextBlock Grid.Column="1" VerticalAlignment="Center" FontWeight="SemiBold" Text="{Binding SelectedVideoSlot.StreamType}"/></Grid>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Margin="20,0,0,0" VerticalAlignment="Center">
+                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="码率"/><TextBlock Grid.Column="1" VerticalAlignment="Center" FontWeight="SemiBold" Text="{Binding SelectedVideoSlot.Bitrate}"/></Grid>
+                        <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="分辨率"/><TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding SelectedVideoSlot.Resolution}"/></Grid>
+                    </StackPanel>
+                    <StackPanel Grid.Column="3" Margin="20,0,0,0" VerticalAlignment="Center">
+                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="通道"/><TextBlock Grid.Column="1" VerticalAlignment="Center" FontWeight="SemiBold" Text="{Binding SelectedVideoSlot.ChannelNumber, StringFormat=通道{0}}"/></Grid>
+                        <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock VerticalAlignment="Center" Style="{StaticResource MutedTextStyle}" Text="更新时间"/><TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding SelectedVideoSlot.Timestamp}"/></Grid>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
