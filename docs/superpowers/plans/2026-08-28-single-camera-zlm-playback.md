@@ -79,7 +79,7 @@ public void Generate_IsStableAndIndependentOfMutableFields()
     device.IpAddress = "10.0.0.20";
     device.Username = "other";
     var after = StreamIdGenerator.Generate(device, channel);
-    Assert.Equal("device_50000000000000000000000000000001_channel_1", before);
+    Assert.Equal("device_50000000000000000000000000000001_channel_1_main", before);
     Assert.Equal(before, after);
 }
 
@@ -113,7 +113,7 @@ public static Uri Build(CameraDevice device, CameraChannel channel)
 }
 
 public static string Generate(CameraDevice device, CameraChannel channel) =>
-    $"device_{device.Id:N}_channel_{channel.ChannelNo}";
+    $"device_{device.Id:N}_channel_{channel.ChannelNo}_{channel.StreamType.ToString().ToLowerInvariant()}";
 ```
 
 - [ ] **Step 5: Run focused tests and commit**

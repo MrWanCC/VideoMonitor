@@ -15,7 +15,7 @@ public sealed class LocalZlmPlaybackSourceProviderTests
     private static readonly Guid ChannelId =
         Guid.Parse("60000000-0000-0000-0000-000000000001");
     private const string TargetStreamId =
-        "device_50000000000000000000000000000001_channel_1";
+        "device_50000000000000000000000000000001_channel_1_main";
 
     [Fact]
     public async Task Prepare_WhenStreamAlreadyExists_ReusesWithoutOwnership()

@@ -17,6 +17,6 @@ public static class StreamIdGenerator
                 "通道号必须大于零。");
         }
 
-        return $"device_{device.Id:N}_channel_{channel.ChannelNo}";
+        return $"device_{device.Id:N}_channel_{channel.ChannelNo}_{channel.StreamType.ToString().ToLowerInvariant()}";
     }
 }

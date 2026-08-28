@@ -50,7 +50,7 @@
 
 ZLM StreamId 使用：
 
-`device_{deviceId:N}_channel_{channelNo}`
+`device_{deviceId:N}_channel_{channelNo}_{streamType}`
 
 其中 `deviceId` 是 `CameraDevice.Id` 的无连字符 GUID，`channelNo` 是通道号。规则只含 ASCII 字母、数字和下划线，不包含中文名称、IP、用户名或密码。设备重命名、IP 或账号变化不会改变 StreamId。
 

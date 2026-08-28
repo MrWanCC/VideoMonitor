@@ -20,8 +20,27 @@ public sealed class StreamIdGeneratorTests
         device.Username = "other";
         var after = StreamIdGenerator.Generate(device, channel);
 
-        Assert.Equal("device_50000000000000000000000000000001_channel_1", before);
+        Assert.Equal("device_50000000000000000000000000000001_channel_1_main", before);
         Assert.Equal(before, after);
+    }
+
+    [Fact]
+    public void Generate_DistinguishesMainAndSubStreams()
+    {
+        var device = CreateDevice(
+            Guid.Parse("50000000-0000-0000-0000-000000000001"),
+            "Camera 01",
+            "192.168.0.2");
+
+        var main = StreamIdGenerator.Generate(
+            device,
+            CreateChannel(device.Id, 1, StreamType.Main));
+        var sub = StreamIdGenerator.Generate(
+            device,
+            CreateChannel(device.Id, 1, StreamType.Sub));
+
+        Assert.Equal("device_50000000000000000000000000000001_channel_1_main", main);
+        Assert.Equal("device_50000000000000000000000000000001_channel_1_sub", sub);
     }
 
     [Fact]
@@ -42,10 +61,14 @@ public sealed class StreamIdGeneratorTests
         Username = "admin"
     };
 
-    private static CameraChannel CreateChannel(Guid deviceId, int channelNo) => new()
+    private static CameraChannel CreateChannel(
+        Guid deviceId,
+        int channelNo,
+        StreamType streamType = StreamType.Main) => new()
     {
         Id = Guid.NewGuid(),
         DeviceId = deviceId,
-        ChannelNo = channelNo
+        ChannelNo = channelNo,
+        StreamType = streamType
     };
 }
