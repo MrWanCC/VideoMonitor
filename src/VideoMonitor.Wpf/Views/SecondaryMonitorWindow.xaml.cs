@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using VideoMonitor.Wpf.ViewModels;
 
 namespace VideoMonitor.Wpf.Views;
@@ -7,6 +8,10 @@ public partial class SecondaryMonitorWindow
     private const double RestoredHeight = 540d;
     private System.Windows.ResizeMode restoredResizeMode;
     private System.Windows.Rect restoredBounds;
+
+    public bool AllowSecondaryWindowClose { get; set; }
+
+    public event EventHandler? HiddenByUser;
 
     public SecondaryMonitorWindow(SecondaryMonitorViewModel viewModel)
     {
@@ -42,6 +47,18 @@ public partial class SecondaryMonitorWindow
         MaxHeight = double.PositiveInfinity;
         ResizeMode = System.Windows.ResizeMode.CanResize;
         WindowState = System.Windows.WindowState.Maximized;
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!AllowSecondaryWindowClose)
+        {
+            e.Cancel = true;
+            Hide();
+            HiddenByUser?.Invoke(this, EventArgs.Empty);
+        }
+
+        base.OnClosing(e);
     }
 
     private void CloseWindow(object sender, System.Windows.RoutedEventArgs e) => Close();

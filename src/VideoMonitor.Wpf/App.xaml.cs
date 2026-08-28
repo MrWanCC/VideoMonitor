@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using VideoMonitor.Core.Mock;
 using VideoMonitor.Core.Services;
@@ -20,18 +21,49 @@ public partial class App
         var monitorViewModel = new MonitorViewModel(switchService, groups);
         var deviceData = MockDeviceData.Create();
         var deviceManagementViewModel = new DeviceManagementViewModel(deviceData.Groups, deviceData.Devices);
-        var mainViewModel = new MainViewModel(monitorViewModel, deviceManagementViewModel);
-        var secondaryViewModel = new SecondaryMonitorViewModel(switchService, groups);
         var screenService = new ScreenService();
+        var mainViewModel = new MainViewModel(
+            monitorViewModel,
+            deviceManagementViewModel,
+            screenService.HasSecondaryScreen);
+        var secondaryViewModel = new SecondaryMonitorViewModel(switchService, groups);
         var mainWindow = new MainWindow(mainViewModel);
         var secondaryWindow = new SecondaryMonitorWindow(secondaryViewModel);
 
         mainWindow.SourceInitialized += (_, _) => screenService.PlaceMainWindow(mainWindow);
-        secondaryWindow.SourceInitialized += (_, _) => screenService.PlaceSecondaryWindow(secondaryWindow);
-        mainWindow.Closed += (_, _) => secondaryWindow.Close();
+
+        void ApplySecondaryScreenVisibility()
+        {
+            if (!mainViewModel.IsSecondaryScreenVisible)
+            {
+                secondaryWindow.Hide();
+                return;
+            }
+
+            screenService.PlaceSecondaryWindow(secondaryWindow);
+            secondaryWindow.Show();
+            secondaryWindow.Activate();
+        }
+
+        void OnMainViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
+        {
+            if (args.PropertyName == nameof(MainViewModel.IsSecondaryScreenVisible))
+            {
+                ApplySecondaryScreenVisibility();
+            }
+        }
+
+        mainViewModel.PropertyChanged += OnMainViewModelPropertyChanged;
+        secondaryWindow.HiddenByUser += (_, _) => mainViewModel.IsSecondaryScreenVisible = false;
+        mainWindow.Closing += (_, _) =>
+        {
+            mainViewModel.PropertyChanged -= OnMainViewModelPropertyChanged;
+            secondaryWindow.AllowSecondaryWindowClose = true;
+            secondaryWindow.Close();
+        };
 
         MainWindow = mainWindow;
         mainWindow.Show();
-        secondaryWindow.Show();
+        ApplySecondaryScreenVisibility();
     }
 }

@@ -88,14 +88,44 @@
                         </Grid>
                     </Border>
                     <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Stretch">
-                        <StackPanel Margin="0,0,18,0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <StackPanel Margin="0,0,12,0" Orientation="Horizontal" VerticalAlignment="Center">
                             <Ellipse Width="8" Height="8" Fill="{StaticResource OnlineGreenBrush}" />
                             <TextBlock Margin="8,0,0,0" Foreground="{StaticResource SecondaryTextBrush}" FontSize="{StaticResource FontSizeAuxiliary}" Text="系统运行正常" />
                         </StackPanel>
-                        <Border Width="1" Height="26" Margin="0,0,14,0" Background="{StaticResource SeparatorBrush}" VerticalAlignment="Center" />
-                        <StackPanel Margin="0,0,12,0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Width="1" Height="26" Margin="0,0,10,0" Background="{StaticResource SeparatorBrush}" VerticalAlignment="Center" />
+                        <StackPanel Margin="0,0,10,0" Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="{StaticResource FontSizeAuxiliary}" Text="当前站点:" />
                             <TextBlock Margin="7,0,0,0" FontWeight="SemiBold" Text="卸矿站" />
+                        </StackPanel>
+                        <Border Width="1" Height="26" Margin="0,0,10,0" Background="{StaticResource SeparatorBrush}" VerticalAlignment="Center" />
+                        <StackPanel Margin="0,0,12,0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}"
+                                       FontSize="{StaticResource FontSizeAuxiliary}" Text="信号联动" />
+                            <ToggleButton Margin="7,0,0,0" AutomationProperties.AutomationId="SignalLinkageToggle"
+                                          AutomationProperties.Name="信号联动" Command="{Binding ToggleSignalLinkageCommand}"
+                                          IsChecked="{Binding IsSignalLinkageEnabled, Mode=OneWay}"
+                                          shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                                <ToggleButton.Style>
+                                    <Style TargetType="ToggleButton" BasedOn="{StaticResource CompactToggleSwitchStyle}">
+                                        <Setter Property="ToolTip" Value="PLC信号不会自动切换监控画面" />
+                                        <Style.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter Property="ToolTip" Value="允许PLC信号自动切换监控画面（通讯功能待接入）" />
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ToggleButton.Style>
+                            </ToggleButton>
+                        </StackPanel>
+                        <StackPanel Margin="0,0,8,0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}"
+                                       FontSize="{StaticResource FontSizeAuxiliary}" Text="副屏" />
+                            <ToggleButton Margin="7,0,0,0" AutomationProperties.AutomationId="SecondaryScreenToggle"
+                                          AutomationProperties.Name="副屏" Command="{Binding ToggleSecondaryScreenCommand}"
+                                          IsChecked="{Binding IsSecondaryScreenVisible, Mode=OneWay}"
+                                          ToolTip="显示或隐藏卸矿站监控窗口"
+                                          Style="{StaticResource CompactToggleSwitchStyle}"
+                                          shell:WindowChrome.IsHitTestVisibleInChrome="True" />
                         </StackPanel>
                         <Button AutomationProperties.AutomationId="MonitorFullscreenButton" AutomationProperties.Name="全屏"
                                 Command="{Binding ToggleFullscreenCommand}" ToolTip="全屏" Style="{StaticResource HeaderToolButtonStyle}"
