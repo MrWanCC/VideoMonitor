@@ -16,6 +16,7 @@ public sealed class MonitorViewModel : ObservableObject
     private bool isSingleTileMode;
     private bool isDetailPanelCollapsed = true;
     private VideoTileViewModel selectedVideoSlot = null!;
+    private IReadOnlyList<MonitorGroup> groups = [];
 
     public MonitorViewModel(
         MonitorSwitchService switchService,
@@ -47,7 +48,11 @@ public sealed class MonitorViewModel : ObservableObject
         }
     }
 
-    public IReadOnlyList<MonitorGroup> Groups { get; }
+    public IReadOnlyList<MonitorGroup> Groups
+    {
+        get => groups;
+        private set => SetProperty(ref groups, value);
+    }
 
     public ObservableCollection<VideoTileViewModel> MainTiles { get; }
 
@@ -166,19 +171,69 @@ public sealed class MonitorViewModel : ObservableObject
 
     private void OnLayoutChanged(object? sender, MonitorLayoutSnapshot snapshot) => Render(snapshot);
 
-    private void OnCatalogChanged(object? sender, EventArgs e) => Render(switchService.Current);
+    private void OnCatalogChanged(object? sender, EventArgs e)
+    {
+        RefreshCatalogProjection();
+        Render(switchService.Current);
+    }
 
     private void Render(MonitorLayoutSnapshot snapshot)
     {
+        var mainCameras = snapshot.MainSlots
+            .Select(ResolveProjectedCamera)
+            .ToArray();
         for (var index = 0; index < MainTiles.Count; index++)
         {
-            var camera = snapshot.MainSlots[index];
+            var camera = mainCameras[index];
             var device = deviceCatalog.GetDevice(camera.DeviceId);
             var channel = device?.Channels.SingleOrDefault(item => item.Id == camera.ChannelId);
             MainTiles[index].Update(camera, device, channel);
         }
 
-        CurrentChuteName = snapshot.MainSlots[0].GroupName;
-        CurrentTunnelName = snapshot.MainSlots[3].GroupName;
+        CurrentChuteName = mainCameras[0].GroupName;
+        CurrentTunnelName = mainCameras[3].GroupName;
     }
+
+    private void RefreshCatalogProjection()
+    {
+        var expandedSections = TreeSections.ToDictionary(
+            section => section.Name,
+            section => section.IsExpanded);
+        var selectedGroupId = selectedTreeItem?.Group?.GroupId;
+        if (selectedTreeItem is not null)
+        {
+            selectedTreeItem.IsSelected = false;
+        }
+
+        var refreshedGroups = MonitorCatalogProjection.CreateGroups(deviceCatalog);
+        Groups = refreshedGroups;
+        TreeSections.Clear();
+        selectedTreeItem = null;
+
+        foreach (var section in CreateTree(refreshedGroups))
+        {
+            if (expandedSections.TryGetValue(section.Name, out var isExpanded))
+            {
+                section.IsExpanded = isExpanded;
+            }
+
+            var selectedItem = section.Children.FirstOrDefault(item =>
+                item.Group?.GroupId == selectedGroupId);
+            if (selectedItem is not null)
+            {
+                selectedItem.IsSelected = true;
+                selectedTreeItem = selectedItem;
+            }
+
+            TreeSections.Add(section);
+        }
+    }
+
+    private CameraInfo ResolveProjectedCamera(CameraInfo camera) =>
+        Groups
+            .SelectMany(group => group.Cameras)
+            .FirstOrDefault(item =>
+                item.DeviceId == camera.DeviceId
+                && item.ChannelId == camera.ChannelId)
+        ?? camera;
 }

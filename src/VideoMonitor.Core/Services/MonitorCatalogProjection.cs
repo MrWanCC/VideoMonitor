@@ -43,7 +43,10 @@ public static class MonitorCatalogProjection
             })
             .ToArray();
 
-        return new MonitorGroup(group.Name, type, cameras);
+        return new MonitorGroup(group.Name, type, cameras)
+        {
+            GroupId = group.Id
+        };
     }
 
     private static MonitorGroupType GetMonitorGroupType(

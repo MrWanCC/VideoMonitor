@@ -10,7 +10,7 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
 {
     private readonly IDeviceCatalog deviceCatalog;
     private readonly MonitorSwitchService switchService;
-    private readonly IReadOnlyList<MonitorGroup> groups;
+    private IReadOnlyList<MonitorGroup> groups;
     private string currentGroupName = string.Empty;
 
     public SecondaryMonitorViewModel(
@@ -53,18 +53,33 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
 
     private void OnLayoutChanged(object? sender, MonitorLayoutSnapshot snapshot) => Render(snapshot);
 
-    private void OnCatalogChanged(object? sender, EventArgs e) => Render(switchService.Current);
+    private void OnCatalogChanged(object? sender, EventArgs e)
+    {
+        groups = MonitorCatalogProjection.CreateGroups(deviceCatalog);
+        Render(switchService.Current);
+    }
 
     private void Render(MonitorLayoutSnapshot snapshot)
     {
+        var secondaryCameras = snapshot.SecondarySlots
+            .Select(ResolveProjectedCamera)
+            .ToArray();
         for (var index = 0; index < Tiles.Count; index++)
         {
-            var camera = snapshot.SecondarySlots[index];
+            var camera = secondaryCameras[index];
             var device = deviceCatalog.GetDevice(camera.DeviceId);
             var channel = device?.Channels.SingleOrDefault(item => item.Id == camera.ChannelId);
             Tiles[index].Update(camera, device, channel);
         }
 
-        CurrentGroupName = snapshot.SecondarySlots[0].GroupName;
+        CurrentGroupName = secondaryCameras[0].GroupName;
     }
+
+    private CameraInfo ResolveProjectedCamera(CameraInfo camera) =>
+        groups
+            .SelectMany(group => group.Cameras)
+            .FirstOrDefault(item =>
+                item.DeviceId == camera.DeviceId
+                && item.ChannelId == camera.ChannelId)
+        ?? camera;
 }

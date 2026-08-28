@@ -1,4 +1,5 @@
 using VideoMonitor.Core.Mock;
+using VideoMonitor.Core.Models;
 using VideoMonitor.Core.Services;
 
 namespace VideoMonitor.Core.Tests.Services;
@@ -20,6 +21,19 @@ public sealed class MonitorCatalogProjectionTests
         Assert.Equal(new[] { 1, 2, 3 }, west401.Cameras.Select(camera => camera.ChannelNumber));
         Assert.Equal(3, groups.Single(group => group.Name == "2#主溜井").Cameras.Count);
         Assert.Single(groups.Single(group => group.Name == "Z-1#巷").Cameras);
+    }
+
+    [Fact]
+    public void CreateGroups_PreservesStableSourceGroupId()
+    {
+        var data = MockDeviceData.Create();
+        var catalog = new InMemoryDeviceCatalog(data.Groups, data.Devices);
+        var sourceGroup = data.Groups.Single(group => group.Name == "西401溜井");
+
+        var projectedGroup = MonitorCatalogProjection.CreateGroups(catalog)
+            .Single(group => group.Name == sourceGroup.Name);
+
+        Assert.Equal(sourceGroup.Id, projectedGroup.GroupId);
     }
 
     [Fact]
