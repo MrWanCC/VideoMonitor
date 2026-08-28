@@ -3,6 +3,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:converters="clr-namespace:VideoMonitor.Wpf.Converters"
              xmlns:models="clr-namespace:VideoMonitor.Core.Models;assembly=VideoMonitor.Core"
+             xmlns:playback="clr-namespace:VideoMonitor.Wpf.Playback"
+             xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
              MinWidth="240" MinHeight="170" SnapsToDevicePixels="True">
     <UserControl.Resources>
         <converters:CameraStatusToTextConverter x:Key="StatusTextConverter" />
@@ -20,6 +22,28 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <ControlTemplate x:Key="VideoOverlayTemplate" TargetType="ContentControl">
+            <Grid IsHitTestVisible="False">
+                <Border Margin="10" Padding="7,4" HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Background="{StaticResource OverlayBrush}" CornerRadius="3">
+                    <TextBlock FontSize="{StaticResource FontSizeAuxiliary}"
+                               Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding Timestamp}" />
+                </Border>
+                <Border Margin="10" Padding="8,4" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                        Background="{StaticResource OverlayBrush}" CornerRadius="3">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="6" Height="6" Margin="0,0,7,0" Fill="{StaticResource OnlineGreenBrush}" />
+                        <TextBlock FontSize="{StaticResource FontSizeAuxiliary}" Text="{Binding Bitrate}" />
+                    </StackPanel>
+                </Border>
+                <Border Margin="10" Padding="8,4" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                        Background="{StaticResource PrimaryBlueMutedBrush}" BorderBrush="{StaticResource PrimaryBlueBrush}"
+                        BorderThickness="1" CornerRadius="4">
+                    <TextBlock FontSize="{StaticResource FontSizeAuxiliary}"
+                               Foreground="{StaticResource PrimaryBlueBrush}" Text="{Binding StreamType}" />
+                </Border>
+            </Grid>
+        </ControlTemplate>
     </UserControl.Resources>
 
     <Border Margin="4" Style="{StaticResource VideoCardStyle}" ClipToBounds="True">
@@ -52,34 +76,90 @@
             <Border Grid.Row="1" Background="{StaticResource VideoBackgroundBrush}"
                     BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
                 <Grid>
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.82">
-                        <Path Width="50" Height="42" Data="{StaticResource IconCamera}"
-                              Stroke="{StaticResource MutedTextBrush}" StrokeThickness="1.2" Stretch="Uniform" />
-                        <TextBlock Margin="0,12,0,0" HorizontalAlignment="Center"
-                                   Foreground="{StaticResource SecondaryTextBrush}" FontSize="{StaticResource FontSizeBody}"
-                                   FontWeight="SemiBold" Text="模拟视频画面" />
-                        <TextBlock Margin="0,5,0,0" HorizontalAlignment="Center" Style="{StaticResource MutedTextStyle}">
-                            <Run Text="CH " /><Run Text="{Binding ChannelNumber, Mode=OneWay}" />
-                        </TextBlock>
-                    </StackPanel>
-                    <Border Margin="10" Padding="7,4" HorizontalAlignment="Left" VerticalAlignment="Top"
-                            Background="{StaticResource OverlayBrush}" CornerRadius="3">
-                        <TextBlock FontSize="{StaticResource FontSizeAuxiliary}"
-                                   Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding Timestamp}" />
-                    </Border>
-                    <Border Margin="10" Padding="8,4" HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                            Background="{StaticResource OverlayBrush}" CornerRadius="3">
-                        <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="6" Height="6" Margin="0,0,7,0" Fill="{StaticResource OnlineGreenBrush}" />
-                            <TextBlock FontSize="{StaticResource FontSizeAuxiliary}" Text="{Binding Bitrate}" />
+                    <vlc:VideoView MediaPlayer="{Binding PlaybackSession.MediaPlayer}">
+                        <vlc:VideoView.Style>
+                            <Style TargetType="vlc:VideoView">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding PlaybackState}"
+                                                 Value="{x:Static playback:PlaybackState.Playing}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </vlc:VideoView.Style>
+                        <ContentControl Template="{StaticResource VideoOverlayTemplate}" />
+                    </vlc:VideoView>
+
+                    <Grid>
+                        <Grid.Style>
+                            <Style TargetType="Grid">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding PlaybackState}"
+                                                 Value="{x:Static playback:PlaybackState.Placeholder}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Grid.Style>
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.82">
+                            <Path Width="50" Height="42" Data="{StaticResource IconCamera}"
+                                  Stroke="{StaticResource MutedTextBrush}" StrokeThickness="1.2" Stretch="Uniform" />
+                            <TextBlock Margin="0,12,0,0" HorizontalAlignment="Center"
+                                       Foreground="{StaticResource SecondaryTextBrush}" FontSize="{StaticResource FontSizeBody}"
+                                       FontWeight="SemiBold" Text="模拟视频画面" />
+                            <TextBlock Margin="0,5,0,0" HorizontalAlignment="Center" Style="{StaticResource MutedTextStyle}">
+                                <Run Text="CH " /><Run Text="{Binding ChannelNumber, Mode=OneWay}" />
+                            </TextBlock>
                         </StackPanel>
-                    </Border>
-                    <Border Margin="10" Padding="8,4" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                            Background="{StaticResource PrimaryBlueMutedBrush}" BorderBrush="{StaticResource PrimaryBlueBrush}"
-                            BorderThickness="1" CornerRadius="4">
-                        <TextBlock FontSize="{StaticResource FontSizeAuxiliary}"
-                                   Foreground="{StaticResource PrimaryBlueBrush}" Text="{Binding StreamType}" />
-                    </Border>
+                        <ContentControl Template="{StaticResource VideoOverlayTemplate}" />
+                    </Grid>
+
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding PlaybackState}"
+                                                 Value="{x:Static playback:PlaybackState.Loading}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <Path Width="44" Height="36" Data="{StaticResource IconCamera}"
+                              Stroke="{StaticResource PrimaryBlueBrush}" StrokeThickness="1.4" Stretch="Uniform" />
+                        <TextBlock Margin="0,12,0,0" HorizontalAlignment="Center"
+                                   FontSize="{StaticResource FontSizeBody}" FontWeight="SemiBold"
+                                   Text="正在连接视频..." />
+                        <TextBlock Margin="0,5,0,0" HorizontalAlignment="Center"
+                                   Style="{StaticResource MutedTextStyle}" Text="正在等待ZLMediaKit注册流" />
+                    </StackPanel>
+
+                    <StackPanel MaxWidth="360" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding PlaybackState}"
+                                                 Value="{x:Static playback:PlaybackState.Error}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <Path Width="44" Height="38" Data="{StaticResource IconAlarm}"
+                              Stroke="{StaticResource WarningOrangeBrush}" StrokeThickness="1.5" Stretch="Uniform" />
+                        <TextBlock Margin="0,12,0,0" HorizontalAlignment="Center"
+                                   Foreground="{StaticResource WarningOrangeBrush}"
+                                   FontSize="{StaticResource FontSizeBody}" FontWeight="SemiBold"
+                                   Text="{Binding PlaybackErrorTitle, TargetNullValue=拉流失败}" />
+                        <TextBlock Margin="0,6,0,0" HorizontalAlignment="Center" TextAlignment="Center"
+                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                   FontSize="{StaticResource FontSizeAuxiliary}"
+                                   Text="{Binding PlaybackErrorDetail}" TextWrapping="Wrap" />
+                    </StackPanel>
                 </Grid>
             </Border>
         </Grid>
