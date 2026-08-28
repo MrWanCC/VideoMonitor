@@ -152,6 +152,36 @@ public sealed class LocalZlmPlaybackSourceProviderTests
                 && request.Query.Contains("key=owned-key"));
     }
 
+    [Fact]
+    public async Task Prepare_WhenCancelledAfterAdd_CleansOwnedProxy()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var handler = Responses(
+            ServerOk(),
+            EmptyMediaList(),
+            AddProxy("owned-key"),
+            EmptyMediaList(),
+            DeleteSucceeded());
+        var mediaListRequests = 0;
+        handler.RequestObserved = request =>
+        {
+            if (request.AbsolutePath.EndsWith("/getMediaList")
+                && ++mediaListRequests == 2)
+            {
+                cancellation.Cancel();
+            }
+        };
+        var provider = CreateProvider(handler);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            provider.PrepareAsync(Device(), Channel(), cancellation.Token));
+
+        Assert.Contains(
+            handler.Requests,
+            request => request.AbsolutePath.EndsWith("/delStreamProxy")
+                && request.Query.Contains("key=owned-key"));
+    }
+
     private static LocalZlmPlaybackSourceProvider CreateProvider(
         StubHttpMessageHandler handler,
         TimeSpan? registrationTimeout = null,

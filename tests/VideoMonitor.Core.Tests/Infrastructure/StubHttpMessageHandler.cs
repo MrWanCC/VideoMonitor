@@ -19,6 +19,8 @@ internal sealed class StubHttpMessageHandler : HttpMessageHandler
 
     public List<Uri> Requests { get; } = [];
 
+    public Action<Uri>? RequestObserved { get; set; }
+
     public Uri? LastRequestUri => Requests.LastOrDefault();
 
     protected override Task<HttpResponseMessage> SendAsync(
@@ -28,6 +30,7 @@ internal sealed class StubHttpMessageHandler : HttpMessageHandler
         if (request.RequestUri is not null)
         {
             Requests.Add(request.RequestUri);
+            RequestObserved?.Invoke(request.RequestUri);
         }
 
         if (!responses.TryDequeue(out var response))

@@ -95,11 +95,16 @@ public sealed class LocalZlmPlaybackSourceProvider : IPlaybackSourceProvider
         }
         catch (PlaybackSourceException)
         {
-            await TryDeleteOwnedProxyAsync(proxyKey, cancellationToken).ConfigureAwait(false);
+            await TryDeleteOwnedProxyAsync(proxyKey, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await TryDeleteOwnedProxyAsync(proxyKey, CancellationToken.None).ConfigureAwait(false);
             throw;
         }
 
-        await TryDeleteOwnedProxyAsync(proxyKey, cancellationToken).ConfigureAwait(false);
+        await TryDeleteOwnedProxyAsync(proxyKey, CancellationToken.None).ConfigureAwait(false);
         throw new PlaybackSourceException(
             PlaybackFailureStage.ZlmStreamRegistrationTimeout,
             "拉流失败",
@@ -170,10 +175,6 @@ public sealed class LocalZlmPlaybackSourceProvider : IPlaybackSourceProvider
             await zlmClient
                 .DeleteStreamProxyAsync(proxyKey, cancellationToken)
                 .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
         }
         catch
         {
