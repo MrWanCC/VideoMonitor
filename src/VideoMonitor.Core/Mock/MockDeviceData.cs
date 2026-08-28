@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using VideoMonitor.Core.Models;
 
 namespace VideoMonitor.Core.Mock;
@@ -29,9 +31,9 @@ public static class MockDeviceData
             CreateGroup("40000000-0000-0000-0000-000000000005", "F-2#巷", tunnel.Id, 5)
         };
 
-        var west401 = groups.Single(group => group.Name == "西401溜井");
-        var devices = Enumerable.Range(1, 3)
-            .Select(index => CreateWest401Device(west401.Id, index))
+        var devices = groups
+            .Where(group => group.ParentId is not null)
+            .SelectMany(CreateDevices)
             .ToArray();
 
         return new MockDeviceDataSet(groups, devices);
@@ -46,42 +48,81 @@ public static class MockDeviceData
         Enabled = true
     };
 
-    private static CameraDevice CreateWest401Device(Guid groupId, int index)
+    private static IEnumerable<CameraDevice> CreateDevices(DeviceGroup group)
     {
-        var deviceId = Guid.Parse($"50000000-0000-0000-0000-{index:000000000000}");
+        var channelCount = group.Name is "Z-1#巷" or "Z-2#巷" or "Z-3#巷" or "F-1#巷" or "F-2#巷"
+            ? 1
+            : 3;
+        return Enumerable.Range(1, channelCount)
+            .Select(slotNo => CreateDevice(group, slotNo));
+    }
+
+    private static CameraDevice CreateDevice(DeviceGroup group, int slotNo)
+    {
+        var isWest401 = group.Name == "西401溜井";
+        var (deviceId, channelId) = GetStableIds(group, slotNo);
         var device = new CameraDevice
         {
             Id = deviceId,
-            Name = $"西401溜井 · 通道{index}",
-            GroupId = groupId,
-            IpAddress = $"192.168.17.{4 + index}",
+            Name = $"{group.Name} · 通道{slotNo}",
+            GroupId = group.Id,
+            IpAddress = isWest401
+                ? $"192.168.17.{4 + slotNo}"
+                : $"10.{group.Id.ToString()[0] - '0'}.0.{group.Sort * 10 + slotNo}",
             SdkPort = 8000,
             RtspPort = 554,
             Username = "admin",
             Password = "mock-password",
             Manufacturer = "海康威视",
             Model = "IPC",
-            TransportMode = index switch
-            {
-                2 => TransportMode.Tcp,
-                3 => TransportMode.Udp,
-                _ => TransportMode.Auto
-            },
+            TransportMode = isWest401
+                ? slotNo switch
+                {
+                    2 => TransportMode.Tcp,
+                    3 => TransportMode.Udp,
+                    _ => TransportMode.Auto
+                }
+                : TransportMode.Auto,
             Status = CameraStatus.Online,
             Enabled = true
         };
 
         device.Channels.Add(new CameraChannel
         {
-            Id = Guid.Parse($"60000000-0000-0000-0000-{index:000000000000}"),
+            Id = channelId,
             DeviceId = deviceId,
             ChannelNo = 1,
             ChannelName = "通道1",
-            StreamType = index == 3 ? StreamType.Sub : StreamType.Main,
-            StreamId = $"west401-camera-{index}",
+            StreamType = isWest401 && slotNo == 3 ? StreamType.Sub : StreamType.Main,
+            StreamId = isWest401
+                ? $"west401-camera-{slotNo}"
+                : $"mock-{deviceId:N}",
             Enabled = true
         });
 
         return device;
+    }
+
+    private static (Guid DeviceId, Guid ChannelId) GetStableIds(
+        DeviceGroup group,
+        int slotNo)
+    {
+        if (group.Name == "西401溜井")
+        {
+            return (
+                Guid.Parse($"50000000-0000-0000-0000-{slotNo:000000000000}"),
+                Guid.Parse($"60000000-0000-0000-0000-{slotNo:000000000000}"));
+        }
+
+        return (
+            CreateStableId("device", group.Id, slotNo),
+            CreateStableId("channel", group.Id, slotNo));
+    }
+
+    private static Guid CreateStableId(string kind, Guid groupId, int channelNo)
+    {
+        var bytes = SHA256.HashData(
+            Encoding.UTF8.GetBytes($"videomonitor:{kind}:{groupId:N}:{channelNo}"));
+        return new Guid(bytes.AsSpan(0, 16));
     }
 }

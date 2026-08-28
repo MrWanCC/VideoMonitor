@@ -1,5 +1,5 @@
-using VideoMonitor.Core.Mock;
 using VideoMonitor.Core.Models;
+using VideoMonitor.Core.Services;
 using VideoMonitor.Wpf.Configuration;
 
 namespace VideoMonitor.Wpf.Playback;
@@ -10,18 +10,17 @@ public sealed record SingleCameraPlaybackSelection(
 
 public static class SingleCameraPlaybackComposition
 {
-    private static readonly Guid Camera01DeviceId =
-        Guid.Parse("50000000-0000-0000-0000-000000000001");
-
     public static SingleCameraPlaybackSelection SelectDevice(
-        MockDeviceDataSet data,
+        IDeviceCatalog catalog,
         LocalDeviceOptions localDevice)
     {
-        ArgumentNullException.ThrowIfNull(data);
+        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(localDevice);
 
-        var device = data.Devices.Single(candidate => candidate.Id == Camera01DeviceId);
-        var channel = device.Channels.Single();
+        var device = catalog.GetDevice(localDevice.DeviceId)
+            ?? throw new InvalidOperationException("本地播放配置对应的设备不存在。");
+        var channel = device.Channels.SingleOrDefault(item => item.Id == localDevice.ChannelId)
+            ?? throw new InvalidOperationException("本地播放配置对应的通道不存在。");
         return new SingleCameraPlaybackSelection(device, channel);
     }
 }

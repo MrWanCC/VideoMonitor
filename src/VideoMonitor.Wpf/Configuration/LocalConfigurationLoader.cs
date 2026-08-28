@@ -82,6 +82,16 @@ public static class LocalConfigurationLoader
 
     private static void ValidateDevice(LocalDeviceOptions options)
     {
+        if (options.DeviceId == Guid.Empty)
+        {
+            throw new InvalidOperationException("配置项LocalDevice.DeviceId不能为空。");
+        }
+
+        if (options.ChannelId == Guid.Empty)
+        {
+            throw new InvalidOperationException("配置项LocalDevice.ChannelId不能为空。");
+        }
+
         Require(options.LocalIdentifier, "LocalDevice.LocalIdentifier");
         Require(options.IpAddress, "LocalDevice.IpAddress");
         Require(options.Username, "LocalDevice.Username");

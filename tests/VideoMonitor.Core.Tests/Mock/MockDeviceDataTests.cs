@@ -35,4 +35,34 @@ public sealed class MockDeviceDataTests
             Assert.Equal(device.Id, channel.DeviceId);
         });
     }
+
+    [Fact]
+    public void Create_ContainsStableDevicesForEveryMonitorGroup()
+    {
+        var data = MockDeviceData.Create();
+
+        Assert.Equal(26, data.Devices.Count);
+        Assert.Equal(data.Devices.Count, data.Devices.Select(device => device.Id).Distinct().Count());
+        Assert.All(data.Devices, device =>
+        {
+            var channel = Assert.Single(device.Channels);
+            Assert.NotEqual(Guid.Empty, device.Id);
+            Assert.NotEqual(Guid.Empty, channel.Id);
+            Assert.Equal(device.Id, channel.DeviceId);
+        });
+    }
+
+    [Fact]
+    public void Create_RepeatedRunsKeepDeviceAndChannelIdsStable()
+    {
+        var first = MockDeviceData.Create();
+        var second = MockDeviceData.Create();
+
+        Assert.Equal(
+            first.Devices.Select(device => device.Id),
+            second.Devices.Select(device => device.Id));
+        Assert.Equal(
+            first.Devices.SelectMany(device => device.Channels).Select(channel => channel.Id),
+            second.Devices.SelectMany(device => device.Channels).Select(channel => channel.Id));
+    }
 }

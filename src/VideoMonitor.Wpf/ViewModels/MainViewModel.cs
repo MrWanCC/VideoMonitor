@@ -7,7 +7,7 @@ public sealed class MainViewModel : ObservableObject
 {
     private string selectedNavigation = "实时监控";
     private bool isMonitorFullscreen;
-    private bool isSidebarCollapsed;
+    private bool isSidebarCollapsed = true;
     private bool isSignalLinkageEnabled;
     private bool isSecondaryScreenVisible;
 

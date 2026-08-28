@@ -9,14 +9,15 @@ public sealed class MainNavigationTests
     [Fact]
     public void Navigate_PreservesDeviceManagementInstanceAndState()
     {
-        var monitorGroups = MockMonitorData.CreateGroups();
+        var data = MockDeviceData.Create();
+        var catalog = new InMemoryDeviceCatalog(data.Groups, data.Devices);
+        var monitorGroups = MonitorCatalogProjection.CreateGroups(catalog);
         var switchService = new MonitorSwitchService(
             monitorGroups.Single(group => group.Name == "备用1"),
             monitorGroups.Single(group => group.Name == "Z-1#巷"),
             monitorGroups.Single(group => group.Name == "2#主溜井"));
-        var monitor = new MonitorViewModel(switchService, monitorGroups);
-        var data = MockDeviceData.Create();
-        var deviceManagement = new DeviceManagementViewModel(data.Groups, data.Devices);
+        var monitor = new MonitorViewModel(switchService, monitorGroups, catalog);
+        var deviceManagement = new DeviceManagementViewModel(catalog);
         var main = new MainViewModel(monitor, deviceManagement);
         deviceManagement.SearchKeyword = "192.168";
 

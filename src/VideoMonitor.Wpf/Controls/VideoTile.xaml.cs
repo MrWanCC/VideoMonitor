@@ -7,10 +7,15 @@ public partial class VideoTile
         InitializeComponent();
     }
 
-    private void OnVideoSurfaceDoubleClick(
+    private void OnVideoSurfaceMouseLeftButtonDown(
         object sender,
         System.Windows.Input.MouseButtonEventArgs e)
     {
+        if (e.ClickCount != 2)
+        {
+            return;
+        }
+
         e.Handled = true;
         RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(
             e.MouseDevice,

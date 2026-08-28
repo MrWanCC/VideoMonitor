@@ -22,28 +22,6 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
-        <ControlTemplate x:Key="VideoOverlayTemplate" TargetType="ContentControl">
-            <Grid Background="#02000000">
-                <Border Margin="10" Padding="7,4" HorizontalAlignment="Left" VerticalAlignment="Top"
-                        Background="{StaticResource OverlayBrush}" CornerRadius="3">
-                    <TextBlock FontSize="{StaticResource FontSizeAuxiliary}"
-                               Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding Timestamp}" />
-                </Border>
-                <Border Margin="10" Padding="8,4" HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                        Background="{StaticResource OverlayBrush}" CornerRadius="3">
-                    <StackPanel Orientation="Horizontal">
-                        <Ellipse Width="6" Height="6" Margin="0,0,7,0" Fill="{StaticResource OnlineGreenBrush}" />
-                        <TextBlock FontSize="{StaticResource FontSizeAuxiliary}" Text="{Binding Bitrate}" />
-                    </StackPanel>
-                </Border>
-                <Border Margin="10" Padding="8,4" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                        Background="{StaticResource PrimaryBlueMutedBrush}" BorderBrush="{StaticResource PrimaryBlueBrush}"
-                        BorderThickness="1" CornerRadius="4">
-                    <TextBlock FontSize="{StaticResource FontSizeAuxiliary}"
-                               Foreground="{StaticResource PrimaryBlueBrush}" Text="{Binding StreamType}" />
-                </Border>
-            </Grid>
-        </ControlTemplate>
     </UserControl.Resources>
 
     <Border Margin="4" Style="{StaticResource VideoCardStyle}" ClipToBounds="True">
@@ -88,8 +66,8 @@
                                 </Style.Triggers>
                             </Style>
                         </vlc:VideoView.Style>
-                        <ContentControl Template="{StaticResource VideoOverlayTemplate}"
-                                        MouseDoubleClick="OnVideoSurfaceDoubleClick" />
+                        <Grid Background="#02000000"
+                              MouseLeftButtonDown="OnVideoSurfaceMouseLeftButtonDown" />
                     </vlc:VideoView>
 
                     <Grid>
@@ -114,7 +92,6 @@
                                 <Run Text="CH " /><Run Text="{Binding ChannelNumber, Mode=OneWay}" />
                             </TextBlock>
                         </StackPanel>
-                        <ContentControl Template="{StaticResource VideoOverlayTemplate}" />
                     </Grid>
 
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">

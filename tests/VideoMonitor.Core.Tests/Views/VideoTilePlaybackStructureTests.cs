@@ -25,6 +25,17 @@ public sealed class VideoTilePlaybackStructureTests
         Assert.Contains("正在连接视频", xaml);
         Assert.Contains("PlaybackErrorTitle", xaml);
         Assert.Contains("PlaybackErrorDetail", xaml);
+        Assert.DoesNotContain("VideoOverlayTemplate", xaml);
+        Assert.DoesNotContain("Stretch=\"Fill\"", xaml);
+        Assert.Contains("MouseLeftButtonDown=\"OnVideoSurfaceMouseLeftButtonDown\"", xaml);
+        Assert.DoesNotContain("MouseDoubleClick=\"OnVideoSurfaceDoubleClick\"", xaml);
+
+        var videoViewStart = xaml.IndexOf("<vlc:VideoView ", StringComparison.Ordinal);
+        var videoViewEnd = xaml.IndexOf("</vlc:VideoView>", videoViewStart, StringComparison.Ordinal);
+        Assert.True(videoViewStart >= 0 && videoViewEnd > videoViewStart);
+        var videoViewContent = xaml[videoViewStart..videoViewEnd];
+        Assert.Contains("<Grid Background=\"#02000000\"", videoViewContent);
+        Assert.DoesNotContain("Background=\"Transparent\"", videoViewContent);
     }
 
     private static int CountOccurrences(string source, string value)

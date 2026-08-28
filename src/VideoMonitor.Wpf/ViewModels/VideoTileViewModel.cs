@@ -10,6 +10,7 @@ public sealed class VideoTileViewModel : ObservableObject
     private string groupName = "--";
     private int channelNumber;
     private CameraStatus status = CameraStatus.Offline;
+    private string ipAddress = "--";
     private string bitrate = "-- Mbps";
     private string streamType = "--";
     private string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
@@ -18,7 +19,11 @@ public sealed class VideoTileViewModel : ObservableObject
     private string playbackErrorTitle = string.Empty;
     private string playbackErrorDetail = string.Empty;
 
-    public string IpAddress => "192.168.17.5";
+    public string IpAddress
+    {
+        get => ipAddress;
+        private set => SetProperty(ref ipAddress, value);
+    }
 
     public string Resolution => "1920×1080";
 
@@ -88,15 +93,21 @@ public sealed class VideoTileViewModel : ObservableObject
         private set => SetProperty(ref playbackErrorDetail, value);
     }
 
-    public void Update(CameraInfo camera)
+    public void Update(
+        CameraInfo camera,
+        CameraDevice? device,
+        CameraChannel? channel)
     {
         ArgumentNullException.ThrowIfNull(camera);
-        CameraName = camera.Name;
+        CameraName = device?.Name ?? camera.Name;
         GroupName = camera.GroupName;
         ChannelNumber = camera.ChannelNumber;
-        Status = camera.Status;
+        Status = device?.Status ?? camera.Status;
+        IpAddress = device?.IpAddress ?? "--";
         Bitrate = camera.Bitrate;
-        StreamType = camera.StreamType;
+        StreamType = channel is null
+            ? camera.StreamType
+            : channel.StreamType == VideoMonitor.Core.Models.StreamType.Main ? "主码流" : "辅码流";
         Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
     }
 

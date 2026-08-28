@@ -52,6 +52,64 @@
             <Setter Property="FontSize" Value="{StaticResource FontSizeVideoTitle}" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
+        <Style x:Key="DeviceGroupSectionToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource PrimaryBlueMutedBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="DeviceGroupRowStyle" TargetType="Button">
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Margin" Value="8,1,0,1" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="5">
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsSelected}" Value="False" />
+                        <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsMouseOver}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Background" Value="{StaticResource PrimaryBlueMutedBrush}" />
+                </MultiDataTrigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <Grid x:Name="DeviceLayout" Background="{StaticResource WindowBackgroundBrush}">
@@ -90,16 +148,36 @@
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="32" />
                                         </Grid.ColumnDefinitions>
-                                        <Path Width="9" Height="9" Data="{StaticResource IconChevron}"
-                                              Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1.7"
-                                              Stretch="Uniform" RenderTransformOrigin=".5,.5">
-                                            <Path.RenderTransform><RotateTransform Angle="90" /></Path.RenderTransform>
-                                        </Path>
-                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource TreeSectionTextStyle}"
-                                                   Text="{Binding Group.Name}" />
-                                        <TextBlock Grid.Column="2" Margin="8,0" VerticalAlignment="Center"
-                                                   Foreground="{StaticResource MutedTextBrush}" FontSize="{StaticResource FontSizeCaption}"
-                                                   Text="{Binding Children.Count, StringFormat=({0})}" />
+                                        <ToggleButton Grid.Column="0" Grid.ColumnSpan="3"
+                                                      IsChecked="{Binding IsExpanded, Mode=TwoWay}"
+                                                      Style="{StaticResource DeviceGroupSectionToggleStyle}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="18" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Path Width="9" Height="9" Data="{StaticResource IconChevron}"
+                                                      Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1.7"
+                                                      Stretch="Uniform" RenderTransformOrigin=".5,.5">
+                                                    <Path.Style>
+                                                        <Style TargetType="Path">
+                                                            <Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="90" /></Setter.Value></Setter>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsExpanded}" Value="False">
+                                                                    <Setter Property="RenderTransform"><Setter.Value><RotateTransform Angle="0" /></Setter.Value></Setter>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Path.Style>
+                                                </Path>
+                                                <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource TreeSectionTextStyle}"
+                                                           Text="{Binding Group.Name}" />
+                                                <TextBlock Grid.Column="2" Margin="8,0" VerticalAlignment="Center"
+                                                           Foreground="{StaticResource MutedTextBrush}" FontSize="{StaticResource FontSizeCaption}"
+                                                           Text="{Binding Children.Count, StringFormat=({0})}" />
+                                            </Grid>
+                                        </ToggleButton>
                                         <Button Grid.Column="3" Width="30" Height="30" ToolTip="新建分组"
                                                 Command="{Binding DataContext.BeginAddGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                 CommandParameter="{Binding Group}" Style="{StaticResource IconButtonStyle}">
@@ -108,14 +186,15 @@
                                                   StrokeThickness="1.7" Stretch="Uniform" />
                                         </Button>
                                     </Grid>
-                                    <ItemsControl ItemsSource="{Binding Children}">
+                                    <ItemsControl ItemsSource="{Binding Children}"
+                                                  Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibilityConverter}}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Border x:Name="GroupRow" Height="36" Margin="8,1,0,1"
-                                                        Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
-                                                        CornerRadius="5"
-                                                        Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                                                    <Border.ContextMenu>
+                                                <Button x:Name="GroupRow" Style="{StaticResource DeviceGroupRowStyle}"
+                                                        Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        Command="{Binding Tag.SelectGroupCommand, RelativeSource={RelativeSource Self}}"
+                                                        CommandParameter="{Binding Group}">
+                                                    <Button.ContextMenu>
                                                         <ContextMenu Background="{StaticResource PanelBackgroundBrush}"
                                                                      BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
                                                             <MenuItem Header="重命名"
@@ -125,11 +204,8 @@
                                                                       Command="{Binding PlacementTarget.Tag.DeleteGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                                       CommandParameter="{Binding PlacementTarget.DataContext.Group, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                                         </ContextMenu>
-                                                    </Border.ContextMenu>
+                                                    </Button.ContextMenu>
                                                     <Grid Margin="10,0,5,0">
-                                                        <Button Background="Transparent" BorderThickness="0" Cursor="Hand"
-                                                                Command="{Binding DataContext.SelectGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                                CommandParameter="{Binding Group}" />
                                                         <Grid Margin="5,0,0,0" IsHitTestVisible="False">
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="15" />
@@ -146,7 +222,7 @@
                                                                  Visibility="Collapsed" Loaded="OnGroupEditorLoaded"
                                                                  KeyDown="OnGroupEditorKeyDown" LostFocus="OnGroupEditorLostFocus" />
                                                     </Grid>
-                                                </Border>
+                                                </Button>
                                                 <DataTemplate.Triggers>
                                                     <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                                         <Setter TargetName="GroupRow" Property="Background" Value="{StaticResource SelectedRowBrush}" />

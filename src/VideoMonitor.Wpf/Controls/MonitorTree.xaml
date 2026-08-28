@@ -40,19 +40,28 @@
             </Setter>
         </Style>
         <Style x:Key="ChevronToggleStyle" TargetType="ToggleButton">
-            <Setter Property="Width" Value="22"/>
             <Setter Property="Height" Value="{StaticResource TreeSectionHeight}"/>
-            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
-                        <Border Background="{TemplateBinding Background}">
-                            <Path x:Name="Chevron" Width="8" Height="8" Data="{StaticResource IconChevron}"
-                                  Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1.7" Stretch="Uniform"
-                                  RenderTransformOrigin=".5,.5"/>
+                        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <Grid>
+                                <Path x:Name="Chevron" Width="8" Height="8" Margin="6,0,0,0"
+                                      HorizontalAlignment="Left" Data="{StaticResource IconChevron}"
+                                      Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1.7" Stretch="Uniform"
+                                      RenderTransformOrigin=".5,.5"/>
+                                <ContentPresenter Margin="26,0,0,0"
+                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="Center"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}" />
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
@@ -60,6 +69,7 @@
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Chevron" Property="Stroke" Value="{StaticResource PrimaryBlueBrush}"/>
+                                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource PrimaryBlueMutedBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -94,11 +104,12 @@
                             <Border Margin="0,0,0,6" Padding="0,0,0,5" BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
                                 <Grid>
                                     <Grid.RowDefinitions><RowDefinition Height="38"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                    <ToggleButton IsChecked="{Binding IsExpanded, Mode=TwoWay}" Style="{StaticResource ChevronToggleStyle}"/>
-                                    <StackPanel Margin="26,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <ToggleButton IsChecked="{Binding IsExpanded, Mode=TwoWay}" Style="{StaticResource ChevronToggleStyle}">
+                                        <StackPanel Orientation="Horizontal" IsHitTestVisible="False">
                                         <TextBlock Style="{StaticResource TreeSectionTextStyle}" Text="{Binding Name}"/>
                                         <TextBlock Margin="8,0,0,0" Foreground="{StaticResource MutedTextBrush}" FontSize="{StaticResource FontSizeAuxiliary}" Text="{Binding CountText}"/>
-                                    </StackPanel>
+                                        </StackPanel>
+                                    </ToggleButton>
                                     <ItemsControl Grid.Row="1" ItemsSource="{Binding Children}"
                                                   Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibilityConverter}}">
                                         <ItemsControl.ItemTemplate>

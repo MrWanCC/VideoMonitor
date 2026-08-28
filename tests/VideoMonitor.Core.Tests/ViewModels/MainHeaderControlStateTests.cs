@@ -51,17 +51,18 @@ public sealed class MainHeaderControlStateTests
 
     private static (MainViewModel Main, MonitorViewModel Monitor, SecondaryMonitorViewModel Secondary, MonitorSwitchService Service) CreateFixture()
     {
-        var groups = MockMonitorData.CreateGroups();
+        var data = MockDeviceData.Create();
+        var catalog = new InMemoryDeviceCatalog(data.Groups, data.Devices);
+        var groups = MonitorCatalogProjection.CreateGroups(catalog);
         var service = new MonitorSwitchService(
             Group(groups, "备用1"),
             Group(groups, "Z-1#巷"),
             Group(groups, "2#主溜井"));
-        var monitor = new MonitorViewModel(service, groups);
-        var secondary = new SecondaryMonitorViewModel(service, groups);
-        var deviceData = MockDeviceData.Create();
+        var monitor = new MonitorViewModel(service, groups, catalog);
+        var secondary = new SecondaryMonitorViewModel(service, groups, catalog);
         var main = new MainViewModel(
             monitor,
-            new DeviceManagementViewModel(deviceData.Groups, deviceData.Devices));
+            new DeviceManagementViewModel(catalog));
 
         return (main, monitor, secondary, service);
     }
