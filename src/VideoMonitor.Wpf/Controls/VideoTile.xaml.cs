@@ -5,6 +5,37 @@ public partial class VideoTile
     public VideoTile()
     {
         InitializeComponent();
+        IsVisibleChanged += OnVideoTileIsVisibleChanged;
+    }
+
+    private void OnVideoTileIsVisibleChanged(
+        object sender,
+        System.Windows.DependencyPropertyChangedEventArgs e)
+    {
+        Dispatcher.BeginInvoke(
+            SynchronizeVideoOverlayWindow,
+            System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    private void SynchronizeVideoOverlayWindow()
+    {
+        var overlayWindow = System.Windows.Window.GetWindow(VideoInteractionSurface);
+        if (overlayWindow is null || overlayWindow == System.Windows.Window.GetWindow(this))
+        {
+            return;
+        }
+
+        if (IsVisible)
+        {
+            if (!overlayWindow.IsVisible)
+            {
+                overlayWindow.Show();
+            }
+
+            return;
+        }
+
+        overlayWindow.Hide();
     }
 
     private void OnVideoSurfaceMouseLeftButtonDown(

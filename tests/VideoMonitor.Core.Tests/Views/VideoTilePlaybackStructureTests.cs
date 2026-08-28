@@ -29,12 +29,20 @@ public sealed class VideoTilePlaybackStructureTests
         Assert.DoesNotContain("Stretch=\"Fill\"", xaml);
         Assert.Contains("MouseLeftButtonDown=\"OnVideoSurfaceMouseLeftButtonDown\"", xaml);
         Assert.DoesNotContain("MouseDoubleClick=\"OnVideoSurfaceDoubleClick\"", xaml);
+        Assert.Contains("x:Name=\"VideoInteractionSurface\"", xaml);
+
+        var codeBehindPath = Path.ChangeExtension(xamlPath, ".xaml.cs");
+        var codeBehind = File.ReadAllText(codeBehindPath);
+        Assert.Contains("IsVisibleChanged += OnVideoTileIsVisibleChanged", codeBehind);
+        Assert.Contains("Window.GetWindow(VideoInteractionSurface)", codeBehind);
+        Assert.Contains("overlayWindow.Hide()", codeBehind);
+        Assert.Contains("overlayWindow.Show()", codeBehind);
 
         var videoViewStart = xaml.IndexOf("<vlc:VideoView ", StringComparison.Ordinal);
         var videoViewEnd = xaml.IndexOf("</vlc:VideoView>", videoViewStart, StringComparison.Ordinal);
         Assert.True(videoViewStart >= 0 && videoViewEnd > videoViewStart);
         var videoViewContent = xaml[videoViewStart..videoViewEnd];
-        Assert.Contains("<Grid Background=\"#02000000\"", videoViewContent);
+        Assert.Contains("Background=\"#02000000\"", videoViewContent);
         Assert.DoesNotContain("Background=\"Transparent\"", videoViewContent);
     }
 
