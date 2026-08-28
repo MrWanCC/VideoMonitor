@@ -22,8 +22,11 @@
 `VideoMonitor.Wpf/Playback` 新增：
 
 - `VlcPlaybackService.cs`：应用级共享 `LibVLC`，创建和释放单画面会话。
-- `PlaybackSession.cs`：保存 `MediaPlayer`、ZLM 播放地址、`ProxyKey`、`OwnsProxy` 与生命周期状态。
-- `SingleCameraPlaybackCoordinator.cs`：串联配置、ZLM 代理、媒体注册确认及 VLC 播放，不把这些细节写进 ViewModel 或窗口 code-behind。
+- `PlaybackSession.cs`：保存 `MediaPlayer`、`CameraChannelId`、`StreamId`、`PlaybackUrl`、`ProxyKey`、`OwnsProxy` 与生命周期状态。
+- `PlaybackSource.cs`：Provider 准备完成后返回的播放源信息，不包含播放器实例。
+- `IPlaybackSourceProvider.cs`：为协调器提供 `PrepareAsync(CameraDevice, CameraChannel)` 与 `ReleaseAsync(PlaybackSource)`。
+- `LocalZlmPlaybackSourceProvider.cs`：本阶段实现，内部串联本地字段覆盖、海康 RTSP 构造、ZLM 代理及媒体注册确认。
+- `SingleCameraPlaybackCoordinator.cs`：只依赖 `IPlaybackSourceProvider` 与 `VlcPlaybackService`，不直接依赖具体 `ZlmClient`，负责把准备好的播放源交给 VLC。
 
 `VideoMonitor.Core.Tests` 增加 Infrastructure 引用，用可替换 `HttpMessageHandler` 测试请求与响应，不访问真实网络。
 
@@ -89,6 +92,31 @@ ZLM StreamId 使用：
 
 所有 API 结果保留 HTTP 失败、ZLM `code`、ZLM `msg` 和阶段信息，不使用吞异常后返回 `false` 的方式。
 
+## 播放源抽象与生产迁移边界
+
+`IPlaybackSourceProvider` 是本阶段唯一新增的生产迁移接缝，保持轻量：
+
+- `PrepareAsync(CameraDevice, CameraChannel)`：返回 `PlaybackSource`。
+- `ReleaseAsync(PlaybackSource)`：释放本次 Provider 拥有的运行期资源。
+
+`PlaybackSource` 至少包含：
+
+- `CameraChannelId`
+- `StreamId`
+- `PlaybackUrl`
+- `ProxyKey`
+- `OwnsProxy`
+
+`SingleCameraPlaybackCoordinator` 不知道 ZLM Secret、海康 RTSP 拼接规则或代理 API，只负责播放状态与 VLC 会话。当前注入 `LocalZlmPlaybackSourceProvider`，其内部仍执行：
+
+`local-device` 字段覆盖 → `HikvisionRtspUrlBuilder` → `ZlmClient` → `AddStreamProxy`/已存在流复用 → MediaList 确认 → 返回 ZLM RTSP 播放地址。
+
+`PlaybackSession` 明确记录 `CameraChannelId`、`StreamId` 与 `PlaybackUrl`。`ProxyKey` 和 `OwnsProxy` 仅用于当前运行期释放本次进程创建的代理，禁止写入设备模型、数据库、长期配置或其他持久化存储。
+
+当前 WPF 直接控制 ZLM 只用于第一阶段单机真实视频验证。未来多客户端生产架构由 `VideoMonitor.Server` 统一管理 AddStreamProxy、DeleteStreamProxy、ZLM Hook、StreamRegistry、引用计数/Lease 与 ZLM 健康状态；WPF 最终只向 Server 获取播放地址，不持有摄像头真实账号密码，也不持有 ZLM API Secret。
+
+本阶段不创建 `ServerPlaybackSourceProvider`，不实现 `VideoMonitor.Server`，也不实现上述生产端能力。未来只需用 `ServerPlaybackSourceProvider` 替换当前 Provider，协调器与播放器边界保持不变。
+
 ## VLC 与 WPF 生命周期
 
 使用正式版：
@@ -105,7 +133,7 @@ ZLM StreamId 使用：
 - `Playing`：显示 `VideoView`。
 - `Error`：显示阶段性错误标题及简述。
 
-播放器会话由应用组合根和协调器持有。双击放大/恢复、侧栏折叠、详情折叠、Monitor/Device 页面切换只改变现有 View 的布局或 Visibility，不触发重新 AddStreamProxy、重新创建 MediaPlayer 或重新缓冲。
+播放器会话由应用组合根和协调器持有。双击放大/恢复、侧栏折叠、详情折叠、Monitor/Device 页面切换只改变现有 View 的布局或 Visibility，不触发重新准备 PlaybackSource、重新 AddStreamProxy、重新创建 MediaPlayer 或重新缓冲。
 
 为避免 WPF airspace 问题，第一阶段优先使用 `VideoView` 支持的内容承载方式；如现有透明 Overlay 不稳定，标题栏保持在视频上方，码率与码流移到安全区域，不引入透明 Window 或 `AllowsTransparency=True`。
 
