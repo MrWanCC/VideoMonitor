@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\VideoMonitor.Core\VideoMonitor.Core.csproj" />
+    <ProjectReference Include="..\..\src\VideoMonitor.Infrastructure\VideoMonitor.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\VideoMonitor.Wpf\VideoMonitor.Wpf.csproj" />
   </ItemGroup>
 
