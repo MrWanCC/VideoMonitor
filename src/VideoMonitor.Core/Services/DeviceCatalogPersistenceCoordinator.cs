@@ -7,8 +7,8 @@ public sealed class DeviceCatalogPersistenceCoordinator : IAsyncDisposable
 {
     private readonly IDeviceCatalog catalog;
     private readonly IDeviceCatalogStore store;
-    private readonly Channel<DeviceCatalogSnapshot> queue =
-        Channel.CreateUnbounded<DeviceCatalogSnapshot>(new UnboundedChannelOptions
+    private readonly Channel<QueueItem> queue =
+        Channel.CreateUnbounded<QueueItem>(new UnboundedChannelOptions
         {
             SingleReader = true,
             SingleWriter = false,
@@ -19,6 +19,7 @@ public sealed class DeviceCatalogPersistenceCoordinator : IAsyncDisposable
     private Task? completionTask;
     private bool acceptingChanges = true;
     private int failureReported;
+    private int failureNotificationSent;
     private Exception? lastPersistenceException;
 
     public DeviceCatalogPersistenceCoordinator(
@@ -39,9 +40,27 @@ public sealed class DeviceCatalogPersistenceCoordinator : IAsyncDisposable
     public async Task FlushAsync()
     {
         Task task;
+        var enqueueFailed = false;
         lock (lifecycleGate)
         {
-            task = CompleteQueueNoLock();
+            if (completionTask is not null)
+            {
+                task = completionTask;
+            }
+            else
+            {
+                var barrier = new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                enqueueFailed = !queue.Writer.TryWrite(new QueueItem.Barrier(barrier));
+                task = barrier.Task;
+            }
+        }
+
+        if (enqueueFailed)
+        {
+            RecordFailure();
+            throw LastPersistenceException
+                ?? new InvalidOperationException("设备目录自动保存失败。");
         }
 
         await task.ConfigureAwait(false);
@@ -110,7 +129,7 @@ public sealed class DeviceCatalogPersistenceCoordinator : IAsyncDisposable
                 }
 
                 snapshot = DeviceCatalogSnapshotFactory.Create(catalog);
-                if (queue.Writer.TryWrite(snapshot))
+                if (queue.Writer.TryWrite(new QueueItem.Save(snapshot)))
                 {
                     return;
                 }
@@ -126,13 +145,21 @@ public sealed class DeviceCatalogPersistenceCoordinator : IAsyncDisposable
 
     private async Task ProcessQueueAsync()
     {
-        await foreach (var snapshot in queue.Reader.ReadAllAsync().ConfigureAwait(false))
+        await foreach (var item in queue.Reader.ReadAllAsync().ConfigureAwait(false))
         {
+            if (item is QueueItem.Barrier barrier)
+            {
+                barrier.Completion.TrySetResult();
+                continue;
+            }
+
+            var snapshot = ((QueueItem.Save)item).Snapshot;
             try
             {
                 await store.SaveAsync(snapshot, CancellationToken.None)
                     .ConfigureAwait(false);
                 Volatile.Write(ref lastPersistenceException, null);
+                Interlocked.Exchange(ref failureNotificationSent, 0);
             }
             catch (Exception)
             {
@@ -148,6 +175,11 @@ public sealed class DeviceCatalogPersistenceCoordinator : IAsyncDisposable
             new InvalidOperationException("设备目录自动保存失败。"));
         Interlocked.Exchange(ref failureReported, 0);
 
+        if (Interlocked.Exchange(ref failureNotificationSent, 1) != 0)
+        {
+            return;
+        }
+
         try
         {
             PersistenceFailed?.Invoke(this, EventArgs.Empty);
@@ -156,5 +188,16 @@ public sealed class DeviceCatalogPersistenceCoordinator : IAsyncDisposable
         {
             // Persistence notifications must not terminate the single consumer.
         }
+    }
+
+    private abstract record QueueItem
+    {
+        private QueueItem()
+        {
+        }
+
+        public sealed record Save(DeviceCatalogSnapshot Snapshot) : QueueItem;
+
+        public sealed record Barrier(TaskCompletionSource Completion) : QueueItem;
     }
 }

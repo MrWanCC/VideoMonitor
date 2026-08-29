@@ -34,10 +34,12 @@ public partial class App
         var singleCameraEnabled = playbackConfiguration?.SingleCameraTest.Enabled == true;
         var deviceCatalogStore = new JsonDeviceCatalogStore();
         InMemoryDeviceCatalog deviceCatalog;
+        string? catalogMigrationWarning = null;
         try
         {
-            deviceCatalog = new DeviceCatalogBootstrapper(
-                deviceCatalogStore).InitializeAsync().GetAwaiter().GetResult();
+            var bootstrapper = new DeviceCatalogBootstrapper(deviceCatalogStore);
+            deviceCatalog = bootstrapper.InitializeAsync().GetAwaiter().GetResult();
+            catalogMigrationWarning = bootstrapper.LastMigrationWarning;
         }
         catch (Exception exception)
         {
@@ -157,6 +159,29 @@ public partial class App
         var shutdownInProgress = false;
         var finalCloseApplied = false;
 
+        void OnPersistenceFailed(object? sender, EventArgs args)
+        {
+            if (shutdownInProgress)
+            {
+                return;
+            }
+
+            _ = mainWindow.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!shutdownInProgress)
+                {
+                    System.Windows.MessageBox.Show(
+                        mainWindow,
+                        "设备配置保存失败。当前修改可能无法在重启后保留，请检查磁盘空间或数据目录权限。",
+                        "保存提示",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+            }));
+        }
+
+        persistenceCoordinator.PersistenceFailed += OnPersistenceFailed;
+
         void ApplyFinalWindowClose()
         {
             if (finalCloseApplied)
@@ -166,19 +191,14 @@ public partial class App
 
             finalCloseApplied = true;
             mainViewModel.PropertyChanged -= OnMainViewModelPropertyChanged;
+            persistenceCoordinator.PersistenceFailed -= OnPersistenceFailed;
             secondaryWindow.AllowSecondaryWindowClose = true;
             secondaryWindow.Close();
             playbackCancellation.Dispose();
         }
 
-        async Task StopPlaybackAsync()
+        async Task StopPlaybackResourcesAsync()
         {
-            if (playbackStopped)
-            {
-                return;
-            }
-
-            playbackStopped = true;
             if (playbackStartTask is not null)
             {
                 await playbackStartTask;
@@ -198,16 +218,45 @@ public partial class App
 
             vlcPlaybackService?.Dispose();
             zlmHttpClient?.Dispose();
+        }
 
+        async Task StopPlaybackAsync()
+        {
+            if (playbackStopped)
+            {
+                return;
+            }
+
+            playbackStopped = true;
             try
             {
-                await persistenceCoordinator.DisposeAsync();
+                await ShutdownCleanupCoordinator.ExecuteAsync(
+                    StopPlaybackResourcesAsync,
+                    () => persistenceCoordinator.DisposeAsync());
             }
             catch (InvalidOperationException exception)
             {
                 Debug.WriteLine(exception.GetType().Name);
                 System.Windows.MessageBox.Show(
                     "设备目录保存失败，最后一次修改可能未保存。",
+                    "关闭提示",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            catch (AggregateException exception)
+            {
+                Debug.WriteLine(exception.GetType().Name);
+                System.Windows.MessageBox.Show(
+                    "关闭时资源清理失败，设备目录最后一次修改可能未保存。",
+                    "关闭提示",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine(exception.GetType().Name);
+                System.Windows.MessageBox.Show(
+                    "关闭时播放资源清理失败，设备目录已尝试保存。",
                     "关闭提示",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
@@ -279,5 +328,15 @@ public partial class App
         MainWindow = mainWindow;
         mainWindow.Show();
         ApplySecondaryScreenVisibility();
+
+        if (catalogMigrationWarning is not null)
+        {
+            System.Windows.MessageBox.Show(
+                mainWindow,
+                catalogMigrationWarning,
+                "迁移提示",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
     }
 }

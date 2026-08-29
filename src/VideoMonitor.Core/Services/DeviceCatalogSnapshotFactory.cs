@@ -48,7 +48,7 @@ public static class DeviceCatalogSnapshotFactory
             Manufacturer = device.Manufacturer,
             Model = device.Model,
             TransportMode = device.TransportMode,
-            Status = device.Status,
+            Status = CameraStatus.Unknown,
             Enabled = device.Enabled,
             Remark = device.Remark
         };
@@ -62,7 +62,6 @@ public static class DeviceCatalogSnapshotFactory
                 ChannelNo = channel.ChannelNo,
                 ChannelName = channel.ChannelName,
                 StreamType = channel.StreamType,
-                StreamId = channel.StreamId,
                 Enabled = channel.Enabled
             });
         }

@@ -265,7 +265,7 @@ public sealed class DeviceCatalogBootstrapperTests
     }
 
     [Fact]
-    public async Task InitializeAsync_WhenOldCatalogRenameFails_LeavesBothCatalogsAndReportsSafeError()
+    public async Task InitializeAsync_WhenOldCatalogRenameFails_ReturnsNewCatalogAndKeepsBothFiles()
     {
         using var directory = new TemporaryDirectory();
         var newPath = directory.PathOf("program-data", "device-catalog.json");
@@ -279,11 +279,11 @@ public sealed class DeviceCatalogBootstrapperTests
             () => throw new InvalidOperationException("不应执行 Mock seed。"),
             oldCatalogPath: oldPath);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => bootstrapper.InitializeAsync());
+        var catalog = await bootstrapper.InitializeAsync();
 
-        Assert.Contains("迁移", exception.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("old-password", exception.ToString(), StringComparison.Ordinal);
+        Assert.Equal("旧用户设备", catalog.GetDevice(DeviceId)!.Name);
+        Assert.Contains("迁移", bootstrapper.LastMigrationWarning, StringComparison.Ordinal);
+        Assert.DoesNotContain("old-password", bootstrapper.LastMigrationWarning, StringComparison.Ordinal);
         Assert.True(File.Exists(newPath));
         Assert.True(File.Exists(oldPath));
         Assert.True(Directory.Exists(GetMigratedCatalogPath(oldPath)));
@@ -469,10 +469,15 @@ public sealed class DeviceCatalogBootstrapperTests
         var source = File.ReadAllText(appPath);
 
         Assert.Contains("new DeviceCatalogBootstrapper", source, StringComparison.Ordinal);
+        Assert.Contains("LastMigrationWarning", source, StringComparison.Ordinal);
+        Assert.Contains("迁移提示", source, StringComparison.Ordinal);
         Assert.Contains("var deviceCatalogStore = new JsonDeviceCatalogStore();", source, StringComparison.Ordinal);
         Assert.DoesNotContain("new InMemoryDeviceCatalog", source, StringComparison.Ordinal);
         Assert.Contains("new DeviceCatalogPersistenceCoordinator", source, StringComparison.Ordinal);
-        Assert.Contains("await persistenceCoordinator.DisposeAsync();", source, StringComparison.Ordinal);
+        Assert.Contains("persistenceCoordinator.PersistenceFailed +=", source, StringComparison.Ordinal);
+        Assert.Contains("Dispatcher.BeginInvoke", source, StringComparison.Ordinal);
+        Assert.Contains("ShutdownCleanupCoordinator.ExecuteAsync", source, StringComparison.Ordinal);
+        Assert.Contains("persistenceCoordinator.DisposeAsync()", source, StringComparison.Ordinal);
         Assert.Contains("new MonitorViewModel(switchService, groups, deviceCatalog)", source, StringComparison.Ordinal);
         Assert.Contains("new DeviceManagementViewModel(deviceCatalog)", source, StringComparison.Ordinal);
         Assert.Contains("new SecondaryMonitorViewModel(switchService, groups, deviceCatalog)", source, StringComparison.Ordinal);

@@ -143,6 +143,28 @@ public sealed class DeviceCatalogPersistenceCoordinatorTests
     }
 
     [Fact]
+    public async Task FlushAsync_DrainsCurrentQueueAndContinuesToPersistLaterChanges()
+    {
+        var store = new RecordingStore();
+        var catalog = CreateCatalog();
+        await using var coordinator = new DeviceCatalogPersistenceCoordinator(catalog, store);
+
+        var first = CloneDevice(catalog.GetDevice(DeviceId)!);
+        first.Name = "第一次 Flush 修改";
+        catalog.UpdateDevice(first);
+        await coordinator.FlushAsync();
+
+        var second = CloneDevice(catalog.GetDevice(DeviceId)!);
+        second.Name = "第二次 Flush 修改";
+        catalog.UpdateDevice(second);
+        await coordinator.FlushAsync();
+
+        Assert.Equal(
+            new[] { "第一次 Flush 修改", "第二次 Flush 修改" },
+            store.Snapshots.Select(snapshot => snapshot.Devices.Single().Name));
+    }
+
+    [Fact]
     public async Task SnapshotIsCreatedBeforeLaterBusinessObjectMutation()
     {
         var firstSaveStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -243,6 +265,47 @@ public sealed class DeviceCatalogPersistenceCoordinatorTests
         Assert.Equal(2, store.SaveCallCount);
         Assert.Null(coordinator.LastPersistenceException);
         Assert.Equal("第二次修改", store.Snapshots.Last().Devices.Single().Name);
+    }
+
+    [Fact]
+    public async Task PersistenceFailed_NotifiesOnlyWhenFailureStateChanges()
+    {
+        var store = new RecordingStore
+        {
+            SaveBehavior = (_, callNumber, _) => callNumber switch
+            {
+                1 or 2 or 4 => Task.FromException(new IOException()),
+                _ => Task.CompletedTask
+            }
+        };
+        var catalog = CreateCatalog();
+        await using var coordinator = new DeviceCatalogPersistenceCoordinator(catalog, store);
+        var notificationCount = 0;
+        coordinator.PersistenceFailed += (_, _) => Interlocked.Increment(ref notificationCount);
+
+        await UpdateAndFlushAsync("第一次失败", expectFailure: true);
+        await UpdateAndFlushAsync("连续失败", expectFailure: true);
+        await UpdateAndFlushAsync("恢复成功", expectFailure: false);
+        await UpdateAndFlushAsync("恢复后的再次失败", expectFailure: true);
+
+        Assert.Equal(2, notificationCount);
+
+        async Task UpdateAndFlushAsync(string name, bool expectFailure)
+        {
+            var device = CloneDevice(catalog.GetDevice(DeviceId)!);
+            device.Name = name;
+            catalog.UpdateDevice(device);
+
+            if (expectFailure)
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(
+                    () => coordinator.FlushAsync());
+            }
+            else
+            {
+                await coordinator.FlushAsync();
+            }
+        }
     }
 
     [Fact]

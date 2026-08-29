@@ -39,6 +39,8 @@ public sealed class DeviceCatalogBootstrapper
         this.mockDataFactory = mockDataFactory ?? MockDeviceData.Create;
     }
 
+    public string? LastMigrationWarning { get; private set; }
+
     private static string DefaultOldCatalogPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "VideoMonitor",
@@ -48,6 +50,7 @@ public sealed class DeviceCatalogBootstrapper
     public async Task<InMemoryDeviceCatalog> InitializeAsync(
         CancellationToken cancellationToken = default)
     {
+        LastMigrationWarning = null;
         var existingSnapshot = await store
             .LoadAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -210,15 +213,13 @@ public sealed class DeviceCatalogBootstrapper
         }
         catch (IOException exception)
         {
-            throw new InvalidOperationException(
-                "旧用户设备目录迁移备份失败，新的机器级设备目录已保留。",
-                exception);
+            LastMigrationWarning = "旧用户设备目录迁移标记失败，新的机器级设备目录已保留。";
+            System.Diagnostics.Debug.WriteLine(exception.GetType().Name);
         }
         catch (UnauthorizedAccessException exception)
         {
-            throw new InvalidOperationException(
-                "旧用户设备目录迁移备份失败，新的机器级设备目录已保留。",
-                exception);
+            LastMigrationWarning = "旧用户设备目录迁移标记失败，新的机器级设备目录已保留。";
+            System.Diagnostics.Debug.WriteLine(exception.GetType().Name);
         }
     }
 
