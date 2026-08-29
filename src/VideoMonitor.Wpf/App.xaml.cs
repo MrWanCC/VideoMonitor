@@ -35,11 +35,13 @@ public partial class App
         var deviceCatalogStore = new JsonDeviceCatalogStore();
         InMemoryDeviceCatalog deviceCatalog;
         string? catalogMigrationWarning = null;
+        var catalogRecoveryOccurred = false;
         try
         {
             var bootstrapper = new DeviceCatalogBootstrapper(deviceCatalogStore);
             deviceCatalog = bootstrapper.InitializeAsync().GetAwaiter().GetResult();
             catalogMigrationWarning = bootstrapper.LastMigrationWarning;
+            catalogRecoveryOccurred = bootstrapper.RecoveryOccurred;
         }
         catch (Exception exception)
         {
@@ -49,6 +51,8 @@ public partial class App
                 UnauthorizedAccessException =>
                     "设备目录目录权限不足，请确认安装器已授予应用目录所需的修改权限。",
                 IOException => "设备目录文件无法访问，应用将退出。",
+                InvalidDataException => exception.Message,
+                NotSupportedException => exception.Message,
                 _ => "设备目录加载失败，应用将退出。"
             };
             System.Windows.MessageBox.Show(
@@ -335,6 +339,16 @@ public partial class App
                 mainWindow,
                 catalogMigrationWarning,
                 "迁移提示",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+
+        if (catalogRecoveryOccurred)
+        {
+            System.Windows.MessageBox.Show(
+                mainWindow,
+                "设备配置文件损坏，系统已从最近的有效备份恢复。\n原损坏文件已保留用于排查。",
+                "设备目录恢复提示",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }

@@ -41,6 +41,8 @@ public sealed class DeviceCatalogBootstrapper
 
     public string? LastMigrationWarning { get; private set; }
 
+    public bool RecoveryOccurred { get; private set; }
+
     private static string DefaultOldCatalogPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "VideoMonitor",
@@ -51,12 +53,30 @@ public sealed class DeviceCatalogBootstrapper
         CancellationToken cancellationToken = default)
     {
         LastMigrationWarning = null;
-        var existingSnapshot = await store
-            .LoadAsync(cancellationToken)
-            .ConfigureAwait(false);
-        if (existingSnapshot is not null)
+        RecoveryOccurred = false;
+        try
         {
-            return CreateCatalog(existingSnapshot);
+            var existingSnapshot = await store
+                .LoadAsync(cancellationToken)
+                .ConfigureAwait(false);
+            if (existingSnapshot is not null)
+            {
+                return CreateCatalog(existingSnapshot);
+            }
+        }
+        catch (Exception exception) when (
+            exception is (InvalidDataException or NotSupportedException)
+                && CanRecoverFormalCatalog())
+        {
+            var recoveredCatalog = await DeviceCatalogRecoveryService
+                .RecoverAsync(
+                    (JsonDeviceCatalogStore)store,
+                    CreateCatalog,
+                    exception,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            RecoveryOccurred = true;
+            return recoveredCatalog;
         }
 
         if (File.Exists(oldCatalogPath))
@@ -90,6 +110,10 @@ public sealed class DeviceCatalogBootstrapper
 
         return reloadedCatalog;
     }
+
+    private bool CanRecoverFormalCatalog() =>
+        store is JsonDeviceCatalogStore jsonStore
+            && File.Exists(jsonStore.FilePath);
 
     private async Task<InMemoryDeviceCatalog> MigrateOldCatalogAsync(
         CancellationToken cancellationToken)

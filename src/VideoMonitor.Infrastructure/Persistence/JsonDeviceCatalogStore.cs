@@ -53,6 +53,10 @@ public sealed class JsonDeviceCatalogStore : IDeviceCatalogStore
         "data",
         "device-catalog.json");
 
+    public string FilePath => filePath;
+
+    public DataProtectionScope ProtectionScope => protectionScope;
+
     public async Task<DeviceCatalogSnapshot?> LoadAsync(
         CancellationToken cancellationToken = default)
     {

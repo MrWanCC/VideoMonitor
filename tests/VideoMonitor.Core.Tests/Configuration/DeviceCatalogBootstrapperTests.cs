@@ -350,11 +350,345 @@ public sealed class DeviceCatalogBootstrapperTests
                 throw new InvalidOperationException("不应退回 Mock。");
             });
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => bootstrapper.InitializeAsync());
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(
+            () => bootstrapper.InitializeAsync());
 
         Assert.False(seedInvoked);
+        Assert.Contains("没有可用备份", exception.Message, StringComparison.Ordinal);
         Assert.Equal(original, await File.ReadAllTextAsync(catalogPath));
         Assert.True(File.Exists(legacyPath));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenFormalCatalogIsCorruptAndBackupIsValid_RecoversFromBackup()
+    {
+        using var directory = new TemporaryDirectory();
+        var catalogPath = directory.PathOf("device-catalog.json");
+        var backupPath = catalogPath + ".bak";
+        var corruptContent = "not valid formal json";
+        var store = new JsonDeviceCatalogStore(catalogPath);
+        await store.SaveAsync(CreateSnapshot("备份设备", "198.51.100.40", "backup-password"));
+        await store.SaveAsync(CreateSnapshot("正式设备", "198.51.100.41", "formal-password"));
+        await File.WriteAllTextAsync(catalogPath, corruptContent);
+
+        var bootstrapper = new DeviceCatalogBootstrapper(
+            store,
+            directory.PathOf("local-device.json"),
+            () => throw new InvalidOperationException("不应退回 Mock。"),
+            oldCatalogPath: directory.PathOf("old-device-catalog.json"));
+
+        var catalog = await bootstrapper.InitializeAsync();
+
+        Assert.Equal("备份设备", catalog.GetDevice(DeviceId)!.Name);
+        Assert.Equal("198.51.100.40", catalog.GetDevice(DeviceId)!.IpAddress);
+        Assert.Equal(corruptContent, await File.ReadAllTextAsync(
+            Directory.GetFiles(
+                directory.Path,
+                "device-catalog.corrupt-*.json").Single()));
+        Assert.Equal("备份设备", (await new JsonDeviceCatalogStore(backupPath).LoadAsync())!
+            .Devices.Single().Name);
+        Assert.Equal("备份设备", (await store.LoadAsync())!.Devices.Single().Name);
+        Assert.False(File.Exists(catalogPath + ".recovery.tmp"));
+        Assert.True(bootstrapper.RecoveryOccurred);
+
+        var nextBootstrapper = new DeviceCatalogBootstrapper(
+            store,
+            oldCatalogPath: directory.PathOf("old-device-catalog.json"));
+        _ = await nextBootstrapper.InitializeAsync();
+
+        Assert.False(nextBootstrapper.RecoveryOccurred);
+        Assert.Single(Directory.GetFiles(
+            directory.Path,
+            "device-catalog.corrupt-*.json"));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenFormalAndBackupAreValid_UsesFormalWithoutRecovery()
+    {
+        using var directory = new TemporaryDirectory();
+        var catalogPath = directory.PathOf("device-catalog.json");
+        var store = new JsonDeviceCatalogStore(catalogPath);
+        await store.SaveAsync(CreateSnapshot("备份设备", "198.51.100.52", "backup-password"));
+        await store.SaveAsync(CreateSnapshot("正式设备", "198.51.100.53", "formal-password"));
+
+        var bootstrapper = new DeviceCatalogBootstrapper(
+            store,
+            oldCatalogPath: directory.PathOf("old-device-catalog.json"));
+
+        var catalog = await bootstrapper.InitializeAsync();
+
+        Assert.Equal("正式设备", catalog.GetDevice(DeviceId)!.Name);
+        Assert.False(bootstrapper.RecoveryOccurred);
+        Assert.Empty(Directory.GetFiles(
+            directory.Path,
+            "device-catalog.corrupt-*.json"));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenFormalSchemaIsUnsupportedAndBackupIsValid_RecoversFromBackup()
+    {
+        using var directory = new TemporaryDirectory();
+        var catalogPath = directory.PathOf("device-catalog.json");
+        var store = new JsonDeviceCatalogStore(catalogPath);
+        await store.SaveAsync(CreateSnapshot("备份设备", "198.51.100.42", "backup-password"));
+        await store.SaveAsync(CreateSnapshot("当前设备", "198.51.100.43", "current-password"));
+        await File.WriteAllTextAsync(
+            catalogPath,
+            "{\"schemaVersion\":999,\"groups\":[],\"devices\":[]}");
+
+        var bootstrapper = new DeviceCatalogBootstrapper(
+            store,
+            oldCatalogPath: directory.PathOf("old-device-catalog.json"));
+
+        var catalog = await bootstrapper.InitializeAsync();
+
+        Assert.Equal("备份设备", catalog.GetDevice(DeviceId)!.Name);
+        Assert.True(bootstrapper.RecoveryOccurred);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenFormalDpapiIsInvalidAndBackupIsValid_RecoversFromBackup()
+    {
+        using var directory = new TemporaryDirectory();
+        var catalogPath = directory.PathOf("device-catalog.json");
+        var store = new JsonDeviceCatalogStore(catalogPath);
+        await store.SaveAsync(CreateSnapshot("备份设备", "198.51.100.44", "backup-password"));
+        await store.SaveAsync(CreateSnapshot("当前设备", "198.51.100.45", "current-password"));
+        await File.WriteAllTextAsync(
+            catalogPath,
+            """
+            {
+              "schemaVersion": 1,
+              "groups": [],
+              "devices": [{
+                "id": "50000000-0000-0000-0000-000000000001",
+                "password": "dpapi:v1:not-valid-base64",
+                "channels": []
+              }]
+            }
+            """);
+
+        var bootstrapper = new DeviceCatalogBootstrapper(
+            store,
+            oldCatalogPath: directory.PathOf("old-device-catalog.json"));
+
+        var catalog = await bootstrapper.InitializeAsync();
+
+        Assert.Equal("备份设备", catalog.GetDevice(DeviceId)!.Name);
+        Assert.True(bootstrapper.RecoveryOccurred);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenFormalCatalogFailsBusinessValidationAndBackupIsValid_RecoversFromBackup()
+    {
+        using var directory = new TemporaryDirectory();
+        var catalogPath = directory.PathOf("device-catalog.json");
+        var store = new JsonDeviceCatalogStore(catalogPath);
+        await store.SaveAsync(CreateSnapshot("备份设备", "198.51.100.46", "backup-password"));
+        await store.SaveAsync(CreateSnapshot("当前设备", "198.51.100.47", "current-password"));
+        await File.WriteAllTextAsync(
+            catalogPath,
+            $$"""
+            {
+              "schemaVersion": 1,
+              "groups": [],
+              "devices": [{
+                "id": "{{DeviceId}}",
+                "groupId": "72000000-0000-0000-0000-000000000001",
+                "password": "",
+                "channels": []
+              }]
+            }
+            """);
+
+        var bootstrapper = new DeviceCatalogBootstrapper(
+            store,
+            oldCatalogPath: directory.PathOf("old-device-catalog.json"));
+
+        var catalog = await bootstrapper.InitializeAsync();
+
+        Assert.Equal("备份设备", catalog.GetDevice(DeviceId)!.Name);
+        Assert.True(bootstrapper.RecoveryOccurred);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenFormalIsCorruptAndBackupSchemaIsUnsupported_FailsWithoutChangingFiles()
+    {
+        using var directory = new TemporaryDirectory();
+        var catalogPath = directory.PathOf("device-catalog.json");
+        var backupPath = catalogPath + ".bak";
+        var formalContent = "corrupt formal content";
+        var backupContent = "{\"schemaVersion\":999,\"groups\":[],\"devices\":[]}";
+        await File.WriteAllTextAsync(catalogPath, formalContent);
+        await File.WriteAllTextAsync(backupPath, backupContent);
+        var bootstrapper = new DeviceCatalogBootstrapper(
+            new JsonDeviceCatalogStore(catalogPath),
+            mockDataFactory: () => throw new InvalidOperationException("不应退回 Mock。"));
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => bootstrapper.InitializeAsync());
+
+        Assert.Equal(formalContent, await File.ReadAllTextAsync(catalogPath));
+        Assert.Equal(backupContent, await File.ReadAllTextAsync(backupPath));
+        Assert.Empty(Directory.GetFiles(
+            directory.Path,
+            "device-catalog.corrupt-*.json"));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenFormalIsCorruptAndBackupDpapiIsInvalid_FailsWithoutChangingFiles()
+    {
+        using var directory = new TemporaryDirectory();
+        var catalogPath = directory.PathOf("device-catalog.json");
+        var backupPath = catalogPath + ".bak";
+        var formalContent = "corrupt formal content";
+        var backupContent = $$"""
+            {
+              "schemaVersion": 1,
+              "groups": [],
+              "devices": [{
+                "id": "{{DeviceId}}",
+                "password": "dpapi:v1:not-valid-base64",
+                "channels": []
+              }]
+            }
+            """;
+        await File.WriteAllTextAsync(catalogPath, formalContent);
+        await File.WriteAllTextAsync(backupPath, backupContent);
+        var bootstrapper = new DeviceCatalogBootstrapper(
+            new JsonDeviceCatalogStore(catalogPath),
+            mockDataFactory: () => throw new InvalidOperationException("不应退回 Mock。"));
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => bootstrapper.InitializeAsync());
+
+        Assert.Equal(formalContent, await File.ReadAllTextAsync(catalogPath));
+        Assert.Equal(backupContent, await File.ReadAllTextAsync(backupPath));
+        Assert.Empty(Directory.GetFiles(
+            directory.Path,
+            "device-catalog.corrupt-*.json"));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenFormalIsCorruptAndBackupBusinessDataIsInvalid_FailsWithoutChangingFiles()
+    {
+        using var directory = new TemporaryDirectory();
+        var catalogPath = directory.PathOf("device-catalog.json");
+        var backupPath = catalogPath + ".bak";
+        var formalContent = "corrupt formal content";
+        var backupContent = $$"""
+            {
+              "schemaVersion": 1,
+              "groups": [],
+              "devices": [{
+                "id": "{{DeviceId}}",
+                "groupId": "72000000-0000-0000-0000-000000000001",
+                "password": "",
+                "channels": []
+              }]
+            }
+            """;
+        await File.WriteAllTextAsync(catalogPath, formalContent);
+        await File.WriteAllTextAsync(backupPath, backupContent);
+        var bootstrapper = new DeviceCatalogBootstrapper(
+            new JsonDeviceCatalogStore(catalogPath),
+            mockDataFactory: () => throw new InvalidOperationException("不应退回 Mock。"));
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => bootstrapper.InitializeAsync());
+
+        Assert.Equal(formalContent, await File.ReadAllTextAsync(catalogPath));
+        Assert.Equal(backupContent, await File.ReadAllTextAsync(backupPath));
+        Assert.Empty(Directory.GetFiles(
+            directory.Path,
+            "device-catalog.corrupt-*.json"));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenFormalIsCorruptAndBackupIsInvalid_KeepsBothFilesAndDoesNotSeedMock()
+    {
+        using var directory = new TemporaryDirectory();
+        var catalogPath = directory.PathOf("device-catalog.json");
+        var backupPath = catalogPath + ".bak";
+        var formalContent = "corrupt formal content";
+        var backupContent = "corrupt backup content";
+        await File.WriteAllTextAsync(catalogPath, formalContent);
+        await File.WriteAllTextAsync(backupPath, backupContent);
+        var seedInvoked = false;
+        var bootstrapper = new DeviceCatalogBootstrapper(
+            new JsonDeviceCatalogStore(catalogPath),
+            mockDataFactory: () =>
+            {
+                seedInvoked = true;
+                throw new InvalidOperationException("不应退回 Mock。");
+            });
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => bootstrapper.InitializeAsync());
+
+        Assert.False(seedInvoked);
+        Assert.Equal(formalContent, await File.ReadAllTextAsync(catalogPath));
+        Assert.Equal(backupContent, await File.ReadAllTextAsync(backupPath));
+        Assert.Empty(Directory.GetFiles(
+            directory.Path,
+            "device-catalog.corrupt-*.json"));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenFormalAndBackupAreRecoveredTwice_DoesNotOverwriteCorruptEvidenceOrBackup()
+    {
+        using var directory = new TemporaryDirectory();
+        var catalogPath = directory.PathOf("device-catalog.json");
+        var backupPath = catalogPath + ".bak";
+        var store = new JsonDeviceCatalogStore(catalogPath);
+        await store.SaveAsync(CreateSnapshot("备份设备", "198.51.100.48", "backup-password"));
+        await store.SaveAsync(CreateSnapshot("当前设备", "198.51.100.49", "current-password"));
+        var healthyBackup = await File.ReadAllTextAsync(backupPath);
+
+        await File.WriteAllTextAsync(catalogPath, "first corrupt content");
+        await new DeviceCatalogBootstrapper(
+            store,
+            oldCatalogPath: directory.PathOf("old-device-catalog.json"))
+            .InitializeAsync();
+
+        await File.WriteAllTextAsync(catalogPath, "second corrupt content");
+        await new DeviceCatalogBootstrapper(
+            store,
+            oldCatalogPath: directory.PathOf("old-device-catalog.json"))
+            .InitializeAsync();
+
+        var corruptFiles = Directory.GetFiles(
+            directory.Path,
+            "device-catalog.corrupt-*.json");
+        Assert.Equal(2, corruptFiles.Length);
+        Assert.Contains(
+            corruptFiles,
+            path => File.ReadAllText(path) == "first corrupt content");
+        Assert.Contains(
+            corruptFiles,
+            path => File.ReadAllText(path) == "second corrupt content");
+        Assert.Equal(healthyBackup, await File.ReadAllTextAsync(backupPath));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenFormalIsMissing_DoesNotUseBackupAsInitialData()
+    {
+        using var directory = new TemporaryDirectory();
+        var catalogPath = directory.PathOf("device-catalog.json");
+        var store = new JsonDeviceCatalogStore(catalogPath);
+        await store.SaveAsync(CreateSnapshot("备份设备", "198.51.100.50", "backup-password"));
+        await store.SaveAsync(CreateSnapshot("当前设备", "198.51.100.51", "current-password"));
+        File.Delete(catalogPath);
+
+        var bootstrapper = new DeviceCatalogBootstrapper(
+            store,
+            oldCatalogPath: directory.PathOf("old-device-catalog.json"));
+
+        var catalog = await bootstrapper.InitializeAsync();
+
+        Assert.NotEqual("备份设备", catalog.GetDevice(DeviceId)!.Name);
+        Assert.False(bootstrapper.RecoveryOccurred);
+        Assert.True(File.Exists(catalogPath));
     }
 
     [Fact]
@@ -386,9 +720,11 @@ public sealed class DeviceCatalogBootstrapperTests
                 throw new InvalidOperationException("不应退回 Mock。");
             });
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => bootstrapper.InitializeAsync());
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(
+            () => bootstrapper.InitializeAsync());
 
         Assert.False(seedInvoked);
+        Assert.Contains("没有可用备份", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -409,9 +745,11 @@ public sealed class DeviceCatalogBootstrapperTests
                 throw new InvalidOperationException("不应退回 Mock。");
             });
 
-        await Assert.ThrowsAsync<NotSupportedException>(() => bootstrapper.InitializeAsync());
+        var exception = await Assert.ThrowsAsync<NotSupportedException>(
+            () => bootstrapper.InitializeAsync());
 
         Assert.False(seedInvoked);
+        Assert.Contains("没有可用备份", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -471,6 +809,9 @@ public sealed class DeviceCatalogBootstrapperTests
         Assert.Contains("new DeviceCatalogBootstrapper", source, StringComparison.Ordinal);
         Assert.Contains("LastMigrationWarning", source, StringComparison.Ordinal);
         Assert.Contains("迁移提示", source, StringComparison.Ordinal);
+        Assert.Contains("RecoveryOccurred", source, StringComparison.Ordinal);
+        Assert.Contains("设备配置文件损坏，系统已从最近的有效备份恢复", source, StringComparison.Ordinal);
+        Assert.Contains("InvalidDataException => exception.Message", source, StringComparison.Ordinal);
         Assert.Contains("var deviceCatalogStore = new JsonDeviceCatalogStore();", source, StringComparison.Ordinal);
         Assert.DoesNotContain("new InMemoryDeviceCatalog", source, StringComparison.Ordinal);
         Assert.Contains("new DeviceCatalogPersistenceCoordinator", source, StringComparison.Ordinal);
