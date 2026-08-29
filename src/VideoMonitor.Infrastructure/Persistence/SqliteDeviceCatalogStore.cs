@@ -191,17 +191,17 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
         }
 
         if (!hasSchemaMigrationsTable
-            || schemaVersion < DeviceCatalogSnapshot.CurrentSchemaVersion)
+            || schemaVersion < SqliteDatabaseInitializer.CurrentSchemaVersion)
         {
             await databaseInitializer.InitializeAsync(cancellationToken)
                 .ConfigureAwait(false);
             return;
         }
 
-        if (schemaVersion > DeviceCatalogSnapshot.CurrentSchemaVersion)
+        if (schemaVersion > SqliteDatabaseInitializer.CurrentSchemaVersion)
         {
             throw new NotSupportedException(
-                $"数据库 SchemaVersion {schemaVersion} 高于当前支持版本 {DeviceCatalogSnapshot.CurrentSchemaVersion}。");
+                $"数据库 SchemaVersion {schemaVersion} 高于当前支持版本 {SqliteDatabaseInitializer.CurrentSchemaVersion}。");
         }
     }
 
@@ -210,6 +210,7 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
         var connection = connectionFactory.CreateConnection();
         var builder = new SqliteConnectionStringBuilder(connection.ConnectionString)
         {
+            // Shared-cache table locks can block snapshot reads; private cache plus WAL keeps writers independent.
             Cache = SqliteCacheMode.Private
         };
         connection.ConnectionString = builder.ToString();
