@@ -52,7 +52,7 @@ VideoMonitor.Wpf
 Server:
   SQLite
   Camera Credentials
-  Groups / Devices / Channels / StreamProfiles
+  Groups / Devices / Channels (ChannelNo + StreamType)
   Backup / Recovery
 
 WPF:
@@ -63,6 +63,8 @@ WPF:
 ```
 
 WPF 不保存正式 Camera Password、ZLM Secret 或自己的可编辑权威设备库。
+
+V1 keeps `StreamType` on `CameraChannel`; `StreamId` and `CameraStatus` are runtime-only.
 
 ## Streaming rules
 

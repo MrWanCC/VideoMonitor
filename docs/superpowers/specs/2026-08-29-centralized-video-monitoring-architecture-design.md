@@ -134,9 +134,12 @@ Failed
 - DeviceGroup；
 - CameraDevice；
 - CameraChannel；
-- Main/Sub StreamProfile；
+- 主码流 / 子码流（由 `CameraChannel.StreamType` 表达）；
 - Enabled；
 - 厂商、型号、IP、SDK/RTSP Port、备注等。
+
+第一版领域模型不新增独立 `StreamProfile` 实体：同一物理通道的 Main/Sub
+分别对应两条 `CameraChannel` 记录，由 `StreamType` 区分。
 
 密码允许录入/修改，但查询详情不返回原密码，只返回 `hasPassword` 等信息。
 
@@ -485,7 +488,6 @@ IP/Port/Password/Channel/Profile 变化后，旧 Entry 被标记失效，下一�
 device_groups
 camera_devices
 camera_channels
-stream_profiles
 server_settings
 schema_migrations
 ```
@@ -493,11 +495,36 @@ schema_migrations
 关键约束：
 
 ```text
-UNIQUE(device_id, channel_no)
-UNIQUE(channel_id, stream_type)
+UNIQUE(device_id, channel_no, stream_type)
 ```
 
-运行时 Stream 状态不入库。
+第一版 `camera_channels` 的业务身份是：
+
+```text
+(device_id, channel_no, stream_type)
+```
+
+因此同一物理 `channel_no` 可以同时存在 Main 和 Sub 两条记录。
+
+以下字段和状态不属于正式 SQLite 持久化数据：
+
+- `CameraChannel.StreamId`：继续由 `StreamIdGenerator` 在运行时派生；
+- `CameraDevice.Status` / `CameraStatus`：运行时设备状态，Server 启动后重新探测或计算；
+- Runtime Stream 状态：不把上次退出时的 Online/Offline、Ready 等状态当作下次启动事实。
+
+正式持久化的数据主要是 `DeviceGroup`、`CameraDevice` 配置和
+`CameraChannel` 配置。
+
+第一版不为了数据库规范化提前拆分 `StreamProfile`。只有未来确实需要持久化
+`Resolution`、`Bitrate`、`FPS`、`Codec`、`ProfileName` 或第三路及更多码流配置时，
+才通过数据库 Migration 和领域模型升级为：
+
+```text
+CameraChannel
+└─ StreamProfile
+```
+
+当前不提前实现。
 
 ## 11. 数据目录
 

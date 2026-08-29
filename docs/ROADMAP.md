@@ -20,7 +20,8 @@
 
 ```text
 Architecture approved
-Documentation landing in Git
+Documentation committed to Git
+Architecture baseline: 32c5b4dda6443d130ef4cf544188f6ce5da9ad08
 Business-code implementation NOT started
 ```
 
