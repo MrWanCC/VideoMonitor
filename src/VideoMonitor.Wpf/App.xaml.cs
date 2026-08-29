@@ -33,17 +33,6 @@ public partial class App
         var singleCameraEnabled = playbackConfiguration?.SingleCameraTest.Enabled == true;
         var deviceData = MockDeviceData.Create();
         var deviceCatalog = new InMemoryDeviceCatalog(deviceData.Groups, deviceData.Devices);
-        if (singleCameraEnabled && playbackConfiguration?.Device is { } configuredDevice)
-        {
-            try
-            {
-                LocalDeviceCatalogOverride.Apply(deviceCatalog, configuredDevice);
-            }
-            catch (InvalidOperationException exception)
-            {
-                playbackConfigurationError = exception.Message;
-            }
-        }
 
         var groups = MonitorCatalogProjection.CreateGroups(deviceCatalog);
         var switchService = new MonitorSwitchService(
@@ -71,13 +60,14 @@ public partial class App
 
         if (singleCameraEnabled
             && playbackConfigurationError is null
-            && playbackConfiguration?.Device is { } localDevice)
+            && playbackConfiguration is { } configuredPlayback)
         {
             try
             {
                 playbackSelection = SingleCameraPlaybackComposition.SelectDevice(
                     deviceCatalog,
-                    localDevice);
+                    configuredPlayback.SingleCameraTest.DeviceId,
+                    configuredPlayback.SingleCameraTest.ChannelId);
                 zlmHttpClient = new HttpClient
                 {
                     Timeout = TimeSpan.FromSeconds(7)

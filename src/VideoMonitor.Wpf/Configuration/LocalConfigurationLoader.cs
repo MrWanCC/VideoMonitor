@@ -8,7 +8,6 @@ namespace VideoMonitor.Wpf.Configuration;
 public static class LocalConfigurationLoader
 {
     private const string AppSettingsFileName = "appsettings.Development.json";
-    private const string DeviceFileName = "local-device.json";
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -29,25 +28,17 @@ public static class LocalConfigurationLoader
         var zlmOptions = document.Zlm ?? new ZlmOptions();
         if (!testOptions.Enabled)
         {
-            return new LocalPlaybackConfiguration(testOptions, zlmOptions, null);
+            return new LocalPlaybackConfiguration(testOptions, zlmOptions);
         }
 
         ValidateZlm(zlmOptions);
-        var devicePath = Path.Combine(baseDirectory, DeviceFileName);
-        if (!File.Exists(devicePath))
-        {
-            throw new InvalidOperationException($"启用单路视频验证时必须提供{DeviceFileName}。");
-        }
-
-        var deviceOptions = Deserialize<LocalDeviceOptions>(devicePath);
-        ValidateDevice(deviceOptions);
-        return new LocalPlaybackConfiguration(testOptions, zlmOptions, deviceOptions);
+        ValidateSingleCameraTest(testOptions);
+        return new LocalPlaybackConfiguration(testOptions, zlmOptions);
     }
 
     private static LocalPlaybackConfiguration DisabledConfiguration() => new(
         new SingleCameraTestOptions(),
-        new ZlmOptions(),
-        null);
+        new ZlmOptions());
 
     private static T Deserialize<T>(string path)
     {
@@ -80,27 +71,16 @@ public static class LocalConfigurationLoader
         ValidatePort(options.RtspPort, "Zlm.RtspPort");
     }
 
-    private static void ValidateDevice(LocalDeviceOptions options)
+    private static void ValidateSingleCameraTest(SingleCameraTestOptions options)
     {
         if (options.DeviceId == Guid.Empty)
         {
-            throw new InvalidOperationException("配置项LocalDevice.DeviceId不能为空。");
+            throw new InvalidOperationException("配置项SingleCameraTest.DeviceId不能为空。");
         }
 
         if (options.ChannelId == Guid.Empty)
         {
-            throw new InvalidOperationException("配置项LocalDevice.ChannelId不能为空。");
-        }
-
-        Require(options.LocalIdentifier, "LocalDevice.LocalIdentifier");
-        Require(options.IpAddress, "LocalDevice.IpAddress");
-        Require(options.Username, "LocalDevice.Username");
-        Require(options.Password, "LocalDevice.Password");
-        ValidatePort(options.RtspPort, "LocalDevice.RtspPort");
-
-        if (options.ChannelNo < 1)
-        {
-            throw new InvalidOperationException("配置项LocalDevice.ChannelNo必须大于零。");
+            throw new InvalidOperationException("配置项SingleCameraTest.ChannelId不能为空。");
         }
     }
 

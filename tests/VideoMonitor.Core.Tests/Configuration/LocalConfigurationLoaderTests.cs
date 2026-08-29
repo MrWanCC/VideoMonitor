@@ -13,6 +13,12 @@ public sealed class LocalConfigurationLoaderTests
         var configuration = LocalConfigurationLoader.Load(directory.Path);
 
         Assert.False(configuration.SingleCameraTest.Enabled);
+        Assert.Equal(
+            Guid.Parse("50000000-0000-0000-0000-000000000001"),
+            configuration.SingleCameraTest.DeviceId);
+        Assert.Equal(
+            Guid.Parse("60000000-0000-0000-0000-000000000001"),
+            configuration.SingleCameraTest.ChannelId);
     }
 
     [Fact]
@@ -26,29 +32,28 @@ public sealed class LocalConfigurationLoaderTests
         var configuration = LocalConfigurationLoader.Load(directory.Path);
 
         Assert.False(configuration.SingleCameraTest.Enabled);
-        Assert.Null(configuration.Device);
+        Assert.Equal(
+            Guid.Parse("50000000-0000-0000-0000-000000000001"),
+            configuration.SingleCameraTest.DeviceId);
     }
 
     [Fact]
-    public void Load_WhenEnabled_ParsesDiscreteCameraAndZlmFields()
+    public void Load_WhenEnabledWithoutLegacyDeviceFile_ParsesIdsAndZlmFields()
     {
         using var directory = ValidConfigurationDirectory();
 
         var configuration = LocalConfigurationLoader.Load(directory.Path);
 
         Assert.True(configuration.SingleCameraTest.Enabled);
-        Assert.Equal("http://192.0.2.10", configuration.Zlm.BaseUrl);
-        Assert.Equal("192.0.2.10", configuration.Zlm.RtspHost);
-        Assert.Equal("192.0.2.20", configuration.Device!.IpAddress);
-        Assert.Equal("camera001", configuration.Device.LocalIdentifier);
         Assert.Equal(
             Guid.Parse("50000000-0000-0000-0000-000000000001"),
-            configuration.Device.DeviceId);
+            configuration.SingleCameraTest.DeviceId);
         Assert.Equal(
             Guid.Parse("60000000-0000-0000-0000-000000000001"),
-            configuration.Device.ChannelId);
-        Assert.Equal(StreamType.Main, configuration.Device.StreamType);
-        Assert.DoesNotContain("SourceUrl", directory.Read("local-device.json"));
+            configuration.SingleCameraTest.ChannelId);
+        Assert.Equal("http://192.0.2.10", configuration.Zlm.BaseUrl);
+        Assert.Equal("192.0.2.10", configuration.Zlm.RtspHost);
+        Assert.False(File.Exists(Path.Combine(directory.Path, "local-device.json")));
     }
 
     [Fact]
@@ -59,7 +64,11 @@ public sealed class LocalConfigurationLoaderTests
             "appsettings.Development.json",
             """
             {
-              "SingleCameraTest": { "Enabled": true },
+              "SingleCameraTest": {
+                "Enabled": true,
+                "DeviceId": "50000000-0000-0000-0000-000000000001",
+                "ChannelId": "60000000-0000-0000-0000-000000000001"
+              },
               "Zlm": {
                 "BaseUrl": "http://192.0.2.10",
                 "Secret": "",
@@ -78,41 +87,71 @@ public sealed class LocalConfigurationLoaderTests
         Assert.DoesNotContain("camera-password", exception.Message);
     }
 
+    [Fact]
+    public void Load_WhenEnabledAndDeviceIdIsEmpty_Throws()
+    {
+        using var directory = ValidConfigurationDirectory();
+        directory.Write(
+            "appsettings.Development.json",
+            ValidConfigurationJson(deviceId: Guid.Empty));
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            LocalConfigurationLoader.Load(directory.Path));
+
+        Assert.Contains("SingleCameraTest.DeviceId", exception.Message);
+    }
+
+    [Fact]
+    public void Load_WhenEnabledAndChannelIdIsEmpty_Throws()
+    {
+        using var directory = ValidConfigurationDirectory();
+        directory.Write(
+            "appsettings.Development.json",
+            ValidConfigurationJson(channelId: Guid.Empty));
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            LocalConfigurationLoader.Load(directory.Path));
+
+        Assert.Contains("SingleCameraTest.ChannelId", exception.Message);
+    }
+
+    [Fact]
+    public void Load_WhenEnabled_IgnoresLegacyDeviceFile()
+    {
+        using var directory = ValidConfigurationDirectory();
+        directory.Write("local-device.json", "not valid json");
+
+        var configuration = LocalConfigurationLoader.Load(directory.Path);
+
+        Assert.True(configuration.SingleCameraTest.Enabled);
+    }
+
     private static TemporaryDirectory ValidConfigurationDirectory()
     {
         var directory = new TemporaryDirectory();
-        directory.Write(
-            "appsettings.Development.json",
-            """
-            {
-              "SingleCameraTest": { "Enabled": true },
-              "Zlm": {
-                "BaseUrl": "http://192.0.2.10",
-                "Secret": "example-secret",
-                "Vhost": "__defaultVhost__",
-                "App": "live",
-                "RtspHost": "192.0.2.10",
-                "RtspPort": 554
-              }
-            }
-            """);
-        directory.Write(
-            "local-device.json",
-            """
-            {
-              "DeviceId": "50000000-0000-0000-0000-000000000001",
-              "ChannelId": "60000000-0000-0000-0000-000000000001",
-              "LocalIdentifier": "camera001",
-              "IpAddress": "192.0.2.20",
-              "RtspPort": 554,
-              "Username": "admin",
-              "Password": "camera-password",
-              "ChannelNo": 1,
-              "StreamType": "Main"
-            }
-            """);
+        directory.Write("appsettings.Development.json", ValidConfigurationJson());
         return directory;
     }
+
+    private static string ValidConfigurationJson(
+        Guid? deviceId = null,
+        Guid? channelId = null) => $$"""
+        {
+          "SingleCameraTest": {
+            "Enabled": true,
+            "DeviceId": "{{deviceId ?? Guid.Parse("50000000-0000-0000-0000-000000000001")}}",
+            "ChannelId": "{{channelId ?? Guid.Parse("60000000-0000-0000-0000-000000000001")}}"
+          },
+          "Zlm": {
+            "BaseUrl": "http://192.0.2.10",
+            "Secret": "example-secret",
+            "Vhost": "__defaultVhost__",
+            "App": "live",
+            "RtspHost": "192.0.2.10",
+            "RtspPort": 554
+          }
+        }
+        """;
 
     private sealed class TemporaryDirectory : IDisposable
     {
