@@ -1,10 +1,11 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Net.Http;
 using System.Windows;
 using LibVLCSharp.Shared;
-using VideoMonitor.Core.Mock;
 using VideoMonitor.Core.Services;
+using VideoMonitor.Infrastructure.Persistence;
 using VideoMonitor.Infrastructure.ZLMediaKit;
 using VideoMonitor.Wpf.Configuration;
 using VideoMonitor.Wpf.Playback;
@@ -31,8 +32,31 @@ public partial class App
         }
 
         var singleCameraEnabled = playbackConfiguration?.SingleCameraTest.Enabled == true;
-        var deviceData = MockDeviceData.Create();
-        var deviceCatalog = new InMemoryDeviceCatalog(deviceData.Groups, deviceData.Devices);
+        var deviceCatalogStore = new JsonDeviceCatalogStore();
+        InMemoryDeviceCatalog deviceCatalog;
+        try
+        {
+            deviceCatalog = new DeviceCatalogBootstrapper(
+                deviceCatalogStore).InitializeAsync().GetAwaiter().GetResult();
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception.GetType().Name);
+            var startupError = exception switch
+            {
+                UnauthorizedAccessException =>
+                    "设备目录目录权限不足，请确认安装器已授予应用目录所需的修改权限。",
+                IOException => "设备目录文件无法访问，应用将退出。",
+                _ => "设备目录加载失败，应用将退出。"
+            };
+            System.Windows.MessageBox.Show(
+                startupError,
+                "启动失败",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
 
         var groups = MonitorCatalogProjection.CreateGroups(deviceCatalog);
         var switchService = new MonitorSwitchService(
@@ -99,6 +123,10 @@ public partial class App
                 playbackCoordinator = null;
             }
         }
+
+        var persistenceCoordinator = new DeviceCatalogPersistenceCoordinator(
+            deviceCatalog,
+            deviceCatalogStore);
 
         mainWindow.SourceInitialized += (_, _) => screenService.PlaceMainWindow(mainWindow);
 
@@ -170,11 +198,25 @@ public partial class App
 
             vlcPlaybackService?.Dispose();
             zlmHttpClient?.Dispose();
+
+            try
+            {
+                await persistenceCoordinator.DisposeAsync();
+            }
+            catch (InvalidOperationException exception)
+            {
+                Debug.WriteLine(exception.GetType().Name);
+                System.Windows.MessageBox.Show(
+                    "设备目录保存失败，最后一次修改可能未保存。",
+                    "关闭提示",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
         }
 
         async void OnMainWindowClosing(object? sender, CancelEventArgs args)
         {
-            if (allowMainWindowClose || playbackCoordinator is null)
+            if (allowMainWindowClose)
             {
                 ApplyFinalWindowClose();
                 return;

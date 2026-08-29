@@ -12,6 +12,7 @@ public sealed class CameraChannel
 
     public StreamType StreamType { get; set; } = StreamType.Main;
 
+    // Derived by StreamIdGenerator for runtime playback; it is not persistent configuration.
     public string StreamId { get; set; } = string.Empty;
 
     public bool Enabled { get; set; } = true;

@@ -15,6 +15,7 @@ public sealed class CameraStatusToTextConverter : IValueConverter
             {
                 CameraStatus.Online => "在线",
                 CameraStatus.Warning => "异常",
+                CameraStatus.Unknown => "未探测",
                 _ => "离线"
             }
             : "离线";
@@ -33,6 +34,7 @@ public sealed class CameraStatusToBrushConverter : IValueConverter
             {
                 CameraStatus.Online => "OnlineGreenBrush",
                 CameraStatus.Warning => "WarningOrangeBrush",
+                CameraStatus.Unknown => "OfflineGrayBrush",
                 _ => "OfflineGrayBrush"
             }
             : "OfflineGrayBrush";

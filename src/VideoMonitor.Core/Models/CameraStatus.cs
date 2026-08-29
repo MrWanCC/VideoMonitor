@@ -2,7 +2,8 @@ namespace VideoMonitor.Core.Models;
 
 public enum CameraStatus
 {
-    Online,
-    Warning,
-    Offline
+    Online = 0,
+    Warning = 1,
+    Offline = 2,
+    Unknown = 3
 }
