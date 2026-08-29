@@ -234,6 +234,87 @@ public sealed class SqliteDeviceCatalogStoreTests
         AssertDeviceConfigurationEqual(source.Devices[0], Assert.Single(loaded.Devices));
     }
 
+    [Fact]
+    public async Task LoadAsync_ConcurrentSaveReturnsSingleConsistentSnapshot()
+    {
+        using var context = TestContext.Create();
+        var snapshotA = CreateSnapshot("Snapshot A");
+        snapshotA.Groups[0].Name = "Root A";
+        snapshotA.Groups[1].Name = "Child A";
+        await context.CreateStore().SaveAsync(snapshotA);
+
+        var snapshotB = CreateSnapshot("Snapshot B");
+        snapshotB.Groups[0].Name = "Root B";
+        snapshotB.Groups[1].Name = "Child B";
+        var blockingProtector = new BlockingSecretProtector(context.CreateProtector());
+        var loadingStore = context.CreateStore(blockingProtector);
+
+        var loadTask = loadingStore.LoadAsync();
+        await blockingProtector.Entered.Task;
+
+        await context.CreateStore().SaveAsync(snapshotB);
+        blockingProtector.Release.TrySetResult(true);
+
+        var loaded = await loadTask;
+        Assert.NotNull(loaded);
+        Assert.Equal("Root A", loaded.Groups[0].Name);
+        Assert.Equal("Child A", loaded.Groups[1].Name);
+        Assert.Equal("Snapshot A", Assert.Single(loaded.Devices).Name);
+    }
+
+    [Fact]
+    public async Task SaveAsync_InvalidTransportModePreservesExistingSnapshot()
+    {
+        using var context = TestContext.Create();
+        var store = context.CreateStore();
+        var source = CreateSnapshot();
+        await store.SaveAsync(source);
+
+        var invalid = CreateSnapshot("Snapshot B");
+        invalid.Devices[0].TransportMode = (TransportMode)999;
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync(invalid));
+
+        var loaded = await store.LoadAsync();
+        Assert.NotNull(loaded);
+        AssertDeviceConfigurationEqual(source.Devices[0], Assert.Single(loaded.Devices));
+
+        await using var connection = context.CreateConnection();
+        await connection.OpenAsync();
+        var persistedMode = await ReadScalarAsync(
+            connection,
+            "SELECT transport_mode FROM camera_devices LIMIT 1;");
+        Assert.Equal("Tcp", persistedMode);
+        Assert.DoesNotContain("999", persistedMode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SaveAsync_InvalidStreamTypePreservesExistingSnapshot()
+    {
+        using var context = TestContext.Create();
+        var store = context.CreateStore();
+        var source = CreateSnapshot();
+        await store.SaveAsync(source);
+
+        var invalid = CreateSnapshot("Snapshot B");
+        invalid.Devices[0].Channels[0].StreamType = (StreamType)999;
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync(invalid));
+
+        var loaded = await store.LoadAsync();
+        Assert.NotNull(loaded);
+        AssertDeviceConfigurationEqual(source.Devices[0], Assert.Single(loaded.Devices));
+
+        await using var connection = context.CreateConnection();
+        await connection.OpenAsync();
+        var persistedType = await ReadScalarAsync(
+            connection,
+            "SELECT stream_type FROM camera_channels WHERE id = $id;",
+            ("$id", source.Devices[0].Channels[0].Id.ToString("N")));
+        Assert.Equal("Main", persistedType);
+        Assert.DoesNotContain("999", persistedType, StringComparison.Ordinal);
+    }
+
     private static DeviceCatalogSnapshot CreateSnapshot(string deviceName = "Camera A")
     {
         var rootId = Guid.Parse("81000000-0000-0000-0000-000000000001");
@@ -348,23 +429,34 @@ public sealed class SqliteDeviceCatalogStoreTests
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
-        foreach (var (name, value) in parameters)
+        foreach (var (name, parameterValue) in parameters)
         {
             var parameter = command.CreateParameter();
             parameter.ParameterName = name;
-            parameter.Value = value;
+            parameter.Value = parameterValue;
             command.Parameters.Add(parameter);
         }
 
         await command.ExecuteNonQueryAsync();
     }
 
-    private static async Task<string> ReadScalarAsync(DbConnection connection, string sql)
+    private static async Task<string> ReadScalarAsync(
+        DbConnection connection,
+        string sql,
+        params (string Name, object Value)[] parameters)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
-        var value = await command.ExecuteScalarAsync();
-        return Convert.ToString(value) ?? string.Empty;
+        foreach (var (name, parameterValue) in parameters)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = parameterValue;
+            command.Parameters.Add(parameter);
+        }
+
+        var result = await command.ExecuteScalarAsync();
+        return Convert.ToString(result) ?? string.Empty;
     }
 
     private static void ClearSqliteConnectionPools()
@@ -404,8 +496,11 @@ public sealed class SqliteDeviceCatalogStoreTests
 
         public DbConnection CreateConnection() => Factory.CreateConnection();
 
+        public ISecretProtector CreateProtector() =>
+            new AesGcmSecretProtector(new FixedMasterKeyProvider());
+
         public SqliteDeviceCatalogStore CreateStore(ISecretProtector? protector = null) =>
-            new(Factory, Initializer, protector ?? new AesGcmSecretProtector(new FixedMasterKeyProvider()));
+            new(Factory, Initializer, protector ?? CreateProtector());
 
         public void Dispose()
         {
@@ -433,6 +528,42 @@ public sealed class SqliteDeviceCatalogStoreTests
 
         public Task<byte[]> GetOrCreateAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(Key.ToArray());
+    }
+
+    private sealed class BlockingSecretProtector : ISecretProtector
+    {
+        private readonly ISecretProtector inner;
+
+        public BlockingSecretProtector(ISecretProtector inner)
+        {
+            this.inner = inner;
+        }
+
+        public TaskCompletionSource<bool> Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<string> ProtectAsync(
+            string plaintext,
+            string purpose,
+            CancellationToken cancellationToken = default) =>
+            inner.ProtectAsync(plaintext, purpose, cancellationToken);
+
+        public async Task<string> UnprotectAsync(
+            string protectedValue,
+            string purpose,
+            CancellationToken cancellationToken = default)
+        {
+            Entered.TrySetResult(true);
+            await Release.Task.WaitAsync(cancellationToken);
+            return await inner.UnprotectAsync(
+                    protectedValue,
+                    purpose,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     private sealed class FailingSecretProtector : ISecretProtector

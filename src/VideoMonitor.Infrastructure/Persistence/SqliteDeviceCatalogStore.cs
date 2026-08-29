@@ -31,15 +31,37 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
         await databaseInitializer.InitializeAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        await using var connection = connectionFactory.CreateConnection();
+        await using var connection = CreateStoreConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        var groups = await ReadGroupsAsync(connection, cancellationToken)
-            .ConfigureAwait(false);
-        var devices = await ReadDevicesAsync(connection, cancellationToken)
-            .ConfigureAwait(false);
-        await ReadChannelsAsync(connection, devices, cancellationToken)
-            .ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: true);
+        List<DeviceGroup> groups;
+        List<CameraDevice> devices;
+        try
+        {
+            groups = await ReadGroupsAsync(connection, transaction, cancellationToken)
+                .ConfigureAwait(false);
+            devices = await ReadDevicesAsync(connection, transaction, cancellationToken)
+                .ConfigureAwait(false);
+            await ReadChannelsAsync(connection, transaction, devices, cancellationToken)
+                .ConfigureAwait(false);
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            try
+            {
+                await transaction.RollbackAsync(CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                // Preserve the original load failure.
+            }
+
+            throw;
+        }
 
         ValidateLoadedCatalog(groups, devices);
 
@@ -66,10 +88,10 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            await databaseInitializer.InitializeAsync(cancellationToken)
+            await EnsureDatabaseInitializedAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            await using var connection = connectionFactory.CreateConnection();
+            await using var connection = CreateStoreConnection();
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
             await using var transaction = (SqliteTransaction)await connection
                 .BeginTransactionAsync(cancellationToken)
@@ -136,6 +158,64 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
         return encryptedPasswords;
     }
 
+    private async Task EnsureDatabaseInitializedAsync(
+        CancellationToken cancellationToken)
+    {
+        var schemaVersion = 0;
+        var hasSchemaMigrationsTable = false;
+
+        await using (var connection = CreateStoreConnection())
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            await using (var tableCommand = connection.CreateCommand())
+            {
+                tableCommand.CommandText = """
+                    SELECT COUNT(*)
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = 'schema_migrations';
+                    """;
+                hasSchemaMigrationsTable = Convert.ToInt32(
+                        await tableCommand.ExecuteScalarAsync(cancellationToken)
+                            .ConfigureAwait(false)) > 0;
+            }
+
+            if (hasSchemaMigrationsTable)
+            {
+                await using var versionCommand = connection.CreateCommand();
+                versionCommand.CommandText = "SELECT MAX(version) FROM schema_migrations;";
+                var value = await versionCommand.ExecuteScalarAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                schemaVersion = value is null or DBNull ? 0 : Convert.ToInt32(value);
+            }
+        }
+
+        if (!hasSchemaMigrationsTable
+            || schemaVersion < DeviceCatalogSnapshot.CurrentSchemaVersion)
+        {
+            await databaseInitializer.InitializeAsync(cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        if (schemaVersion > DeviceCatalogSnapshot.CurrentSchemaVersion)
+        {
+            throw new NotSupportedException(
+                $"数据库 SchemaVersion {schemaVersion} 高于当前支持版本 {DeviceCatalogSnapshot.CurrentSchemaVersion}。");
+        }
+    }
+
+    private SqliteConnection CreateStoreConnection()
+    {
+        var connection = connectionFactory.CreateConnection();
+        var builder = new SqliteConnectionStringBuilder(connection.ConnectionString)
+        {
+            Cache = SqliteCacheMode.Private
+        };
+        connection.ConnectionString = builder.ToString();
+        return connection;
+    }
+
     private static void ValidateSnapshot(DeviceCatalogSnapshot snapshot)
     {
         if (snapshot.SchemaVersion != DeviceCatalogSnapshot.CurrentSchemaVersion)
@@ -151,6 +231,22 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
         catch (ArgumentException exception)
         {
             throw new InvalidDataException("设备目录数据校验失败。", exception);
+        }
+
+        foreach (var device in snapshot.Devices)
+        {
+            if (!Enum.IsDefined(typeof(TransportMode), device.TransportMode))
+            {
+                throw new InvalidDataException("设备目录包含无效的传输模式。");
+            }
+
+            foreach (var channel in device.Channels)
+            {
+                if (!Enum.IsDefined(typeof(StreamType), channel.StreamType))
+                {
+                    throw new InvalidDataException("设备目录包含无效的码流类型。");
+                }
+            }
         }
 
         var duplicateStreamIdentity = snapshot.Devices
@@ -302,9 +398,11 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
 
     private async Task<List<DeviceGroup>> ReadGroupsAsync(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT id, name, parent_id, sort, enabled
             FROM device_groups
@@ -332,9 +430,11 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
 
     private async Task<List<CameraDevice>> ReadDevicesAsync(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT id, group_id, name, ip_address, sdk_port, rtsp_port,
                    username, password_ciphertext, manufacturer, model,
@@ -381,12 +481,14 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
 
     private static async Task ReadChannelsAsync(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         IReadOnlyList<CameraDevice> devices,
         CancellationToken cancellationToken)
     {
         var devicesById = devices.ToDictionary(device => device.Id);
 
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT id, device_id, channel_no, channel_name, stream_type, enabled
             FROM camera_channels
