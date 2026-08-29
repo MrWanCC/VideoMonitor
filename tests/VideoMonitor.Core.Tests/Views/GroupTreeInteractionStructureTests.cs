@@ -36,6 +36,27 @@ public sealed class GroupTreeInteractionStructureTests
     }
 
     [Fact]
+    public void DeviceView_ContextMenuHighlightUsesOpaqueSelectedBackground()
+    {
+        var xaml = ReadXaml(
+            "Views",
+            "Pages",
+            "DeviceView.xaml");
+        var menuStart = xaml.IndexOf("<ContextMenu ", StringComparison.Ordinal);
+        var menuEnd = xaml.IndexOf("</ContextMenu>", menuStart, StringComparison.Ordinal);
+
+        Assert.True(menuStart >= 0 && menuEnd > menuStart);
+        var contextMenu = xaml[menuStart..menuEnd];
+
+        Assert.Contains(
+            "Value=\"{StaticResource SelectedBlueBrush}\"",
+            contextMenu);
+        Assert.DoesNotContain(
+            "Value=\"{StaticResource PrimaryBlueMutedBrush}\"",
+            contextMenu);
+    }
+
+    [Fact]
     public void DeviceView_GroupRowUsesHoverStyleOnlyWhenNotSelected()
     {
         var xaml = ReadXaml(
@@ -73,6 +94,24 @@ public sealed class GroupTreeInteractionStructureTests
         Assert.Contains("HorizontalAlignment\" Value=\"Stretch\"", monitorXaml);
         Assert.Contains("HorizontalContentAlignment\" Value=\"Stretch\"", monitorXaml);
         Assert.Contains("IsChecked=\"{Binding IsExpanded, Mode=TwoWay}\"", monitorXaml);
+    }
+
+    [Fact]
+    public void DeviceView_GroupNameEditorFitsInsideFixedGroupRow()
+    {
+        var xaml = ReadXaml(
+            "Views",
+            "Pages",
+            "DeviceView.xaml");
+        var editorStart = xaml.IndexOf(
+            "<TextBox x:Name=\"GroupNameEditor\"",
+            StringComparison.Ordinal);
+        var editorEnd = xaml.IndexOf(" />", editorStart, StringComparison.Ordinal);
+
+        Assert.True(editorStart >= 0 && editorEnd > editorStart);
+        var editor = xaml[editorStart..editorEnd];
+        Assert.Contains("Height=\"32\"", editor);
+        Assert.Contains("Margin=\"18,1,0,1\"", editor);
     }
 
     private static string ReadXaml(params string[] path)
