@@ -267,7 +267,7 @@ git commit -m "feat: add central catalog repository"
 
 Read the device twice as safe DTOs, map each DTO in test code to the trusted write model, and then perform the two updates with the DTO revisions. The test mapper does not require or recover a password because update preserves the stored ciphertext when `newPassword` is null. The first update must return revision 2; the second must return `RevisionConflict` with `CurrentRevision=2`.
 
-Also test stale delete, non-empty group delete, duplicate `(device_id, channel_no, stream_type)`, channel failure rollback, and password-protection failure preserving old ciphertext/revision. Explicitly test an existing password with `newPassword=null`: the update succeeds with revision +1, the raw `password_ciphertext` is byte/string-identical, and `UnprotectAsync` has zero calls. Test an existing password with `newPassword=""` through the service/API: it returns HTTP 400 `CATALOG_VALIDATION_FAILED`, leaves revision and ciphertext unchanged, and does not call `ProtectAsync`. Test a non-empty replacement: `ProtectAsync` is called, ciphertext changes, revision increases once, and the response exposes only `HasPassword=true`.
+Also test stale delete, non-empty group delete, duplicate `(device_id, channel_no, stream_type)`, channel failure rollback, and password-protection failure preserving old ciphertext/revision. Explicitly test an existing password with `newPassword=null`: the repository update succeeds with revision +1, the raw `password_ciphertext` is byte/string-identical, and `UnprotectAsync` has zero calls. Test an existing password with a non-empty `newPassword`: `ProtectAsync` is called, ciphertext changes, revision increases once, and the repository result exposes only the safe DTO with `HasPassword=true`. Keep HTTP 400 validation out of this repository task.
 
 - [ ] **Step 2: Run and verify failure**
 
@@ -338,7 +338,7 @@ CATALOG_WRITE_FAILED
 
 - [ ] **Step 1: Write failing validation/result tests**
 
-Cover Guid.Empty, missing group, invalid IP, ports outside 1–65535, channel <=0, duplicate channel identity, invalid enum value, explicit empty create password (accepted and stored as no password), missing/null required input as a binding/validation error, existing password with `NewPassword=null` (preserved without `UnprotectAsync`), existing password with `NewPassword=""` (HTTP 400 `CATALOG_VALIDATION_FAILED`, no revision/ciphertext change), non-empty password replacement (protected replacement, one revision increment, safe `HasPassword=true` response), RevisionConflict and GroupNotEmpty mappings.
+Use a fake repository to test application-service validation and result mapping. Cover Guid.Empty, missing group, invalid IP, ports outside 1–65535, channel <=0, duplicate channel identity, invalid enum value, explicit empty create password (accepted and stored as no password), missing/null required input as a binding/validation error, existing password with `NewPassword=null` (preserved without `UnprotectAsync`), existing password with `NewPassword=""` (HTTP 400 `CATALOG_VALIDATION_FAILED`, no revision/ciphertext change, and `UpdateDeviceAsync` is not called), non-empty password replacement (protected replacement, one revision increment, safe `HasPassword=true` response), RevisionConflict and GroupNotEmpty mappings.
 
 - [ ] **Step 2: Run and verify failure**
 
@@ -389,7 +389,7 @@ DELETE /api/v1/devices/{id}?expectedRevision={revision}
 
 - [ ] **Step 1: Write failing WebApplicationFactory CRUD tests**
 
-Use existing temporary `TestServerFactory`. Assert status codes, returned revisions, and safe DTOs. Add a readiness-failure test using the failing machine protector: every catalog endpoint returns HTTP 503 and a safe `CatalogErrorDto` with code `CATALOG_UNAVAILABLE`, without calling the repository. Add malformed JSON, missing/invalid `expectedRevision`, and invalid Guid/enum binding tests; each returns HTTP 400 with code `CATALOG_VALIDATION_FAILED`, never the default ASP.NET problem-details format.
+Use existing temporary `TestServerFactory`. Assert status codes, returned revisions, and safe DTOs. Add a readiness-failure test using the failing machine protector: every catalog endpoint returns HTTP 503 and a safe `CatalogErrorDto` with code `CATALOG_UNAVAILABLE`, without calling the repository. Add a `PUT /api/v1/devices/{id}` test with `NewPassword=""`; it must return HTTP 400 with code `CATALOG_VALIDATION_FAILED`. Add malformed JSON, missing/invalid `expectedRevision`, and invalid Guid/enum binding tests; each returns HTTP 400 with code `CATALOG_VALIDATION_FAILED`, never the default ASP.NET problem-details format.
 
 - [ ] **Step 2: Run and verify failure**
 
