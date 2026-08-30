@@ -416,16 +416,15 @@ public sealed class CatalogApplicationService
                 request.Manufacturer,
                 request.Model,
                 request.Remark,
-                request.TransportMode)
-            || !ValidateChannels(request.Channels, out var channelError))
+                request.TransportMode))
         {
             error = ValidationFailure<CameraDeviceDto>();
             return false;
         }
 
-        if (channelError is not null)
+        if (!ValidateChannels(request.Channels, out var channelError))
         {
-            error = channelError;
+            error = channelError ?? ValidationFailure<CameraDeviceDto>();
             return false;
         }
 
@@ -452,16 +451,15 @@ public sealed class CatalogApplicationService
                 request.Manufacturer,
                 request.Model,
                 request.Remark,
-                request.TransportMode)
-            || !ValidateChannels(request.Channels, out var channelError))
+                request.TransportMode))
         {
             error = ValidationFailure<CameraDeviceDto>();
             return false;
         }
 
-        if (channelError is not null)
+        if (!ValidateChannels(request.Channels, out var channelError))
         {
-            error = channelError;
+            error = channelError ?? ValidationFailure<CameraDeviceDto>();
             return false;
         }
 

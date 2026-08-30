@@ -292,8 +292,141 @@ public sealed class CatalogApplicationServiceTests
             "CreateDeviceAsync",
             validWithConflict,
             CancellationToken.None);
-        AssertError(conflict, "CATALOG_VALIDATION_FAILED", 400);
+        AssertError(conflict, "CHANNEL_CONFLICT", 409);
         Assert.Equal(0, fake.CreateDeviceCalls);
+    }
+
+    [Fact]
+    public async Task CreateDeviceAsync_NullPasswordIsValidationFailureWithoutWrite()
+    {
+        var groupId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Groups = { [groupId] = new DeviceGroupDto(groupId, "Group", null, 0, true, 1) }
+        };
+        var service = CreateService(fake);
+        var result = await InvokeAsync(
+            service,
+            "CreateDeviceAsync",
+            ValidCreateDeviceRequest(groupId) with { Password = null! },
+            CancellationToken.None);
+
+        AssertError(result, "CATALOG_VALIDATION_FAILED", 400);
+        Assert.Equal(0, fake.CreateDeviceCalls);
+    }
+
+    [Fact]
+    public async Task CreateDeviceAsync_MissingGroupIsNotFoundWithoutWrite()
+    {
+        var fake = new FakeCentralCatalogRepository();
+        var service = CreateService(fake);
+        var result = await InvokeAsync(
+            service,
+            "CreateDeviceAsync",
+            ValidCreateDeviceRequest(Guid.NewGuid()),
+            CancellationToken.None);
+
+        AssertError(result, "GROUP_NOT_FOUND", 404);
+        Assert.Equal(0, fake.CreateDeviceCalls);
+    }
+
+    [Fact]
+    public async Task CreateDeviceAsync_RejectsInvalidPortsAndTransportModeWithoutWrite()
+    {
+        var groupId = Guid.NewGuid();
+        var requests = new[]
+        {
+            ValidCreateDeviceRequest(groupId) with { SdkPort = 0 },
+            ValidCreateDeviceRequest(groupId) with { SdkPort = 65536 },
+            ValidCreateDeviceRequest(groupId) with { RtspPort = 0 },
+            ValidCreateDeviceRequest(groupId) with { RtspPort = 65536 },
+            ValidCreateDeviceRequest(groupId) with { TransportMode = (TransportMode)999 }
+        };
+
+        foreach (var request in requests)
+        {
+            var fake = new FakeCentralCatalogRepository();
+            var service = CreateService(fake);
+            var result = await InvokeAsync(
+                service,
+                "CreateDeviceAsync",
+                request,
+                CancellationToken.None);
+
+            AssertError(result, "CATALOG_VALIDATION_FAILED", 400);
+            Assert.Equal(0, fake.CreateDeviceCalls);
+        }
+    }
+
+    [Fact]
+    public async Task CreateDeviceAsync_RejectsInvalidChannelFieldsWithoutWrite()
+    {
+        var groupId = Guid.NewGuid();
+        var valid = ValidCreateDeviceRequest(groupId);
+        var invalidRequests = new[]
+        {
+            valid with
+            {
+                Channels = [valid.Channels[0] with { ChannelNo = 0 }]
+            },
+            valid with
+            {
+                Channels = [valid.Channels[0] with { StreamType = (StreamType)999 }]
+            },
+            valid with
+            {
+                Channels =
+                [
+                    valid.Channels[0],
+                    valid.Channels[0] with { Id = valid.Channels[0].Id }
+                ]
+            }
+        };
+
+        foreach (var request in invalidRequests)
+        {
+            var fake = new FakeCentralCatalogRepository();
+            var service = CreateService(fake);
+            var result = await InvokeAsync(
+                service,
+                "CreateDeviceAsync",
+                request,
+                CancellationToken.None);
+
+            AssertError(result, "CATALOG_VALIDATION_FAILED", 400);
+            Assert.Equal(0, fake.CreateDeviceCalls);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateDeviceAsync_DuplicateChannelIdentity_ReturnsChannelConflictWithoutWrite()
+    {
+        var groupId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+        var firstChannelId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Groups = { [groupId] = new DeviceGroupDto(groupId, "Group", null, 0, true, 1) }
+        };
+        var service = CreateService(fake);
+        var request = ValidUpdateDeviceRequest(groupId, expectedRevision: 1) with
+        {
+            Channels =
+            [
+                new CameraChannelInput(firstChannelId, 1, "Main", StreamType.Main, true),
+                new CameraChannelInput(Guid.NewGuid(), 1, "Duplicate Main", StreamType.Main, true)
+            ]
+        };
+
+        var result = await InvokeAsync(
+            service,
+            "UpdateDeviceAsync",
+            deviceId,
+            request,
+            CancellationToken.None);
+
+        AssertError(result, "CHANNEL_CONFLICT", 409);
+        Assert.Equal(0, fake.UpdateDeviceCalls);
     }
 
     [Fact]
@@ -408,6 +541,90 @@ public sealed class CatalogApplicationServiceTests
     }
 
     [Fact]
+    public async Task DeleteDeviceAsync_MapsRevisionConflict()
+    {
+        var fake = new FakeCentralCatalogRepository
+        {
+            DeleteDeviceResult = new CatalogRepositoryDeleteResult(
+                CatalogRepositoryStatus.RevisionConflict,
+                9)
+        };
+        var service = CreateService(fake);
+
+        var result = await InvokeAsync(
+            service,
+            "DeleteDeviceAsync",
+            Guid.NewGuid(),
+            8L,
+            CancellationToken.None);
+
+        AssertError(result, "DEVICE_REVISION_CONFLICT", 409, 9);
+    }
+
+    [Fact]
+    public async Task DeleteGroupAsync_MapsRevisionConflict()
+    {
+        var fake = new FakeCentralCatalogRepository
+        {
+            DeleteGroupResult = new CatalogRepositoryDeleteResult(
+                CatalogRepositoryStatus.RevisionConflict,
+                6)
+        };
+        var service = CreateService(fake);
+
+        var result = await InvokeAsync(
+            service,
+            "DeleteGroupAsync",
+            Guid.NewGuid(),
+            5L,
+            CancellationToken.None);
+
+        AssertError(result, "GROUP_REVISION_CONFLICT", 409, 6);
+    }
+
+    [Fact]
+    public async Task UpdateDeviceAsync_MapsNotFound()
+    {
+        var groupId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Groups = { [groupId] = new DeviceGroupDto(groupId, "Group", null, 0, true, 1) },
+            UpdateDeviceResult = new CatalogRepositoryResult<CameraDeviceDto>(
+                CatalogRepositoryStatus.NotFound)
+        };
+        var service = CreateService(fake);
+
+        var result = await InvokeAsync(
+            service,
+            "UpdateDeviceAsync",
+            Guid.NewGuid(),
+            ValidUpdateDeviceRequest(groupId, 1),
+            CancellationToken.None);
+
+        AssertError(result, "DEVICE_NOT_FOUND", 404);
+    }
+
+    [Fact]
+    public async Task UpdateGroupAsync_MapsNotFound()
+    {
+        var fake = new FakeCentralCatalogRepository
+        {
+            UpdateGroupResult = new CatalogRepositoryResult<DeviceGroupDto>(
+                CatalogRepositoryStatus.NotFound)
+        };
+        var service = CreateService(fake);
+
+        var result = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            Guid.NewGuid(),
+            new UpdateGroupRequest("Updated", null, 0, true, 1),
+            CancellationToken.None);
+
+        AssertError(result, "GROUP_NOT_FOUND", 404);
+    }
+
+    [Fact]
     public async Task MutationException_IsSanitizedAndCancellationPropagates()
     {
         var groupId = Guid.NewGuid();
@@ -486,6 +703,25 @@ public sealed class CatalogApplicationServiceTests
             true,
             "remark",
             expectedRevision,
+            [new CameraChannelInput(Guid.NewGuid(), 1, "Main", StreamType.Main, true)]);
+
+    private static CreateDeviceRequest ValidCreateDeviceRequest(
+        Guid groupId,
+        string password = "password") =>
+        new(
+            Guid.NewGuid(),
+            groupId,
+            "Camera",
+            "192.0.2.10",
+            8000,
+            554,
+            "user",
+            password,
+            "Maker",
+            "Model",
+            TransportMode.Tcp,
+            true,
+            "remark",
             [new CameraChannelInput(Guid.NewGuid(), 1, "Main", StreamType.Main, true)]);
 
     private static CatalogSnapshotDto SnapshotWithOneGroup()
