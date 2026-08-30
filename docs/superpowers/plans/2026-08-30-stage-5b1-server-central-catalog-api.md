@@ -19,7 +19,7 @@
 - `CameraChannel` has no independent revision; channel changes increment parent `CameraDevice.Revision` exactly once.
 - GET/runtime status changes never increment configuration Revision.
 - Catalog reads never return plaintext password or `password_ciphertext`.
-- `UpdateDeviceRequest.NewPassword == null` preserves the existing protected password; a non-empty value replaces it.
+- `UpdateDeviceRequest.NewPassword == null` preserves the existing protected password; any non-null value, including an explicit empty string, replaces it.
 - CameraDevice + channels update atomically in one SQLite transaction.
 - HTTP endpoints contain no SQL and never log secret-bearing request bodies.
 - Preserve all Stage 5A health/readiness/backup/security tests.
@@ -211,23 +211,25 @@ public sealed record CatalogRepositoryDeleteResult(CatalogRepositoryStatus Statu
 
 public interface ICentralCatalogRepository
 {
-    Task<DeviceCatalogSnapshot> GetCatalogAsync(CancellationToken cancellationToken = default);
-    Task<DeviceGroup?> GetGroupAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<CameraDevice?> GetDeviceAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<CatalogRepositoryResult<DeviceGroup>> CreateGroupAsync(DeviceGroup group, CancellationToken cancellationToken = default);
-    Task<CatalogRepositoryResult<CameraDevice>> CreateDeviceAsync(CameraDevice device, CancellationToken cancellationToken = default);
-    Task<CatalogRepositoryResult<DeviceGroup>> UpdateGroupAsync(DeviceGroup group, long expectedRevision, CancellationToken cancellationToken = default);
+    Task<CatalogSnapshotDto> GetCatalogAsync(CancellationToken cancellationToken = default);
+    Task<DeviceGroupDto?> GetGroupAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<CameraDeviceDto?> GetDeviceAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<CatalogRepositoryResult<DeviceGroupDto>> CreateGroupAsync(DeviceGroup group, CancellationToken cancellationToken = default);
+    Task<CatalogRepositoryResult<CameraDeviceDto>> CreateDeviceAsync(CameraDevice device, CancellationToken cancellationToken = default);
+    Task<CatalogRepositoryResult<DeviceGroupDto>> UpdateGroupAsync(DeviceGroup group, long expectedRevision, CancellationToken cancellationToken = default);
     Task<CatalogRepositoryDeleteResult> DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default);
-    Task<CatalogRepositoryResult<CameraDevice>> UpdateDeviceAsync(CameraDevice device, string? newPassword, long expectedRevision, CancellationToken cancellationToken = default);
+    Task<CatalogRepositoryResult<CameraDeviceDto>> UpdateDeviceAsync(CameraDevice device, string? newPassword, long expectedRevision, CancellationToken cancellationToken = default);
     Task<CatalogRepositoryDeleteResult> DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default);
 }
 ```
 
-Create device receives initial plaintext in `device.Password`, protects it before INSERT, and returns internal trusted Server model. Update ignores `device.Password`; `newPassword == null` preserves stored ciphertext.
+Write methods may accept an internal Server `DeviceGroup`/`CameraDevice` write model plus `newPassword`, but every read, create, and update result is a password-safe Core DTO. Repository reads never call `ISecretProtector.UnprotectAsync`. When reading `camera_devices`, `password_ciphertext` is used only to calculate `HasPassword = !string.IsNullOrEmpty(passwordCiphertext)`; it is never decrypted for a Catalog response. A non-empty create password is protected before INSERT and returns `HasPassword = true`; an explicitly empty create password remains allowed by this plan and returns `HasPassword = false`.
+
+`UpdateDeviceRequest.NewPassword == null` preserves the existing ciphertext without decrypting it. A non-null replacement calls `ProtectAsync(newPassword, ...)`, stores the new ciphertext, and still returns only a safe DTO. Stage 5B adds no password-read repository method. When Stage 5C Playback Resolve actually needs camera credentials, it may add a purpose-specific Server-only credential retrieval boundary; Stage 5B Catalog GET must not decrypt passwords in anticipation of that need.
 
 - [ ] **Step 1: Write failing read/create tests**
 
-Cover one consistent snapshot; group/device start revision 1; CameraDevice + channels create in one transaction; raw DB contains ciphertext and not plaintext; internal GetDevice decrypts correctly.
+Cover one consistent snapshot; group/device start revision 1; CameraDevice + channels create in one transaction; raw DB contains ciphertext and not plaintext; Catalog reads return safe DTOs and `HasPassword` without decrypting. Use a test `ISecretProtector` whose `ProtectAsync` succeeds but whose `UnprotectAsync` throws, then prove repository catalog/device reads still succeed and never call `UnprotectAsync`.
 
 - [ ] **Step 2: Run and verify failure**
 
@@ -237,7 +239,7 @@ dotnet test tests/VideoMonitor.Core.Tests/VideoMonitor.Core.Tests.csproj --filte
 
 - [ ] **Step 3: Implement consistent read/create**
 
-`GetCatalogAsync` reads groups/devices/channels in one deferred read transaction. Reuse the Stage 5A private-cache/WAL-safe connection pattern. Device create encrypts before/inside write flow and commits the aggregate once.
+`GetCatalogAsync` reads groups/devices/channels in one deferred read transaction. Reuse the Stage 5A private-cache/WAL-safe connection pattern. The read path selects `password_ciphertext` only to set `HasPassword` and never calls `UnprotectAsync`. Device create encrypts before/inside write flow and commits the aggregate once, then maps the committed row to a safe DTO. Add the no-Unprotect test before considering the read path complete.
 
 - [ ] **Step 4: Run tests**
 
@@ -258,20 +260,11 @@ git commit -m "feat: add central catalog repository"
 - Modify: `src/VideoMonitor.Infrastructure/Persistence/SqliteCentralCatalogRepository.cs`
 - Modify: `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteCentralCatalogRepositoryTests.cs`
 
-**Interfaces:** Task 3 signatures remain unchanged.
+**Interfaces:** Task 3's password-safe DTO read/write contract remains unchanged.
 
 - [ ] **Step 1: Add failing concurrency/rollback tests**
 
-```csharp
-var a = await repository.GetDeviceAsync(id);
-var b = await repository.GetDeviceAsync(id);
-a!.Name = "A committed";
-Assert.Equal(2, (await repository.UpdateDeviceAsync(a, null, a.Revision)).Value!.Revision);
-b!.Name = "B stale";
-var stale = await repository.UpdateDeviceAsync(b, null, b.Revision);
-Assert.Equal(CatalogRepositoryStatus.RevisionConflict, stale.Status);
-Assert.Equal(2, stale.CurrentRevision);
-```
+Read the device twice as safe DTOs, map each DTO in test code to the trusted write model, and then perform the two updates with the DTO revisions. The test mapper does not require or recover a password because update preserves the stored ciphertext when `newPassword` is null. The first update must return revision 2; the second must return `RevisionConflict` with `CurrentRevision=2`.
 
 Also test stale delete, non-empty group delete, duplicate `(device_id, channel_no, stream_type)`, channel failure rollback, and password-protection failure preserving old ciphertext/revision.
 
@@ -340,7 +333,7 @@ CATALOG_WRITE_FAILED
 
 - [ ] **Step 1: Write failing validation/result tests**
 
-Cover Guid.Empty, missing group, invalid IP, ports outside 1–65535, channel <=0, duplicate channel identity, invalid enum value, blank create password, `NewPassword=null`, RevisionConflict and GroupNotEmpty mappings.
+Cover Guid.Empty, missing group, invalid IP, ports outside 1–65535, channel <=0, duplicate channel identity, invalid enum value, explicit empty create password (accepted and stored as no password), missing/null required input as a binding/validation error, `NewPassword=null`, RevisionConflict and GroupNotEmpty mappings.
 
 - [ ] **Step 2: Run and verify failure**
 
@@ -350,7 +343,9 @@ dotnet test tests/VideoMonitor.Server.Tests/VideoMonitor.Server.Tests.csproj --f
 
 - [ ] **Step 3: Implement validation and safe DTO mapping**
 
-`CameraDeviceDto.HasPassword = !string.IsNullOrEmpty(device.Password)`. Never copy password into read DTO/error text/log text.
+Map `CameraDeviceDto.HasPassword` from the presence of stored protected ciphertext, not from a plaintext read. Never decrypt or copy a password into a read DTO, error text, or log text. Explicit empty create password is valid and yields `HasPassword=false`; a non-null `NewPassword` replaces the protected value, while null preserves it.
+
+Unexpected repository exceptions are converted to a safe `CatalogOperationResult<T>`: read operations return HTTP 500 with code `CATALOG_READ_FAILED`, and mutation operations return HTTP 500 with code `CATALOG_WRITE_FAILED`. Do not expose exception messages or stack traces.
 
 - [ ] **Step 4: Run tests**
 
@@ -389,7 +384,7 @@ DELETE /api/v1/devices/{id}?expectedRevision={revision}
 
 - [ ] **Step 1: Write failing WebApplicationFactory CRUD tests**
 
-Use existing temporary `TestServerFactory`. Assert status codes, returned revisions, and safe DTOs.
+Use existing temporary `TestServerFactory`. Assert status codes, returned revisions, and safe DTOs. Add a readiness-failure test using the failing machine protector: every catalog endpoint returns HTTP 503 and a safe `CatalogErrorDto` with code `CATALOG_UNAVAILABLE`, without calling the repository. Add malformed JSON, missing/invalid `expectedRevision`, and invalid Guid/enum binding tests; each returns HTTP 400 with code `CATALOG_VALIDATION_FAILED`, never the default ASP.NET problem-details format.
 
 - [ ] **Step 2: Run and verify failure**
 
@@ -406,7 +401,9 @@ builder.Services.AddSingleton<CatalogApplicationService>();
 app.MapCatalogEndpoints();
 ```
 
-Endpoint code only parses input, calls service, maps `CatalogOperationResult<T>` to `IResult`; no SQL/secret handling.
+Register `ServerReadinessState` and guard every catalog endpoint before calling the service/repository. When `IsReady` is false, return HTTP 503 with `{ "code":"CATALOG_UNAVAILABLE", "message":"Catalog service is unavailable.", "currentRevision":null }`; do not include an exception, path, connection string, secret, or password. Endpoint code only performs transport parsing, calls the service, and maps `CatalogOperationResult<T>` to `IResult`; no SQL/secret handling and no business validation in `Program`.
+
+Read route/query values as strings and use explicit `TryParse` checks for Guid and `long expectedRevision`; missing or invalid values map to HTTP 400 `CATALOG_VALIDATION_FAILED`. Read request bodies inside the handler with `HttpRequest.ReadFromJsonAsync<T>` and map `JsonException`/`NotSupportedException` (including malformed JSON or invalid enum values) to the same `CatalogErrorDto`, so framework default binding errors cannot escape. A small endpoint parsing/mapping helper or filter is allowed.
 
 - [ ] **Step 4: Run API + existing health tests**
 
@@ -439,6 +436,8 @@ Two separate `HttpClient`s read revision 1; A PUT succeeds revision 2; B PUT wit
 - [ ] **Step 2: Add secret leak tests**
 
 Use test-only literal `stage5b-secret-P@55`. Assert it is absent from every GET/error response and raw DB plaintext search; raw `password_ciphertext` begins with expected protected-envelope prefix and is never returned by API.
+
+Also inject a test protector whose `ProtectAsync` succeeds but whose `UnprotectAsync` always throws. Prove the repository-backed API GET still succeeds and returns `HasPassword` from ciphertext presence without invoking `UnprotectAsync`.
 
 - [ ] **Step 3: Run focused tests**
 
