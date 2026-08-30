@@ -40,83 +40,178 @@ Core:
 Modify:
 
 - `src/VideoMonitor.Core/Models/DeviceGroup.cs`
+  - Responsibility: hold stable group identity, hierarchy links, display fields, ordering, enabled state, and nullable `MonitorGroupType` Kind.
 - `src/VideoMonitor.Core/Catalog/DeviceGroupDto.cs`
+  - Responsibility: expose the password-safe group read contract used across the Server API and WPF client.
 - `src/VideoMonitor.Core/Catalog/CatalogRequests.cs`
+  - Responsibility: define group/device/channel write request contracts, including expected revisions and password write semantics.
 - `src/VideoMonitor.Core/Models/MonitorGroup.cs`
+  - Responsibility: represent the monitor projection identity and root/child ordering metadata without owning Catalog persistence.
 - `src/VideoMonitor.Core/Services/MonitorCatalogProjection.cs`
+  - Responsibility: convert the password-safe read model into valid two-level monitor groups and Guid-based selections.
 - `src/VideoMonitor.Core/Services/MonitorLayoutSnapshot.cs`
+  - Responsibility: carry nullable fixed Main and Secondary slot collections for the 4+3 layout.
 - `src/VideoMonitor.Core/Services/MonitorSwitchService.cs`
+  - Responsibility: validate Kind-specific Guid switches, deterministic defaults, and selection fallback for projected groups.
 
 Create:
 
 - `src/VideoMonitor.Core/Catalog/IDeviceCatalogReadModel.cs`
+  - Responsibility: expose the central password-safe read-only Catalog boundary and its change notification.
 
 Server / Infrastructure:
 
 Modify:
 
 - `src/VideoMonitor.Infrastructure/Persistence/SqliteDatabaseInitializer.cs`
+  - Responsibility: apply and validate SQLite schema versions and the V2-to-V3 `group_kind` migration.
 - `src/VideoMonitor.Infrastructure/Persistence/SqliteCentralCatalogRepository.cs`
+  - Responsibility: persist and read central groups, devices, channels, revisions, and protected credential values through SQLite transactions.
 - `src/VideoMonitor.Server/Catalog/CatalogApplicationService.cs`
+  - Responsibility: validate two-level group and device mutations and translate repository results into application outcomes.
 
-`CatalogEndpoints.cs` is changed only if an existing DTO signature requires it for compilation; endpoint behavior and error contracts remain those approved in Stage 5B-1.
+- `src/VideoMonitor.Server/Catalog/CatalogEndpoints.cs`
+  - Responsibility: retain the approved endpoint transport and error contracts, changing only when the Task 1 DTO signature update requires compilation alignment.
 
 WPF Catalog:
 
 Create:
 
 - `src/VideoMonitor.Wpf/Catalog/CatalogApiException.cs`
+  - Responsibility: represent safe HTTP Catalog failures with machine-readable code and optional current revision.
+- `src/VideoMonitor.Wpf/Catalog/CatalogMutationUncertainException.cs`
+  - Responsibility: represent an ambiguous remote mutation using only a safe operation name and entity Guid.
 - `src/VideoMonitor.Wpf/Catalog/CatalogApiClient.cs`
+  - Responsibility: perform only HTTP serialization/deserialization, endpoint invocation, and safe Catalog error mapping; own no BaseUrl and no retry policy.
 - `src/VideoMonitor.Wpf/Catalog/IDeviceCatalogCommandService.cs`
+  - Responsibility: define asynchronous device/group command operations independently of transport and local compatibility implementation.
 - `src/VideoMonitor.Wpf/Catalog/ClientCatalogCache.cs`
+  - Responsibility: store a process-local password-safe `CatalogSnapshotDto`, perform Guid lookup, atomically replace snapshots, and publish UI-dispatched changes.
 - `src/VideoMonitor.Wpf/Catalog/IUiDispatcher.cs`
+  - Responsibility: abstract dispatching cache notifications and ViewModel mutations to the WPF UI thread.
 - `src/VideoMonitor.Wpf/Catalog/WpfUiDispatcher.cs`
+  - Responsibility: adapt the active WPF Dispatcher to `IUiDispatcher` without embedding Catalog policy.
 - `src/VideoMonitor.Wpf/Catalog/LegacyDeviceCatalogReadModel.cs`
+  - Responsibility: adapt the legacy local `IDeviceCatalog` to password-safe DTO reads for explicit `SingleCameraTest` mode only.
 - `src/VideoMonitor.Wpf/Catalog/LegacyDeviceCatalogCommandService.cs`
+  - Responsibility: adapt local `IDeviceCatalog` writes to the asynchronous command boundary for `SingleCameraTest` only.
 - `src/VideoMonitor.Wpf/Catalog/RemoteDeviceCatalogCommandService.cs`
+  - Responsibility: route one remote mutation through the current connected Server and request a full refresh after success.
 - `src/VideoMonitor.Wpf/Catalog/ServerConnectionState.cs`
+  - Responsibility: define connection states and the immutable status value shown by WPF.
 - `src/VideoMonitor.Wpf/Catalog/IClientConnectionClock.cs`
+  - Responsibility: abstract UTC time, delay, and deterministic jitter generation for coordinator behavior.
 - `src/VideoMonitor.Wpf/Catalog/SystemClientConnectionClock.cs`
+  - Responsibility: provide production time, cancellation-aware delays, and bounded random jitter.
 - `src/VideoMonitor.Wpf/Catalog/ServerConnectionCoordinator.cs`
+  - Responsibility: own endpoint state, initial connect, refresh, reconnect/backoff, stale mode, and atomic Server switching.
 
 WPF configuration:
 
 Create:
 
 - `src/VideoMonitor.Wpf/Configuration/ClientSettings.cs`
+  - Responsibility: define the non-sensitive client Server endpoint settings value.
 - `src/VideoMonitor.Wpf/Configuration/IClientSettingsStore.cs`
+  - Responsibility: define synchronous load and cancellation-aware durable client-settings save operations.
 - `src/VideoMonitor.Wpf/Configuration/ClientSettingsPathProvider.cs`
+  - Responsibility: resolve the ProgramData Client settings path or an injected development root.
 - `src/VideoMonitor.Wpf/Configuration/JsonClientSettingsStore.cs`
+  - Responsibility: read safe JSON settings and perform same-directory flushed atomic create/replace writes.
 
 Modify:
 
 - `.gitignore`
+  - Responsibility: prevent local `.devdata/` development storage from entering Git.
 
 WPF:
 
 Modify:
 
 - `src/VideoMonitor.Wpf/ViewModels/DeviceEditDraftViewModel.cs`
+  - Responsibility: hold local DTO-based device edit fields and password write-only draft state.
 - `src/VideoMonitor.Wpf/ViewModels/DeviceGroupTreeItemViewModel.cs`
+  - Responsibility: present password-safe group tree items and Guid selection state.
 - `src/VideoMonitor.Wpf/ViewModels/DeviceManagementViewModel.cs`
+  - Responsibility: orchestrate DTO-based presentation, local drafts, async commands, and conflict/error UX; own no HTTP or authoritative Catalog storage.
 - `src/VideoMonitor.Wpf/ViewModels/MonitorViewModel.cs`
+  - Responsibility: consume the central read model, rebuild the monitor tree, preserve Guid selection, and render nullable slots.
 - `src/VideoMonitor.Wpf/ViewModels/SecondaryMonitorViewModel.cs`
+  - Responsibility: consume dynamic UnloadingStation groups and route selection by Guid.
 - `src/VideoMonitor.Wpf/ViewModels/VideoTileViewModel.cs`
+  - Responsibility: render password-safe device/channel DTO data, runtime status, and unconfigured tile state.
 - `src/VideoMonitor.Wpf/ViewModels/MainViewModel.cs`
+  - Responsibility: expose central connection status and Server settings actions to the shell.
 - `src/VideoMonitor.Wpf/Views/Pages/DeviceView.xaml`
+  - Responsibility: provide the existing Device Management layout plus minimal Root editor bindings.
 - `src/VideoMonitor.Wpf/Views/Pages/DeviceView.xaml.cs` only when focus handling is required
+  - Responsibility: provide only required focus/keyboard plumbing for the Root editor.
 - `src/VideoMonitor.Wpf/Views/SecondaryMonitorWindow.xaml`
+  - Responsibility: render dynamic Secondary group choices and fixed nullable tiles.
 - `src/VideoMonitor.Wpf/MainWindow.xaml`
+  - Responsibility: bind the shell Server status and settings entry without redesigning unrelated UI.
 - `src/VideoMonitor.Wpf/MainWindow.xaml.cs`
+  - Responsibility: open the Server settings window and coordinate shell-level lifecycle hooks.
 - `src/VideoMonitor.Wpf/Controls/StatusBar.xaml`
+  - Responsibility: display actual central Server availability and last successful sync.
 - `src/VideoMonitor.Wpf/App.xaml.cs`
+  - Responsibility: compose the formal central mode or explicit SingleCameraTest compatibility mode and own shutdown order.
 
 Create:
 
 - `src/VideoMonitor.Wpf/ViewModels/ServerSettingsViewModel.cs`
+  - Responsibility: validate and execute Test/Save endpoint commands while preserving Draft and atomic-switch rules.
 - `src/VideoMonitor.Wpf/ViewModels/ServerStatusViewModel.cs`
+  - Responsibility: map `ServerConnectionStatus` to safe localized display state and last-sync text.
 - `src/VideoMonitor.Wpf/Views/ServerSettingsWindow.xaml`
+  - Responsibility: provide minimal BaseUrl, Test Connection, and Save controls.
 - `src/VideoMonitor.Wpf/Views/ServerSettingsWindow.xaml.cs`
+  - Responsibility: bind the settings window to its ViewModel and close without owning connection policy.
+
+Tests:
+
+- `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteDatabaseInitializerTests.cs`
+  - Responsibility: verify schema V3 creation, idempotent upgrade, root Kind migration, and unsupported-version rejection.
+- `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteCentralCatalogRepositoryTests.cs`
+  - Responsibility: verify central group/device persistence and repository-facing Kind/channel contracts.
+- `tests/VideoMonitor.Server.Tests/CatalogApplicationServiceTests.cs`
+  - Responsibility: verify Root/Child/Device hierarchy validation and application error mapping.
+- `tests/VideoMonitor.Server.Tests/CatalogApiTests.cs`
+  - Responsibility: verify HTTP serialization of Kind and the approved Catalog endpoint behavior.
+- `tests/VideoMonitor.Core.Tests/Configuration/ClientSettingsStoreTests.cs`
+  - Responsibility: verify client settings paths, first-save behavior, atomic replacement, and failure preservation.
+- `tests/VideoMonitor.Core.Tests/Catalog/CatalogApiClientTests.cs`
+  - Responsibility: verify explicit-URI HTTP calls, safe errors, no write retry, and password-safe Catalog reads.
+- `tests/VideoMonitor.Core.Tests/Catalog/ClientCatalogCacheTests.cs`
+  - Responsibility: verify atomic password-safe snapshot replacement, Guid lookup, and change suppression.
+- `tests/VideoMonitor.Core.Tests/Catalog/LegacyDeviceCatalogReadModelTests.cs`
+  - Responsibility: verify local compatibility projection exposes only safe DTO fields and HasPassword.
+- `tests/VideoMonitor.Core.Tests/Catalog/ServerConnectionCoordinatorTests.cs`
+  - Responsibility: verify connection state, periodic refresh, bounded retry/jitter, single-flight behavior, and atomic switching.
+- `tests/VideoMonitor.Core.Tests/Services/MonitorCatalogProjectionTests.cs`
+  - Responsibility: verify two-level DTO projection, filtering, ordering, and runtime status initialization.
+- `tests/VideoMonitor.Core.Tests/Services/MonitorSwitchServiceTests.cs`
+  - Responsibility: verify Guid-based Kind switching, defaults, and fixed 4+3 nullable layout behavior.
+- `tests/VideoMonitor.Core.Tests/ViewModels/MonitorCatalogRefreshTests.cs`
+  - Responsibility: verify monitor ViewModel refresh and selected-Guid preservation.
+- `tests/VideoMonitor.Core.Tests/ViewModels/MonitorUiStateTests.cs`
+  - Responsibility: verify nullable tile reset, runtime status presentation, and existing monitor UI state.
+- `tests/VideoMonitor.Core.Tests/ViewModels/SecondaryMonitorCatalogTests.cs`
+  - Responsibility: verify dynamic Secondary groups and Guid-based selection.
+- `tests/VideoMonitor.Core.Tests/Catalog/DeviceCatalogCommandServiceTests.cs`
+  - Responsibility: verify one-write remote commands, uncertainty mapping, refresh confirmation, and offline behavior.
+- `tests/VideoMonitor.Core.Tests/ViewModels/DeviceManagementDraftTests.cs`
+  - Responsibility: verify DTO-based Draft retention, password safety, conflicts, and asynchronous command state.
+- `tests/VideoMonitor.Core.Tests/ViewModels/DeviceManagementGroupTests.cs`
+  - Responsibility: verify Root Draft validation, stable IDs, Kind assignment, and command routing.
+- `tests/VideoMonitor.Core.Tests/ViewModels/ServerSettingsViewModelTests.cs`
+  - Responsibility: verify Test versus Save semantics, repeat probe, Draft blocking, and settings status presentation.
+- `tests/VideoMonitor.Core.Tests/ViewModels/MainHeaderControlStateTests.cs`
+  - Responsibility: verify shell status bindings preserve accurate central connection state.
+- `tests/VideoMonitor.Core.Tests/Composition/ApplicationCatalogCompositionTests.cs`
+  - Responsibility: verify formal central composition versus explicit SingleCameraTest compatibility composition.
+- `tests/VideoMonitor.Core.Tests/Services/ShutdownCleanupCoordinatorTests.cs`
+  - Responsibility: verify one-time shutdown ownership and mode-specific cancellation/cleanup.
 
 ## Task 1 — Schema V3 Group Kind Contracts and Persistence
 
@@ -129,6 +224,27 @@ Files:
 - Modify `src/VideoMonitor.Infrastructure/Persistence/SqliteCentralCatalogRepository.cs`
 - Modify tests: `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteDatabaseInitializerTests.cs`
 - Modify tests: `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteCentralCatalogRepositoryTests.cs`
+
+Interfaces:
+
+Consumes:
+
+- `DeviceGroup` with `Guid Id`, `long Revision`, `string Name`, `Guid? ParentId`, `int Sort`, and `bool Enabled`.
+- `DeviceGroupDto(Guid Id, string Name, Guid? ParentId, int Sort, bool Enabled, long Revision)`.
+- `CreateGroupRequest(Guid Id, string Name, Guid? ParentId, int Sort, bool Enabled)`.
+- `UpdateGroupRequest(string Name, Guid? ParentId, int Sort, bool Enabled, long ExpectedRevision)`.
+- `SqliteDatabaseInitializer.InitializeAsync(CancellationToken cancellationToken = default)`.
+- `ICentralCatalogRepository.GetCatalogAsync(CancellationToken cancellationToken = default)`.
+- `ICentralCatalogRepository.GetGroupAsync(Guid id, CancellationToken cancellationToken = default)` and `GetDeviceAsync(Guid id, CancellationToken cancellationToken = default)`.
+- `ICentralCatalogRepository.CreateGroupAsync(DeviceGroup group, CancellationToken cancellationToken = default)` and `CreateDeviceAsync(CameraDevice device, CancellationToken cancellationToken = default)`.
+- `ICentralCatalogRepository.UpdateGroupAsync(DeviceGroup group, long expectedRevision, CancellationToken cancellationToken = default)`, `DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default)`, `UpdateDeviceAsync(CameraDevice device, string? newPassword, long expectedRevision, CancellationToken cancellationToken = default)`, and `DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default)`.
+
+Produces:
+
+- `DeviceGroup.Kind` with type `MonitorGroupType?`.
+- `DeviceGroupDto(Guid Id, string Name, Guid? ParentId, int Sort, bool Enabled, MonitorGroupType? Kind, long Revision)`.
+- `CreateGroupRequest(Guid Id, string Name, Guid? ParentId, int Sort, bool Enabled, MonitorGroupType? Kind)` and `UpdateGroupRequest(string Name, Guid? ParentId, int Sort, bool Enabled, MonitorGroupType? Kind, long ExpectedRevision)`.
+- `SqliteDatabaseInitializer.CurrentSchemaVersion == 3` and the nullable `device_groups.group_kind` migration contract.
 
 Contracts:
 
@@ -165,11 +281,103 @@ dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
 
 Commit: `feat: add catalog group kind schema v3`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add the migration, round-trip, and invalid-enum tests; run the focused command above and confirm failure because V3 Kind persistence is absent.
-- [ ] GREEN: add only the V3 field, migration, and repository mapping; run the focused and affected-suite commands above and confirm PASS.
-- [ ] Commit the Task 1 files with the stated message, then stop for review.
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  internal sealed class SqliteTestDatabase : IAsyncDisposable
+  {
+      public SqliteDatabaseInitializer Initializer { get; }
+
+      public static Task<SqliteTestDatabase> CreateV2Async() => throw new NotSupportedException();
+
+      public Task InsertRootAsync(string name) => throw new NotSupportedException();
+
+      public Task<string?> ReadGroupKindAsync() => throw new NotSupportedException();
+
+      public Task<int> ReadMaxSchemaVersionAsync() => throw new NotSupportedException();
+
+      public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+  }
+
+  [Fact]
+  public async Task InitializeAsync_UpgradesV2KnownRootKind()
+  {
+      await using var database = await SqliteTestDatabase.CreateV2Async();
+      await database.InsertRootAsync("溜井监控");
+
+      await database.Initializer.InitializeAsync();
+
+      Assert.Equal("Chute", await database.ReadGroupKindAsync());
+  }
+
+  [Fact]
+  public async Task InitializeAsync_LeavesUnknownRootKindNull()
+  {
+      await using var database = await SqliteTestDatabase.CreateV2Async();
+      await database.InsertRootAsync("现场自定义分类");
+
+      await database.Initializer.InitializeAsync();
+
+      Assert.Null(await database.ReadGroupKindAsync());
+      Assert.Equal(3, await database.ReadMaxSchemaVersionAsync());
+  }
+  ```
+
+  The test fixture uses an in-memory SQLite connection and a `SqliteTestDatabase.CreateV2Async()` helper that creates only the historical V2 schema; it does not change production migration code.
+- [ ] Step 2: Run RED.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~SqliteDatabaseInitializerTests
+  ```
+
+  Confirm failure because the V3 field, migration, and current-version assertions do not yet exist.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  public sealed class SqliteDatabaseInitializer
+  {
+      public const int CurrentSchemaVersion = 3;
+
+      public Task InitializeAsync(CancellationToken cancellationToken = default)
+      {
+          // Apply historical migrations, then one idempotent V2 -> V3 group_kind migration.
+          // Existing migration history remains unchanged.
+      }
+
+      private Task ApplyV3Async(CancellationToken cancellationToken) { }
+  }
+  ```
+
+  Add `MonitorGroupType? Kind` to the domain/DTO/request boundaries and parameterized repository mapping. Reject invalid stored enum text instead of coercing it.
+- [ ] Step 4: Run focused GREEN.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~SqliteDatabaseInitializerTests
+  ```
+
+  Confirm PASS.
+- [ ] Step 5: Run affected suite/build.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~SqliteDatabaseInitializerTests|FullyQualifiedName~SqliteCentralCatalogRepositoryTests"
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+- [ ] Step 6: Review the diff.
+
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 1 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Core/Models/DeviceGroup.cs src/VideoMonitor.Core/Catalog/DeviceGroupDto.cs src/VideoMonitor.Core/Catalog/CatalogRequests.cs src/VideoMonitor.Infrastructure/Persistence/SqliteDatabaseInitializer.cs src/VideoMonitor.Infrastructure/Persistence/SqliteCentralCatalogRepository.cs tests/VideoMonitor.Core.Tests/Infrastructure/SqliteDatabaseInitializerTests.cs tests/VideoMonitor.Core.Tests/Infrastructure/SqliteCentralCatalogRepositoryTests.cs
+  git commit -m "feat: add catalog group kind schema v3"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 2 — Enforce Two-Level Group Semantics on Server
 
@@ -179,6 +387,21 @@ Files:
 - Modify `CatalogEndpoints.cs` only if compilation requires an existing DTO signature update
 - Modify tests: `tests/VideoMonitor.Server.Tests/CatalogApplicationServiceTests.cs`
 - Modify tests: `tests/VideoMonitor.Server.Tests/CatalogApiTests.cs`
+
+Interfaces:
+
+Consumes:
+
+- Task 1's `DeviceGroup`/request/DTO Kind contracts.
+- `Task<CatalogOperationResult<DeviceGroupDto>> CatalogApplicationService.CreateGroupAsync(CreateGroupRequest request, CancellationToken cancellationToken = default)`.
+- `Task<CatalogOperationResult<DeviceGroupDto>> CatalogApplicationService.UpdateGroupAsync(Guid id, UpdateGroupRequest request, CancellationToken cancellationToken = default)` and `Task<CatalogOperationResult<object?>> CatalogApplicationService.DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default)`.
+- `Task<CatalogOperationResult<CameraDeviceDto>> CatalogApplicationService.CreateDeviceAsync(CreateDeviceRequest request, CancellationToken cancellationToken = default)`.
+- `Task<CatalogOperationResult<CameraDeviceDto>> CatalogApplicationService.UpdateDeviceAsync(Guid id, UpdateDeviceRequest request, CancellationToken cancellationToken = default)` and `Task<CatalogOperationResult<object?>> CatalogApplicationService.DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default)`.
+
+Produces:
+
+- The same `Task<CatalogOperationResult<DeviceGroupDto>> CreateGroupAsync(CreateGroupRequest, CancellationToken)`, `Task<CatalogOperationResult<DeviceGroupDto>> UpdateGroupAsync(Guid, UpdateGroupRequest, CancellationToken)`, `Task<CatalogOperationResult<object?>> DeleteGroupAsync(Guid, long, CancellationToken)`, `Task<CatalogOperationResult<CameraDeviceDto>> CreateDeviceAsync(CreateDeviceRequest, CancellationToken)`, `Task<CatalogOperationResult<CameraDeviceDto>> UpdateDeviceAsync(Guid, UpdateDeviceRequest, CancellationToken)`, and `Task<CatalogOperationResult<object?>> DeleteDeviceAsync(Guid, long, CancellationToken)` signatures with two-level Root/Child/Device validation and `CATALOG_VALIDATION_FAILED` mapping.
+- Root/Child Kind and ParentId invariants consumed by Task 11 Root UI and Task 7 projection.
 
 Validation contract:
 
@@ -206,24 +429,102 @@ dotnet build .\VideoMonitor.sln -c Debug
 
 Commit: `feat: enforce catalog group hierarchy semantics`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add the Root/Child/Device validation cases, then run:
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  [Fact]
+  public async Task CreateRootWithoutKind_ReturnsValidationFailure()
+  {
+      var service = await CatalogServiceFixture.CreateAsync();
+
+      var result = await service.CreateGroupAsync(
+          new CreateGroupRequest(Guid.NewGuid(), "Root", null, 0, true, null));
+
+      Assert.Equal("CATALOG_VALIDATION_FAILED", result.Code);
+  }
+
+  [Fact]
+  public async Task CreateDeviceAgainstRoot_ReturnsValidationFailure()
+  {
+      var fixture = await CatalogServiceFixture.CreateWithRootAsync(MonitorGroupType.Chute);
+
+      var result = await fixture.Service.CreateDeviceAsync(
+          CatalogServiceFixture.ValidDeviceRequest(fixture.RootId));
+
+      Assert.Equal("CATALOG_VALIDATION_FAILED", result.Code);
+  }
+
+  private sealed class CatalogServiceFixture
+  {
+      public CatalogApplicationService Service { get; private init; } = null!;
+      public Guid RootId { get; private init; }
+
+      public static Task<CatalogApplicationService> CreateAsync() => throw new NotSupportedException();
+      public static Task<CatalogServiceFixture> CreateWithRootAsync(MonitorGroupType kind) => throw new NotSupportedException();
+      public static CreateDeviceRequest ValidDeviceRequest(Guid groupId) => throw new NotSupportedException();
+  }
+  ```
+
+  Add the same fixture pattern for Child-with-Kind, Child-to-Child, Root/Child conversion, Device-to-Root, and a valid Device-to-Child case.
+- [ ] Step 2: Run RED.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter FullyQualifiedName~CatalogApplicationServiceTests
   ```
 
-  Confirm failure because the existing service accepts an invalid hierarchy.
-- [ ] GREEN: add the smallest service validation and preserve the existing error contract, then run the same focused command, followed by:
+  Confirm failure because the current service accepts at least one invalid Root/Child/Device relationship.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  private static string? ValidateGroupMutation(
+      DeviceGroupDto? current,
+      Guid? parentId,
+      MonitorGroupType? kind,
+      IReadOnlyList<DeviceGroupDto> groups)
+  {
+      var parent = parentId is Guid id ? groups.SingleOrDefault(group => group.Id == id) : null;
+      var isRoot = parentId is null;
+      if (isRoot && kind is null && current is null) return "CATALOG_VALIDATION_FAILED";
+      if (!isRoot && parent is null) return "CATALOG_VALIDATION_FAILED";
+      if (!isRoot && parent!.ParentId is not null) return "CATALOG_VALIDATION_FAILED";
+      if (!isRoot && kind is not null) return "CATALOG_VALIDATION_FAILED";
+      if (current is not null && current.ParentId is null && parentId is not null) return "CATALOG_VALIDATION_FAILED";
+      if (current is not null && current.ParentId is not null && parentId is null) return "CATALOG_VALIDATION_FAILED";
+      if (current is not null && current.ParentId is null && current.Kind is not null && current.Kind != kind) return "CATALOG_VALIDATION_FAILED";
+      return null;
+  }
+  ```
+
+  Apply the same parent check to device create/update, preserve the repository result mapping, and keep the approved error code.
+- [ ] Step 4: Run focused GREEN.
 
   ```powershell
-  dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj
-  dotnet build .\VideoMonitor.sln -c Debug
+  dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter FullyQualifiedName~CatalogApplicationServiceTests
   ```
 
   Confirm PASS.
-- [ ] Commit the Task 2 files with the stated message, then stop for review.
+- [ ] Step 5: Run the affected suite/build.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+- [ ] Step 6: Review the diff.
+
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 2 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Server/Catalog/CatalogApplicationService.cs src/VideoMonitor.Server/Catalog/CatalogEndpoints.cs tests/VideoMonitor.Server.Tests/Catalog/CatalogApplicationServiceTests.cs tests/VideoMonitor.Server.Tests/Catalog/CatalogApiTests.cs
+  git commit -m "feat: enforce catalog group hierarchy semantics"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 3 — Client Settings and Atomic Save
 
@@ -235,6 +536,19 @@ Files:
 - Create `src/VideoMonitor.Wpf/Configuration/JsonClientSettingsStore.cs`
 - Modify `.gitignore` to add `.devdata/`
 - Create tests: `tests/VideoMonitor.Core.Tests/Configuration/ClientSettingsStoreTests.cs`
+
+Interfaces:
+
+Consumes:
+
+- `ClientSettingsPathProvider` root resolution and the existing JSON/file-system APIs available to the WPF project.
+- `string ClientSettingsPathProvider.GetPath(string? injectedRoot = null)` and `ClientSettings.Empty`.
+
+Produces:
+
+- `ClientServerSettings(string? BaseUrl)` and `ClientSettings(ClientServerSettings Server)` with `ClientSettings.Empty`.
+- `ClientSettings IClientSettingsStore.Load()` and `Task IClientSettingsStore.SaveAsync(ClientSettings settings, CancellationToken cancellationToken = default)`.
+- `string ClientSettingsPathProvider.GetPath(string? injectedRoot = null)` and `JsonClientSettingsStore` atomic persistence behavior.
 
 Contracts:
 
@@ -264,24 +578,111 @@ Tests cover first-save round-trip, existing-file replacement, and replacement fa
 
 Commit: `feat: add atomic client server settings`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add first-save, replacement, and failure-preservation cases, then run:
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  [Fact]
+  public async Task FirstSave_RoundTripsBaseUrl()
+  {
+      var store = new JsonClientSettingsStore(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+      var expected = new ClientSettings(new ClientServerSettings("https://server-b"));
+
+      await store.SaveAsync(expected);
+
+      Assert.Equal(expected, store.Load());
+  }
+
+  [Fact]
+  public async Task ReplaceFailure_PreservesOldFile()
+  {
+      var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+      var store = new JsonClientSettingsStore(root);
+      var old = new ClientSettings(new ClientServerSettings("https://server-a"));
+      await store.SaveAsync(old);
+      var targetPath = Path.Combine(root, "client-settings.json");
+      await using var targetLock = new FileStream(targetPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+      await Assert.ThrowsAnyAsync<IOException>(() => store.SaveAsync(
+          new ClientSettings(new ClientServerSettings("https://server-b"))));
+
+      Assert.Equal(old, store.Load());
+  }
+  ```
+
+  Add a test that asserts a malformed file throws `InvalidDataException` without replacing the old bytes.
+- [ ] Step 2: Run RED.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~ClientSettingsStoreTests
   ```
 
-  Confirm failure because the settings store does not exist.
-- [ ] GREEN: implement the path provider and atomic write behavior only, then run the same focused command and:
+  Confirm failure because the client settings types and store do not exist.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  public sealed class JsonClientSettingsStore : IClientSettingsStore
+  {
+      private readonly string filePath;
+
+      public JsonClientSettingsStore(string root)
+      {
+          filePath = Path.Combine(Path.GetFullPath(root), "client-settings.json");
+      }
+
+      public ClientSettings Load() =>
+          File.Exists(filePath)
+              ? JsonSerializer.Deserialize<ClientSettings>(File.ReadAllText(filePath))
+                  ?? throw new InvalidDataException("Client settings are invalid.")
+              : ClientSettings.Empty;
+
+      public async Task SaveAsync(ClientSettings settings, CancellationToken cancellationToken = default)
+      {
+          var directory = Path.GetDirectoryName(filePath)!;
+          Directory.CreateDirectory(directory);
+          var temporaryPath = Path.Combine(directory, "client-settings.tmp");
+          await using (var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None))
+          {
+              await JsonSerializer.SerializeAsync(stream, settings, cancellationToken: cancellationToken);
+              await stream.FlushAsync(cancellationToken);
+              stream.Flush(flushToDisk: true);
+          }
+          if (File.Exists(filePath))
+              File.Replace(temporaryPath, filePath, destinationBackupFileName: null);
+          else
+              File.Move(temporaryPath, filePath);
+      }
+  }
+  ```
+
+  Keep `JsonClientSettingsStore` non-sensitive and make temporary cleanup best effort without masking the primary exception.
+- [ ] Step 4: Run focused GREEN.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~ClientSettingsStoreTests
+  ```
+
+  Confirm PASS.
+- [ ] Step 5: Run the affected suite/build.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
   dotnet build .\VideoMonitor.sln -c Debug
   ```
+- [ ] Step 6: Review the diff.
 
-  Confirm PASS.
-- [ ] Commit the Task 3 files with the stated message, then stop for review.
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 3 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Wpf/Configuration/ClientSettings.cs src/VideoMonitor.Wpf/Configuration/IClientSettingsStore.cs src/VideoMonitor.Wpf/Configuration/ClientSettingsPathProvider.cs src/VideoMonitor.Wpf/Configuration/JsonClientSettingsStore.cs .gitignore tests/VideoMonitor.Core.Tests/Configuration/ClientSettingsStoreTests.cs
+  git commit -m "feat: add atomic client server settings"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 4 — CatalogApiClient
 
@@ -290,6 +691,21 @@ Files:
 - Create `src/VideoMonitor.Wpf/Catalog/CatalogApiException.cs`
 - Create `src/VideoMonitor.Wpf/Catalog/CatalogApiClient.cs`
 - Create tests: `tests/VideoMonitor.Core.Tests/Catalog/CatalogApiClientTests.cs`
+
+Interfaces:
+
+Consumes:
+
+- `CatalogSnapshotDto`, `DeviceGroupDto`, `CameraDeviceDto`, `CameraChannelDto`, and the existing Stage 5B-1 HTTP endpoint/error contracts.
+- `CreateGroupRequest(Guid Id, string Name, Guid? ParentId, int Sort, bool Enabled)`, `UpdateGroupRequest(string Name, Guid? ParentId, int Sort, bool Enabled, long ExpectedRevision)`, `CreateDeviceRequest(Guid Id, Guid GroupId, string Name, string IpAddress, int SdkPort, int RtspPort, string Username, string Password, string Manufacturer, string Model, TransportMode TransportMode, bool Enabled, string Remark, IReadOnlyList<CameraChannelInput> Channels)`, and `UpdateDeviceRequest(Guid GroupId, string Name, string IpAddress, int SdkPort, int RtspPort, string Username, string? NewPassword, string Manufacturer, string Model, TransportMode TransportMode, bool Enabled, string Remark, long ExpectedRevision, IReadOnlyList<CameraChannelInput> Channels)`.
+- `CatalogErrorDto(string Code, string Message, long? CurrentRevision)` for safe error-field mapping.
+
+Produces:
+
+- `CatalogApiException(string code, long? currentRevision = null)` with safe properties `Code` and `CurrentRevision`, plus `static Task<CatalogApiException> FromResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken = default)` that parses only the approved error envelope.
+- `CatalogApiClient.CheckReadyAsync(Uri baseUri, CancellationToken cancellationToken = default)`.
+- `CatalogApiClient.GetCatalogAsync(Uri baseUri, CancellationToken cancellationToken = default)`.
+- Explicit-URI asynchronous Create/Update/Delete group and device methods using the Stage 5B-1 request DTOs.
 
 `CatalogApiClient` never mutates `HttpClient.BaseAddress` during a Server switch. Every operation receives an explicit `Uri baseUri`.
 
@@ -310,24 +726,125 @@ Use the existing Stage 5B-1 endpoint and error contracts after reading `CatalogE
 
 Commit: `feat: add central catalog api client`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add HTTP handler cases for the listed responses and request rules, then run:
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  [Fact]
+  public async Task ConflictResponse_MapsCodeAndRevision()
+  {
+      var handler = new RecordingHttpMessageHandler(HttpStatusCode.Conflict, "{\"code\":\"CATALOG_CONFLICT\",\"currentRevision\":7}");
+      var client = new CatalogApiClient(new HttpClient(handler));
+
+      var error = await Assert.ThrowsAsync<CatalogApiException>(() =>
+          client.UpdateGroupAsync(new Uri("https://server-b/"), Guid.NewGuid(), ValidUpdateRequest()));
+
+      Assert.Equal("CATALOG_CONFLICT", error.Code);
+      Assert.Equal(7, error.CurrentRevision);
+      Assert.Equal(1, handler.RequestCount);
+  }
+
+  [Fact]
+  public async Task WriteFailure_IsNotRetried()
+  {
+      var handler = new RecordingHttpMessageHandler(HttpStatusCode.ServiceUnavailable, "{}");
+      var client = new CatalogApiClient(new HttpClient(handler));
+
+      await Assert.ThrowsAsync<CatalogApiException>(() =>
+          client.DeleteDeviceAsync(new Uri("https://server-b/"), Guid.NewGuid(), 3));
+
+      Assert.Equal(1, handler.RequestCount);
+  }
+
+  private static UpdateGroupRequest ValidUpdateRequest() =>
+      new("Group", null, 0, true, MonitorGroupType.Chute, 6);
+
+  private sealed class RecordingHttpMessageHandler : HttpMessageHandler
+  {
+      private readonly HttpStatusCode statusCode;
+      private readonly string body;
+      public int RequestCount { get; private set; }
+
+      public RecordingHttpMessageHandler(HttpStatusCode statusCode, string body)
+      {
+          this.statusCode = statusCode;
+          this.body = body;
+      }
+
+      protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+      {
+          RequestCount++;
+          return Task.FromResult(new HttpResponseMessage(statusCode)
+          {
+              Content = new StringContent(body, Encoding.UTF8, "application/json")
+          });
+      }
+  }
+  ```
+
+  Add the same handler fixture for ready 200, Catalog Kind deserialization, malformed error bodies, transport exceptions, and zero password-unprotect calls on Catalog GET.
+- [ ] Step 2: Run RED.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~CatalogApiClientTests
   ```
 
-  Confirm failure because the client is absent.
-- [ ] GREEN: implement explicit-URI requests and safe response mapping, then run the same focused command and:
+  Confirm failure because the HTTP client and safe exception mapping do not exist.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  public sealed class CatalogApiClient
+  {
+      private readonly HttpClient httpClient;
+
+      public CatalogApiClient(HttpClient httpClient) => this.httpClient = httpClient;
+
+      public async Task<CatalogSnapshotDto> GetCatalogAsync(Uri baseUri, CancellationToken cancellationToken = default)
+      {
+          using var response = await httpClient.GetAsync(new Uri(baseUri, "/api/v1/catalog"), cancellationToken);
+          response.EnsureSuccessStatusCode();
+          return await response.Content.ReadFromJsonAsync<CatalogSnapshotDto>(cancellationToken: cancellationToken)
+              ?? throw new CatalogApiException("CATALOG_UNAVAILABLE");
+      }
+
+      private async Task<T> SendAsync<T>(HttpRequestMessage request, CancellationToken cancellationToken)
+      {
+          using var response = await httpClient.SendAsync(request, cancellationToken);
+          if (!response.IsSuccessStatusCode)
+              throw await CatalogApiException.FromResponseAsync(response, cancellationToken);
+          return (await response.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken))!;
+      }
+  }
+  ```
+
+  Build each write request with its explicit URI, map only approved safe error fields, and never include response bodies, credentials, or retry logic in exceptions.
+- [ ] Step 4: Run focused GREEN.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~CatalogApiClientTests
+  ```
+
+  Confirm PASS.
+- [ ] Step 5: Run the affected suite/build.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
   dotnet build .\VideoMonitor.sln -c Debug
   ```
+- [ ] Step 6: Review the diff.
 
-  Confirm PASS.
-- [ ] Commit the Task 4 files with the stated message, then stop for review.
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 4 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Wpf/Catalog/CatalogApiException.cs src/VideoMonitor.Wpf/Catalog/CatalogApiClient.cs tests/VideoMonitor.Core.Tests/Catalog/CatalogApiClientTests.cs
+  git commit -m "feat: add central catalog api client"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 5 — Password-Safe Read Model, Cache, Dispatcher, and Legacy Adapter
 
@@ -340,6 +857,20 @@ Files:
 - Create `src/VideoMonitor.Wpf/Catalog/LegacyDeviceCatalogReadModel.cs`
 - Create tests: `tests/VideoMonitor.Core.Tests/Catalog/ClientCatalogCacheTests.cs`
 - Create tests: `tests/VideoMonitor.Core.Tests/Catalog/LegacyDeviceCatalogReadModelTests.cs`
+
+Interfaces:
+
+Consumes:
+
+- `CatalogSnapshotDto`, `DeviceGroupDto`, `CameraDeviceDto`, and legacy `IDeviceCatalog`.
+- `IUiDispatcher.InvokeAsync(Action action, CancellationToken cancellationToken = default)`.
+- `IDeviceCatalog.GetGroups(): IReadOnlyList<DeviceGroup>`, `GetDevices(Guid groupId): IReadOnlyList<CameraDevice>`, `GetDevice(Guid deviceId): CameraDevice?`, `Changed`, and the existing Add/Update/Delete methods for the explicit local compatibility mode.
+
+Produces:
+
+- `IDeviceCatalogReadModel.GetGroups()`, `GetDevices(Guid groupId)`, `GetDevice(Guid deviceId)`, and `Changed`.
+- `ClientCatalogCache` with `CatalogSnapshotDto Snapshot` and `Task ReplaceAsync(CatalogSnapshotDto snapshot, CancellationToken cancellationToken = default)`.
+- `LegacyDeviceCatalogReadModel : IDeviceCatalogReadModel`, with password mapped only to `HasPassword`.
 
 The read-model contract is:
 
@@ -365,30 +896,118 @@ public interface IUiDispatcher
 }
 ```
 
-`ClientCatalogCache` stores only a complete `CatalogSnapshotDto` or equivalent password-safe snapshot. It never stores Core `CameraDevice`, `Password`, or `PasswordCiphertext`. Replacement prepares and validates a complete snapshot, atomically swaps the reference, and publishes `Changed` through the dispatcher only when content differs. `GetGroup` and `GetDevice` use Guid identity. The legacy adapter is restricted to `SingleCameraTest` and maps password to `HasPassword` inside the adapter without exposing it.
+`ClientCatalogCache` stores only a complete `CatalogSnapshotDto` or equivalent password-safe snapshot. It never stores Core `CameraDevice`, `Password`, or `PasswordCiphertext`. Replacement prepares and validates a complete snapshot, atomically swaps the reference, and publishes `Changed` through the dispatcher only when content differs. `GetGroups`, `GetDevices(Guid)`, and `GetDevice(Guid)` use Guid identity. The legacy adapter is restricted to `SingleCameraTest` and maps password to `HasPassword` inside the adapter without exposing it.
 
 Tests cover atomic replacement, no notification for identical snapshots, Guid lookup, dispatcher publication, reflection absence of sensitive DTO properties, and legacy `HasPassword` mapping.
 
 Commit: `feat: add password safe client catalog cache`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add cache replacement, dispatcher, DTO-safety, and legacy-adapter cases, then run:
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  [Fact]
+  public async Task IdenticalSnapshot_DoesNotRaiseChanged()
+  {
+      var dispatcher = new InlineUiDispatcher();
+      var cache = new ClientCatalogCache(EmptySnapshot(), dispatcher);
+      var changed = 0;
+      cache.Changed += (_, _) => changed++;
+
+      await cache.ReplaceAsync(EmptySnapshot());
+
+      Assert.Equal(0, changed);
+  }
+
+  [Fact]
+  public async Task CacheType_DoesNotExposePasswordProperties()
+  {
+      var names = typeof(ClientCatalogCache).GetProperties()
+          .Select(property => property.Name)
+          .ToArray();
+
+      Assert.DoesNotContain("Password", names);
+      Assert.DoesNotContain("PasswordCiphertext", names);
+  }
+
+  private static CatalogSnapshotDto EmptySnapshot() => new(Array.Empty<DeviceGroupDto>(), Array.Empty<CameraDeviceDto>());
+
+  private sealed class InlineUiDispatcher : IUiDispatcher
+  {
+      public Task InvokeAsync(Action action, CancellationToken cancellationToken = default)
+      {
+          action();
+          return Task.CompletedTask;
+      }
+  }
+  ```
+
+  Add a Guid lookup test and a legacy-adapter test proving a non-empty local password becomes only `HasPassword = true` in the read model.
+- [ ] Step 2: Run RED.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~ClientCatalogCacheTests|FullyQualifiedName~LegacyDeviceCatalogReadModelTests"
   ```
 
-  Confirm failure because the read model and cache are absent.
-- [ ] GREEN: implement the safe snapshot cache and adapter boundaries, then run the same focused command and:
+  Confirm failure because the password-safe read model and cache are absent.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  public sealed class ClientCatalogCache : IDeviceCatalogReadModel
+  {
+      private readonly IUiDispatcher dispatcher;
+      private CatalogSnapshotDto snapshot;
+
+      public ClientCatalogCache(CatalogSnapshotDto initial, IUiDispatcher dispatcher)
+      {
+          snapshot = initial;
+          this.dispatcher = dispatcher;
+      }
+
+      public CatalogSnapshotDto Snapshot => Volatile.Read(ref snapshot);
+      public event EventHandler? Changed;
+
+      public async Task ReplaceAsync(CatalogSnapshotDto next, CancellationToken cancellationToken = default)
+      {
+          if (Snapshot.Equals(next)) return;
+          Volatile.Write(ref snapshot, next);
+          await dispatcher.InvokeAsync(() => Changed?.Invoke(this, EventArgs.Empty), cancellationToken).ConfigureAwait(false);
+      }
+
+      public IReadOnlyList<DeviceGroupDto> GetGroups() => Snapshot.Groups;
+      public IReadOnlyList<CameraDeviceDto> GetDevices(Guid groupId) => Snapshot.Devices.Where(device => device.GroupId == groupId).ToArray();
+      public CameraDeviceDto? GetDevice(Guid deviceId) => Snapshot.Devices.SingleOrDefault(device => device.Id == deviceId);
+  }
+  ```
+
+  Compare complete DTO snapshots by value, publish after the atomic reference swap, and keep legacy password mapping inside the adapter.
+- [ ] Step 4: Run focused GREEN.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~ClientCatalogCacheTests|FullyQualifiedName~LegacyDeviceCatalogReadModelTests"
+  ```
+
+  Confirm PASS.
+- [ ] Step 5: Run the affected suite/build.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
   dotnet build .\VideoMonitor.sln -c Debug
   ```
+- [ ] Step 6: Review the diff.
 
-  Confirm PASS.
-- [ ] Commit the Task 5 files with the stated message, then stop for review.
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 5 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Core/Catalog/IDeviceCatalogReadModel.cs src/VideoMonitor.Wpf/Catalog/IUiDispatcher.cs src/VideoMonitor.Wpf/Catalog/WpfUiDispatcher.cs src/VideoMonitor.Wpf/Catalog/ClientCatalogCache.cs src/VideoMonitor.Wpf/Catalog/LegacyDeviceCatalogReadModel.cs tests/VideoMonitor.Core.Tests/Catalog/ClientCatalogCacheTests.cs tests/VideoMonitor.Core.Tests/Catalog/LegacyDeviceCatalogReadModelTests.cs
+  git commit -m "feat: add password safe client catalog cache"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 6 — ServerConnectionCoordinator
 
@@ -400,6 +1019,21 @@ Files:
 - Create `src/VideoMonitor.Wpf/Catalog/ServerConnectionCoordinator.cs`
 - Add only a minimal internal client seam to `CatalogApiClient.cs` if deterministic tests require it; do not add a second transport implementation
 - Create tests: `tests/VideoMonitor.Core.Tests/Catalog/ServerConnectionCoordinatorTests.cs`
+
+Interfaces:
+
+Consumes:
+
+- `IClientSettingsStore`, `CatalogApiClient`, `ClientCatalogCache`, `IUiDispatcher`, `IClientConnectionClock`, and `Func<bool> hasUnsavedDraft`.
+- `ClientSettings IClientSettingsStore.Load()` and `Task IClientSettingsStore.SaveAsync(ClientSettings settings, CancellationToken cancellationToken = default)`.
+- `Task CatalogApiClient.CheckReadyAsync(Uri baseUri, CancellationToken cancellationToken = default)` and `Task<CatalogSnapshotDto> CatalogApiClient.GetCatalogAsync(Uri baseUri, CancellationToken cancellationToken = default)`.
+- `CatalogSnapshotDto ClientCatalogCache.Snapshot` and `Task ClientCatalogCache.ReplaceAsync(CatalogSnapshotDto snapshot, CancellationToken cancellationToken = default)`.
+
+Produces:
+
+- `ServerConnectionState` values `Unconfigured`, `Connecting`, `Connected`, and `Unavailable`.
+- `ServerConnectionStatus(Uri? BaseUri, ServerConnectionState State, DateTimeOffset? LastSuccessfulSyncUtc, bool IsStale)`.
+- `ServerConnectionCoordinator.Status`, `StatusChanged`, `RunAsync(CancellationToken)`, `RefreshNowAsync(CancellationToken)`, `ProbeAsync(Uri, CancellationToken)`, and `SwitchServerAsync(Uri, Func<bool>, CancellationToken)`.
 
 States are `Unconfigured`, `Connecting`, `Connected`, and `Unavailable`. Status is:
 
@@ -434,24 +1068,146 @@ Deterministic tests cover no configuration, first connect, stale mode, reconnect
 
 Commit: `feat: add central server connection coordinator`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add deterministic coordinator tests for connection, refresh, retry, and switch behavior, then run:
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  [Fact]
+  public async Task FailedServerSwitch_KeepsServerA()
+  {
+      var fixture = await ConnectionFixture.ConnectedToAsync("https://server-a");
+      fixture.Api.ProbeResult = false;
+
+      await Assert.ThrowsAsync<CatalogApiException>(() =>
+          fixture.Coordinator.SwitchServerAsync(new Uri("https://server-b"), () => false));
+
+      Assert.Equal(new Uri("https://server-a"), fixture.Coordinator.Status.BaseUri);
+      Assert.Equal(ServerConnectionState.Connected, fixture.Coordinator.Status.State);
+  }
+
+  [Fact]
+  public async Task SuccessfulSwitch_PersistsBeforeFinalStateChange()
+  {
+      var fixture = await ConnectionFixture.ConnectedToAsync("https://server-a");
+      fixture.Settings.SaveResult = Task.CompletedTask;
+
+      await fixture.Coordinator.SwitchServerAsync(new Uri("https://server-b"), () => false);
+
+      Assert.Equal(new Uri("https://server-b"), fixture.Coordinator.Status.BaseUri);
+      Assert.Equal(1, fixture.Settings.SaveCount);
+  }
+
+  [Fact]
+  public async Task RetryDelay_UsesBoundedDeterministicJitter()
+  {
+      var clock = new FakeConnectionClock(0.5);
+      Assert.Equal(TimeSpan.FromSeconds(3.5), clock.Jitter(TimeSpan.FromSeconds(5)));
+      Assert.Equal(TimeSpan.FromSeconds(21), clock.Jitter(TimeSpan.FromSeconds(30)));
+  }
+
+  private sealed class ConnectionFixture
+  {
+      public ServerConnectionCoordinator Coordinator { get; private init; } = null!;
+      public FakeCatalogApi Api { get; } = new();
+      public FakeClientSettingsStore Settings { get; } = new();
+      public static Task<ConnectionFixture> ConnectedToAsync(string baseUrl) => throw new NotSupportedException();
+  }
+
+  private sealed class FakeCatalogApi
+  {
+      public bool ProbeResult { get; set; } = true;
+  }
+
+  private sealed class FakeClientSettingsStore
+  {
+      public int SaveCount { get; private set; }
+      public Task SaveResult { get; set; } = Task.CompletedTask;
+  }
+
+  private sealed class FakeConnectionClock
+  {
+      private readonly double jitterUnit;
+      public FakeConnectionClock(double jitterUnit) => this.jitterUnit = jitterUnit;
+      public TimeSpan Jitter(TimeSpan baseDelay) => baseDelay * (0.8 + 0.4 * jitterUnit);
+  }
+  ```
+
+  Add tests for stale-cache preservation, 2/5/10/15/15 reconnect bases, 30-second periodic refresh, single-flight refresh, and Draft blocking.
+- [ ] Step 2: Run RED.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~ServerConnectionCoordinatorTests
   ```
 
-  Confirm failure because the coordinator is absent.
-- [ ] GREEN: implement one loop, single-flight refresh, bounded backoff, and atomic switching, then run the same focused command and:
+  Confirm failure because the coordinator and deterministic clock seam are absent.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  public sealed class ServerConnectionCoordinator : IAsyncDisposable
+  {
+      private readonly SemaphoreSlim refreshGate = new(1, 1);
+      private readonly CancellationTokenSource shutdown = new();
+      private readonly CatalogApiClient apiClient;
+      private readonly ClientCatalogCache cache;
+      private readonly IClientSettingsStore settingsStore;
+      private Uri? configuredBaseUri;
+
+      public ServerConnectionStatus Status { get; private set; } =
+          new(null, ServerConnectionState.Unconfigured, null, true);
+
+      public Task RunAsync(CancellationToken cancellationToken) => RunLoopAsync(cancellationToken);
+      public Task ProbeAsync(Uri baseUri, CancellationToken cancellationToken = default) => ProbeReadyAndCatalogAsync(baseUri, cancellationToken);
+      public Task SwitchServerAsync(Uri candidate, Func<bool> hasUnsavedDraft, CancellationToken cancellationToken = default) => SwitchCoreAsync(candidate, hasUnsavedDraft, cancellationToken);
+
+      public async Task RefreshNowAsync(CancellationToken cancellationToken = default)
+      {
+          if (!await refreshGate.WaitAsync(0, cancellationToken)) return;
+          try
+          {
+              var snapshot = await apiClient.GetCatalogAsync(configuredBaseUri!, cancellationToken).ConfigureAwait(false);
+              await cache.ReplaceAsync(snapshot, cancellationToken).ConfigureAwait(false);
+          }
+          finally { refreshGate.Release(); }
+      }
+
+      public async ValueTask DisposeAsync()
+      {
+          shutdown.Cancel();
+          refreshGate.Dispose();
+          shutdown.Dispose();
+          await Task.CompletedTask.ConfigureAwait(false);
+      }
+  }
+  ```
+
+  Add the single process loop, the specified backoff/jitter, and the settings-write commit point around this seam; no overlapping refresh or automatic write retry.
+- [ ] Step 4: Run focused GREEN.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~ServerConnectionCoordinatorTests
+  ```
+
+  Confirm PASS.
+- [ ] Step 5: Run the affected suite/build.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
   dotnet build .\VideoMonitor.sln -c Debug
   ```
+- [ ] Step 6: Review the diff.
 
-  Confirm PASS.
-- [ ] Commit the Task 6 files with the stated message, then stop for review.
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 6 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Wpf/Catalog/ServerConnectionState.cs src/VideoMonitor.Wpf/Catalog/IClientConnectionClock.cs src/VideoMonitor.Wpf/Catalog/SystemClientConnectionClock.cs src/VideoMonitor.Wpf/Catalog/ServerConnectionCoordinator.cs src/VideoMonitor.Wpf/Catalog/CatalogApiClient.cs tests/VideoMonitor.Core.Tests/Catalog/ServerConnectionCoordinatorTests.cs
+  git commit -m "feat: add central server connection coordinator"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 7 — Monitor Projection and Fixed Nullable 4+3
 
@@ -463,6 +1219,21 @@ Files:
 - Modify `src/VideoMonitor.Core/Services/MonitorSwitchService.cs`
 - Modify tests: `tests/VideoMonitor.Core.Tests/Services/MonitorCatalogProjectionTests.cs`
 - Modify tests: `tests/VideoMonitor.Core.Tests/Services/MonitorSwitchServiceTests.cs`
+
+Interfaces:
+
+Consumes:
+
+- `IDeviceCatalogReadModel.GetGroups()`, `GetDevices(Guid)`, `GetDevice(Guid)`, and `Changed`.
+- `DeviceGroupDto` with nullable `MonitorGroupType? Kind` and direct `ParentId` hierarchy.
+- Existing `MonitorGroup(string Name, MonitorGroupType Type, IReadOnlyList<CameraInfo> Cameras)` and `MonitorSwitchService(MonitorGroup defaultChuteGroup, MonitorGroup defaultTunnelGroup, MonitorGroup defaultUnloadingGroup)` behavior, which this Task extends without changing the 3+1 business rule.
+
+Produces:
+
+- `MonitorGroup(string Name, MonitorGroupType Type, IReadOnlyList<CameraInfo> Cameras)` with `GroupId`, `RootGroupId`, `RootName`, `RootSort`, and `Sort` metadata.
+- `MonitorCatalogProjection.CreateGroups(IDeviceCatalogReadModel catalog)`.
+- `MonitorLayoutSnapshot(IReadOnlyList<CameraInfo?> MainSlots, IReadOnlyList<CameraInfo?> SecondarySlots)`.
+- `void MonitorSwitchService.ReplaceGroups(IReadOnlyList<MonitorGroup>)`, `void SwitchChuteGroup(Guid)`, `void SwitchTunnelGroup(Guid)`, and `void SwitchUnloadingGroup(Guid)`.
 
 `MonitorGroup` contains `GroupId`, `RootGroupId`, `RootName`, `RootSort`, and `Sort`. `MonitorLayoutSnapshot` contains `IReadOnlyList<CameraInfo?> MainSlots` and `IReadOnlyList<CameraInfo?> SecondarySlots`.
 
@@ -476,24 +1247,102 @@ Tests cover empty data, one/two Chute groups, Tunnel, UnloadingStation, same-Kin
 
 Commit: `feat: make monitor layout catalog tolerant`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add projection, hierarchy filtering, default-order, and nullable-slot cases, then run:
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  [Fact]
+  public void EmptyCatalog_ProducesFourMainAndThreeSecondaryNullSlots()
+  {
+      var groups = MonitorCatalogProjection.CreateGroups(new ReadModelStub());
+      var layout = new MonitorSwitchService(groups).CurrentLayout;
+
+      Assert.Equal(4, layout.MainSlots.Count);
+      Assert.Equal(3, layout.SecondarySlots.Count);
+      Assert.All(layout.MainSlots, slot => Assert.Null(slot));
+      Assert.All(layout.SecondarySlots, slot => Assert.Null(slot));
+  }
+
+  [Fact]
+  public void DuplicateChildNames_AreSelectedByGuid()
+  {
+      var first = new MonitorGroup("401", MonitorGroupType.Chute, Array.Empty<CameraInfo>()) { GroupId = Guid.NewGuid() };
+      var second = first with { GroupId = Guid.NewGuid() };
+      var service = new MonitorSwitchService(new[] { first, second });
+
+      service.SwitchChuteGroup(second.GroupId);
+
+      Assert.Equal(second.GroupId, service.SelectedChuteGroupId);
+  }
+
+  private sealed class ReadModelStub : IDeviceCatalogReadModel
+  {
+      public event EventHandler? Changed;
+      public IReadOnlyList<DeviceGroupDto> GetGroups() => Array.Empty<DeviceGroupDto>();
+      public IReadOnlyList<CameraDeviceDto> GetDevices(Guid groupId) => Array.Empty<CameraDeviceDto>();
+      public CameraDeviceDto? GetDevice(Guid deviceId) => null;
+  }
+  ```
+
+  Add cases for deterministic Root/Child ordering, deleted/disabled fallback, same-Kind Roots, and wrong-kind Guid rejection.
+- [ ] Step 2: Run RED.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~MonitorCatalogProjectionTests|FullyQualifiedName~MonitorSwitchServiceTests"
   ```
 
-  Confirm failure because the central read-model projection is absent.
-- [ ] GREEN: implement the two-level projection and Guid-based switch behavior, then run the same focused command and:
+  Confirm failure because nullable layout slots and central read-model projection are not implemented.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  public sealed record MonitorLayoutSnapshot(
+      IReadOnlyList<CameraInfo?> MainSlots,
+      IReadOnlyList<CameraInfo?> SecondarySlots);
+
+  public static IReadOnlyList<MonitorGroup> CreateGroups(IDeviceCatalogReadModel catalog)
+  {
+      var groups = catalog.GetGroups();
+      var roots = groups.Where(group => group.ParentId is null && group.Enabled && group.Kind is not null);
+      return roots.SelectMany(root => groups
+          .Where(child => child.ParentId == root.Id && child.Enabled)
+          .OrderBy(child => child.Sort)
+          .ThenBy(child => child.Id)
+          .Select(child => ToMonitorGroup(root, child, catalog)))
+          .OrderBy(group => group.RootSort)
+          .ThenBy(group => group.Sort)
+          .ThenBy(group => group.GroupId)
+          .ToArray();
+  }
+  ```
+
+  Preserve the existing `MonitorSwitchService` 3+1 behavior while making all group and slot selection Guid based.
+- [ ] Step 4: Run focused GREEN.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~MonitorCatalogProjectionTests|FullyQualifiedName~MonitorSwitchServiceTests"
+  ```
+
+  Confirm PASS.
+- [ ] Step 5: Run the affected suite/build.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
   dotnet build .\VideoMonitor.sln -c Debug
   ```
+- [ ] Step 6: Review the diff.
 
-  Confirm PASS.
-- [ ] Commit the Task 7 files with the stated message, then stop for review.
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 7 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Core/Models/MonitorGroup.cs src/VideoMonitor.Core/Services/MonitorCatalogProjection.cs src/VideoMonitor.Core/Services/MonitorLayoutSnapshot.cs src/VideoMonitor.Core/Services/MonitorSwitchService.cs tests/VideoMonitor.Core.Tests/Services/MonitorCatalogProjectionTests.cs tests/VideoMonitor.Core.Tests/Services/MonitorSwitchServiceTests.cs
+  git commit -m "feat: make monitor layout catalog tolerant"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 8 — Monitor, Secondary, and VideoTile DTO Refactor
 
@@ -508,6 +1357,20 @@ Files:
 - Modify tests: `tests/VideoMonitor.Core.Tests/ViewModels/MonitorUiStateTests.cs`
 - Create tests: `tests/VideoMonitor.Core.Tests/ViewModels/SecondaryMonitorCatalogTests.cs`
 
+Interfaces:
+
+Consumes:
+
+- `IDeviceCatalogReadModel`, `MonitorCatalogProjection.CreateGroups(IDeviceCatalogReadModel catalog)`, `MonitorLayoutSnapshot` nullable slots, and runtime `CameraStatus`.
+- Existing `MonitorViewModel`, `SecondaryMonitorViewModel`, and `VideoTileViewModel` bindings that will be redirected.
+- `IReadOnlyList<CameraInfo?> MonitorLayoutSnapshot.MainSlots` and `IReadOnlyList<CameraInfo?> MonitorLayoutSnapshot.SecondarySlots` produced by Task 7.
+
+Produces:
+
+- `VideoTileViewModel.Update(CameraInfo, CameraDeviceDto?, CameraChannelDto?, CameraStatus)` and `ResetUnconfigured()`.
+- `MonitorViewModel` and `SecondaryMonitorViewModel` subscriptions to `IDeviceCatalogReadModel.Changed` with Guid selection preservation, and `VideoTileViewModel.Update(CameraInfo, CameraDeviceDto?, CameraChannelDto?, CameraStatus)`.
+- `SecondaryMonitorWindow` dynamic group ItemsControl binding.
+
 Formal `VideoTile` updates consume `CameraInfo`, `CameraDeviceDto?`, `CameraChannelDto?`, and runtime `CameraStatus`; they do not consume Core `CameraDevice`. Add `ResetUnconfigured()` so an empty slot displays `CameraName = "未配置"`, `Status = Unknown`, `IP = "--"`, stream = `"--"`, and the existing unconfigured visual state.
 
 `MonitorViewModel` listens to `IDeviceCatalogReadModel.Changed`, re-projects groups, calls `MonitorSwitchService.ReplaceGroups`, rebuilds the tree while preserving selected Guids, and renders nullable slots. `SecondaryMonitorViewModel` uses dynamic UnloadingStation groups and Guid/object command parameters rather than fixed names. `SecondaryMonitorWindow.xaml` uses an `ItemsControl` for those groups.
@@ -516,30 +1379,98 @@ Tests cover empty Catalogs, duplicate Child names, same-Kind Roots, selected-Gui
 
 Commit: `feat: bind monitor views to central catalog read model`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add ViewModel and Secondary Catalog refresh cases, then run:
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  [Fact]
+  public void NullTile_ResetShowsUnconfiguredAndUnknown()
+  {
+      var tile = new VideoTileViewModel();
+
+      tile.ResetUnconfigured();
+
+      Assert.Equal("未配置", tile.CameraName);
+      Assert.Equal(CameraStatus.Unknown, tile.Status);
+      Assert.Equal("--", tile.IP);
+  }
+
+  [Fact]
+  public void SecondaryDuplicateNames_SwitchesByGuid()
+  {
+      var first = new MonitorGroup("卸矿站", MonitorGroupType.UnloadingStation, Array.Empty<CameraInfo>()) { GroupId = Guid.NewGuid() };
+      var second = first with { GroupId = Guid.NewGuid() };
+      var viewModel = new SecondaryMonitorViewModel(new[] { first, second });
+
+      viewModel.SelectGroupCommand.Execute(second.GroupId);
+
+      Assert.Equal(second.GroupId, viewModel.SelectedGroupId);
+  }
+  ```
+
+  Add a `VideoTileViewModel` constructor/factory in the test fixture only if the existing ViewModel requires services; the fixture must not construct a Core `CameraDevice` for the formal central path.
+- [ ] Step 2: Run RED.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~MonitorCatalogRefreshTests|FullyQualifiedName~MonitorUiStateTests|FullyQualifiedName~SecondaryMonitorCatalogTests"
   ```
 
-  Confirm failure because the ViewModels still depend on the old source shape.
-- [ ] GREEN: bind the ViewModels and tiles to password-safe DTO/read-model data with nullable slot reset, then run the same focused command and:
+  Confirm failure because the ViewModels still require the old source shape or do not reset null slots.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  public void Update(CameraInfo info, CameraDeviceDto? device, CameraChannelDto? channel, CameraStatus status)
+  {
+      CameraName = info.Name;
+      IP = device?.IpAddress ?? "--";
+      Stream = channel?.StreamType.ToString() ?? "--";
+      Status = status;
+  }
+
+  public void ResetUnconfigured()
+  {
+      CameraName = "未配置";
+      IP = "--";
+      Stream = "--";
+      Status = CameraStatus.Unknown;
+  }
+  ```
+
+  Change Monitor and Secondary bindings to consume the safe DTO read model and preserve Guid selections while keeping existing visual bindings.
+- [ ] Step 4: Run focused GREEN.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~MonitorCatalogRefreshTests|FullyQualifiedName~MonitorUiStateTests|FullyQualifiedName~SecondaryMonitorCatalogTests"
+  ```
+
+  Confirm PASS.
+- [ ] Step 5: Run the affected suite/build.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
   dotnet build .\VideoMonitor.sln -c Debug
   ```
+- [ ] Step 6: Review the diff.
 
-  Confirm PASS.
-- [ ] Commit the Task 8 files with the stated message, then stop for review.
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 8 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Wpf/ViewModels/MonitorViewModel.cs src/VideoMonitor.Wpf/ViewModels/SecondaryMonitorViewModel.cs src/VideoMonitor.Wpf/ViewModels/VideoTileViewModel.cs src/VideoMonitor.Wpf/ViewModels/MonitorTreeItemViewModel.cs src/VideoMonitor.Wpf/Views/SecondaryMonitorWindow.xaml tests/VideoMonitor.Core.Tests/ViewModels/MonitorCatalogRefreshTests.cs tests/VideoMonitor.Core.Tests/ViewModels/MonitorUiStateTests.cs tests/VideoMonitor.Core.Tests/ViewModels/SecondaryMonitorCatalogTests.cs
+  git commit -m "feat: bind monitor views to central catalog read model"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 9 — Async Command Service and Device Management Draft
 
 Files:
 
 - Create `src/VideoMonitor.Wpf/Catalog/IDeviceCatalogCommandService.cs`
+- Create `src/VideoMonitor.Wpf/Catalog/CatalogMutationUncertainException.cs`
 - Create `src/VideoMonitor.Wpf/Catalog/RemoteDeviceCatalogCommandService.cs`
 - Create `src/VideoMonitor.Wpf/Catalog/LegacyDeviceCatalogCommandService.cs`
 - Modify `src/VideoMonitor.Wpf/ViewModels/DeviceEditDraftViewModel.cs`
@@ -547,6 +1478,20 @@ Files:
 - Modify `src/VideoMonitor.Wpf/ViewModels/DeviceManagementViewModel.cs`
 - Create tests: `tests/VideoMonitor.Core.Tests/Catalog/DeviceCatalogCommandServiceTests.cs`
 - Create tests: `tests/VideoMonitor.Core.Tests/ViewModels/DeviceManagementDraftTests.cs`
+
+Interfaces:
+
+Consumes:
+
+- `IDeviceCatalogReadModel`, `CatalogApiClient`, `ServerConnectionCoordinator`, client settings connection state, and the existing DTO request records.
+- `Task ServerConnectionCoordinator.RefreshNowAsync(CancellationToken cancellationToken = default)`, `Task ProbeAsync(Uri baseUri, CancellationToken cancellationToken = default)`, and `ServerConnectionStatus Status`.
+- The explicit Stage 5B-1 DTO request records without exposing Core `CameraDevice` to the central cache.
+
+Produces:
+
+- `IDeviceCatalogCommandService` with `CanWrite`, `AvailabilityChanged`, `CreateGroupAsync(CreateGroupRequest, CancellationToken)`, `UpdateGroupAsync(Guid, UpdateGroupRequest, CancellationToken)`, `DeleteGroupAsync(Guid, long, CancellationToken)`, `CreateDeviceAsync(CreateDeviceRequest, CancellationToken)`, `UpdateDeviceAsync(Guid, UpdateDeviceRequest, CancellationToken)`, and `DeleteDeviceAsync(Guid, long, CancellationToken)`.
+- `CatalogMutationUncertainException(string operation, Guid entityId, Exception? innerException = null)` with `Operation` and `EntityId`.
+- DTO-based Device Management Draft commands that retain password safety and Revision conflict state.
 
 The command contract is:
 
@@ -566,6 +1511,29 @@ public interface IDeviceCatalogCommandService
 }
 ```
 
+The uncertainty type is:
+
+```csharp
+public sealed class CatalogMutationUncertainException : Exception
+{
+    public CatalogMutationUncertainException(
+        string operation,
+        Guid entityId,
+        Exception? innerException = null)
+        : base("The Catalog mutation result could not be confirmed.", innerException)
+    {
+        Operation = operation;
+        EntityId = entityId;
+    }
+
+    public string Operation { get; }
+
+    public Guid EntityId { get; }
+}
+```
+
+The constructor message is fixed safe text and never includes a password, request body, or raw response. Device Management catches this type, keeps the Draft, and does not display success. Create/Delete are converted to success only after a refresh proves the known Guid committed; ambiguous Update always remains uncertain when GET cannot prove the mutation.
+
 Remote commands use only the coordinator's current Connected BaseUri, issue one write, and then run a full refresh. They do not blindly retry. After an ambiguous Create/Delete timeout, a refresh checks known identity presence/absence. An ambiguous Update, especially one containing `NewPassword`, raises a safe uncertainty exception and retains the Draft because GET cannot prove a password write.
 
 The legacy command adapter is async-shaped but only supports local `SingleCameraTest`. Device Management receives `IDeviceCatalogReadModel` and `IDeviceCatalogCommandService`, uses DTO collections and `AsyncRelayCommand`, and exposes `IsSaving`, `IsServerAvailable`, `OperationError`, and `HasUnsavedDraft`. Add Child remains UI-only until Save. Cancel performs zero writes. Device edits preserve existing channel IDs and unedited channels; new IDs are generated before POST. Blank password maps to `NewPassword = null`; non-empty replaces it; old password is never shown. Offline and 409 states disable writes or preserve the Draft as appropriate.
@@ -574,24 +1542,132 @@ Tests cover one-write behavior, timeout identity checks, uncertainty for passwor
 
 Commit: `feat: make device management use async catalog drafts`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add command-service and Draft cases for one-write behavior, timeout ambiguity, password safety, conflicts, and offline mode, then run:
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  [Fact]
+  public async Task BlankPassword_MapsToNoPasswordChange()
+  {
+      var commands = new FakeCatalogCommandService();
+      var draft = new DeviceEditDraftViewModel(commands) { Password = "" };
+
+      await draft.SaveAsync();
+
+      Assert.Null(commands.LastUpdate!.NewPassword);
+  }
+
+  [Fact]
+  public async Task Conflict_RetainsDraft()
+  {
+      var commands = new FakeCatalogCommandService { NextFailure = new CatalogApiException("CATALOG_CONFLICT", 9) };
+      var draft = new DeviceEditDraftViewModel(commands) { Name = "Unsubmitted" };
+
+      await Assert.ThrowsAsync<CatalogApiException>(() => draft.SaveAsync());
+
+      Assert.True(draft.HasUnsavedDraft);
+      Assert.Equal("Unsubmitted", draft.Name);
+  }
+
+  [Fact]
+  public async Task AmbiguousUpdate_ThrowsSafeUncertaintyAndRetainsDraft()
+  {
+      var commands = new FakeCatalogCommandService { NextFailure = new CatalogMutationUncertainException("update-device", Guid.NewGuid()) };
+      var draft = new DeviceEditDraftViewModel(commands) { Password = "new-secret" };
+
+      await Assert.ThrowsAsync<CatalogMutationUncertainException>(() => draft.SaveAsync());
+
+      Assert.True(draft.HasUnsavedDraft);
+  }
+
+  private sealed class FakeCatalogCommandService : IDeviceCatalogCommandService
+  {
+      public UpdateDeviceRequest? LastUpdate { get; private set; }
+      public Exception? NextFailure { get; init; }
+      public bool CanWrite => true;
+      public event EventHandler? AvailabilityChanged;
+      public Task<DeviceGroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+      public Task<DeviceGroupDto> UpdateGroupAsync(Guid id, UpdateGroupRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+      public Task DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+      public Task<CameraDeviceDto> CreateDeviceAsync(CreateDeviceRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+      public Task<CameraDeviceDto> UpdateDeviceAsync(Guid id, UpdateDeviceRequest request, CancellationToken cancellationToken = default)
+      {
+          LastUpdate = request;
+          return NextFailure is null ? Task.FromResult<CameraDeviceDto>(null!) : Task.FromException<CameraDeviceDto>(NextFailure);
+      }
+      public Task DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+  }
+  ```
+
+  Add timeout identity checks and offline availability cases with the same fake command boundary; no test may assert a password value is returned by a read model.
+- [ ] Step 2: Run RED.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~DeviceCatalogCommandServiceTests|FullyQualifiedName~DeviceManagementDraftTests"
   ```
 
-  Confirm failure because the async command boundary is absent.
-- [ ] GREEN: implement the remote/legacy command services and DTO-based Draft flow, then run the same focused command and:
+  Confirm failure because the async command boundary and DTO-based Draft flow are absent.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  public interface IDeviceCatalogCommandService
+  {
+      bool CanWrite { get; }
+      event EventHandler? AvailabilityChanged;
+      Task<DeviceGroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken cancellationToken = default);
+      Task<DeviceGroupDto> UpdateGroupAsync(Guid id, UpdateGroupRequest request, CancellationToken cancellationToken = default);
+      Task DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default);
+      Task<CameraDeviceDto> CreateDeviceAsync(CreateDeviceRequest request, CancellationToken cancellationToken = default);
+      Task<CameraDeviceDto> UpdateDeviceAsync(Guid id, UpdateDeviceRequest request, CancellationToken cancellationToken = default);
+      Task DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default);
+  }
+
+  public sealed class RemoteDeviceCatalogCommandService : IDeviceCatalogCommandService
+  {
+      public async Task<CameraDeviceDto> UpdateDeviceAsync(Guid id, UpdateDeviceRequest request, CancellationToken cancellationToken = default)
+      {
+          try
+          {
+              var result = await apiClient.UpdateDeviceAsync(currentBaseUri, id, request, cancellationToken).ConfigureAwait(false);
+              await coordinator.RefreshNowAsync(cancellationToken).ConfigureAwait(false);
+              return result;
+          }
+          catch (Exception exception) when (IsAmbiguousTransportFailure(exception))
+          {
+              throw new CatalogMutationUncertainException("update-device", id, exception);
+          }
+      }
+  }
+  ```
+
+  Keep the command service to one write plus refresh, retain Draft on uncertainty/conflict, and use the legacy adapter only in explicit SingleCameraTest mode.
+- [ ] Step 4: Run focused GREEN.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~DeviceCatalogCommandServiceTests|FullyQualifiedName~DeviceManagementDraftTests"
+  ```
+
+  Confirm PASS.
+- [ ] Step 5: Run the affected suite/build.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
   dotnet build .\VideoMonitor.sln -c Debug
   ```
+- [ ] Step 6: Review the diff.
 
-  Confirm PASS.
-- [ ] Commit the Task 9 files with the stated message, then stop for review.
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 9 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Wpf/Catalog/IDeviceCatalogCommandService.cs src/VideoMonitor.Wpf/Catalog/CatalogMutationUncertainException.cs src/VideoMonitor.Wpf/Catalog/RemoteDeviceCatalogCommandService.cs src/VideoMonitor.Wpf/Catalog/LegacyDeviceCatalogCommandService.cs src/VideoMonitor.Wpf/ViewModels/DeviceEditDraftViewModel.cs src/VideoMonitor.Wpf/ViewModels/DeviceGroupTreeItemViewModel.cs src/VideoMonitor.Wpf/ViewModels/DeviceManagementViewModel.cs tests/VideoMonitor.Core.Tests/Catalog/DeviceCatalogCommandServiceTests.cs tests/VideoMonitor.Core.Tests/ViewModels/DeviceManagementDraftTests.cs
+  git commit -m "feat: make device management use async catalog drafts"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 10 — Root Category Management
 
@@ -601,6 +1677,19 @@ Files:
 - Modify `src/VideoMonitor.Wpf/Views/Pages/DeviceView.xaml`
 - Modify `src/VideoMonitor.Wpf/Views/Pages/DeviceView.xaml.cs` only if focus handling is required
 - Modify tests: `tests/VideoMonitor.Core.Tests/ViewModels/DeviceManagementGroupTests.cs`
+
+Interfaces:
+
+Consumes:
+
+- `IDeviceCatalogReadModel`, `IDeviceCatalogCommandService`, `MonitorGroupType`, and the existing Device Management tree bindings.
+- `IReadOnlyList<DeviceGroupDto> IDeviceCatalogReadModel.GetGroups()` and `Task<DeviceGroupDto> IDeviceCatalogCommandService.CreateGroupAsync(CreateGroupRequest request, CancellationToken cancellationToken = default)`.
+- `Task<DeviceGroupDto> IDeviceCatalogCommandService.UpdateGroupAsync(Guid id, UpdateGroupRequest request, CancellationToken cancellationToken = default)` and `Task IDeviceCatalogCommandService.DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default)`.
+
+Produces:
+
+- Root draft state with `string RootEditName`, `MonitorGroupType? RootEditKind`, `Guid? EditingRootId`, `IRelayCommand BeginAddRootCommand`, `IRelayCommand<Guid?> BeginEditRootCommand`, `IAsyncRelayCommand SaveRootCommand`, `IRelayCommand CancelRootEditCommand`, and `IAsyncRelayCommand DeleteRootCommand`.
+- Root create/update/delete requests with `ParentId = null`, required `MonitorGroupType`, stable Guid, and one-time legacy Kind assignment.
 
 This Task is required because an empty Catalog must allow the user to create the first Root.
 
@@ -614,24 +1703,109 @@ Tests cover Root draft cancel, required fields, one-time legacy assignment, immu
 
 Commit: `feat: add root category management`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add Root draft and command cases, then run:
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  [Fact]
+  public async Task CancelRootDraft_PerformsZeroWrites()
+  {
+      var commands = new RecordingCatalogCommandService();
+      var viewModel = new DeviceManagementViewModel(commands);
+
+      viewModel.BeginAddRootCommand.Execute(null);
+      viewModel.RootEditName = "未提交分类";
+      viewModel.CancelRootEditCommand.Execute(null);
+
+      Assert.Equal(0, commands.WriteCount);
+  }
+
+  [Fact]
+  public async Task LegacyRootKind_MayBeAssignedOnlyOnce()
+  {
+      var commands = new RecordingCatalogCommandService();
+      var viewModel = DeviceManagementViewModelFixture.WithLegacyRoot(commands, Guid.NewGuid());
+
+      viewModel.BeginEditRootCommand.Execute(viewModel.EditingRootId);
+      viewModel.RootEditKind = MonitorGroupType.Chute;
+      await viewModel.SaveRootCommand.ExecuteAsync(null);
+
+      Assert.Equal(1, commands.WriteCount);
+      Assert.Equal(MonitorGroupType.Chute, commands.LastGroupUpdate!.Kind);
+  }
+
+  private sealed class RecordingCatalogCommandService : IDeviceCatalogCommandService
+  {
+      public int WriteCount { get; private set; }
+      public UpdateGroupRequest? LastGroupUpdate { get; private set; }
+      public bool CanWrite => true;
+      public event EventHandler? AvailabilityChanged;
+      public Task<DeviceGroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken cancellationToken = default) { WriteCount++; return Task.FromResult<DeviceGroupDto>(null!); }
+      public Task<DeviceGroupDto> UpdateGroupAsync(Guid id, UpdateGroupRequest request, CancellationToken cancellationToken = default) { WriteCount++; LastGroupUpdate = request; return Task.FromResult<DeviceGroupDto>(null!); }
+      public Task DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default) { WriteCount++; return Task.CompletedTask; }
+      public Task<CameraDeviceDto> CreateDeviceAsync(CreateDeviceRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+      public Task<CameraDeviceDto> UpdateDeviceAsync(Guid id, UpdateDeviceRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+      public Task DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+  }
+
+  private static class DeviceManagementViewModelFixture
+  {
+      public static DeviceManagementViewModel WithLegacyRoot(RecordingCatalogCommandService commands, Guid rootId) => throw new NotSupportedException();
+  }
+  ```
+
+  Add cases for required name/kind, immutable mapped Kind, stable Guid creation, and delete command routing.
+- [ ] Step 2: Run RED.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~DeviceManagementGroupTests
   ```
 
-  Confirm failure because Root management is absent.
-- [ ] GREEN: implement the smallest Root editor and command bindings without redesigning the page, then run the same focused command and:
+  Confirm failure because Root management and its explicit command bindings are absent.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  public IReadOnlyList<MonitorGroupType> RootKindOptions { get; } = Enum.GetValues<MonitorGroupType>();
+  public bool IsRootEditorOpen { get; private set; }
+  public Guid? EditingRootId { get; private set; }
+  public string RootEditName { get; set; } = "";
+  public MonitorGroupType? RootEditKind { get; set; }
+
+  private async Task SaveRootAsync()
+  {
+      var request = new UpdateGroupRequest(RootEditName, null, NextSort(), true, RootEditKind, CurrentRevision);
+      await commandService.UpdateGroupAsync(EditingRootId!.Value, request).ConfigureAwait(false);
+  }
+  ```
+
+  Keep Root editor state local until Save, enforce the one-time legacy Kind rule, use one stable Guid per new Root, and preserve the existing page layout.
+- [ ] Step 4: Run focused GREEN.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~DeviceManagementGroupTests
+  ```
+
+  Confirm PASS.
+- [ ] Step 5: Run the affected suite/build.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
   dotnet build .\VideoMonitor.sln -c Debug
   ```
+- [ ] Step 6: Review the diff.
 
-  Confirm PASS.
-- [ ] Commit the Task 10 files with the stated message, then stop for review.
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 10 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Wpf/ViewModels/DeviceManagementViewModel.cs src/VideoMonitor.Wpf/Views/Pages/DeviceView.xaml src/VideoMonitor.Wpf/Views/Pages/DeviceView.xaml.cs tests/VideoMonitor.Core.Tests/ViewModels/DeviceManagementGroupTests.cs
+  git commit -m "feat: add root category management"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 11 — Server Settings UI and Status
 
@@ -648,6 +1822,20 @@ Files:
 - Create tests: `tests/VideoMonitor.Core.Tests/ViewModels/ServerSettingsViewModelTests.cs`
 - Modify tests: `tests/VideoMonitor.Core.Tests/ViewModels/MainHeaderControlStateTests.cs`
 
+Interfaces:
+
+Consumes:
+
+- `ServerConnectionStatus`, `ServerConnectionCoordinator.StatusChanged`, `IClientSettingsStore`, and `SwitchServerAsync(Uri, Func<bool>, CancellationToken)`.
+- `event EventHandler? ServerConnectionCoordinator.StatusChanged`, `Task ServerConnectionCoordinator.ProbeAsync(Uri baseUri, CancellationToken cancellationToken = default)`, and `Task ServerConnectionCoordinator.SwitchServerAsync(Uri candidate, Func<bool> hasUnsavedDraft, CancellationToken cancellationToken = default)`.
+- `ClientSettings IClientSettingsStore.Load()` and `Task IClientSettingsStore.SaveAsync(ClientSettings settings, CancellationToken cancellationToken = default)`.
+
+Produces:
+
+- `ServerSettingsViewModel` with `string BaseUrl`, `IAsyncRelayCommand TestConnectionCommand`, `IAsyncRelayCommand SaveCommand`, and Draft-blocking commands.
+- `ServerStatusViewModel` state mapping and last-sync formatting.
+- MainWindow/StatusBar bindings to the real central connection state.
+
 Display states are Unconfigured = 未配置, Connecting = 连接中, Connected = 已连接, and Unavailable = 连接失败. Null last-sync time displays `--`; otherwise use local `yyyy-MM-dd HH:mm:ss`.
 
 Settings UI provides BaseUrl, Test Connection, and Save. Test only probes and never switches. A successful test result is cleared when the URL changes. Save calls `SwitchServerAsync`, which probes again and cannot use a previous Test result as a consistency shortcut. `HasUnsavedDraft` blocks Save.
@@ -658,24 +1846,107 @@ Tests cover state labels, last-sync formatting, repeat probe on Save, Draft bloc
 
 Commit: `feat: add central server settings and status ui`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add status and settings interaction cases, then run:
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  [Fact]
+  public async Task TestConnection_DoesNotSwitchEndpoint()
+  {
+      var coordinator = new RecordingConnectionCoordinator(new Uri("https://server-a"));
+      var viewModel = new ServerSettingsViewModel(coordinator, new ClientSettingsStoreStub());
+      viewModel.BaseUrl = "https://server-b";
+
+      await viewModel.TestConnectionCommand.ExecuteAsync(null);
+
+      Assert.Equal(0, coordinator.SwitchCount);
+      Assert.Equal(new Uri("https://server-a"), coordinator.Status.BaseUri);
+  }
+
+  [Fact]
+  public async Task Save_ProbesAgainBeforeSwitch()
+  {
+      var coordinator = new RecordingConnectionCoordinator(new Uri("https://server-a"));
+      var viewModel = new ServerSettingsViewModel(coordinator, new ClientSettingsStoreStub());
+      viewModel.BaseUrl = "https://server-b";
+
+      await viewModel.SaveCommand.ExecuteAsync(null);
+
+      Assert.Equal(1, coordinator.ProbeCount);
+      Assert.Equal(1, coordinator.SwitchCount);
+  }
+
+  private sealed class RecordingConnectionCoordinator
+  {
+      public ServerConnectionStatus Status { get; }
+      public int ProbeCount { get; private set; }
+      public int SwitchCount { get; private set; }
+      public RecordingConnectionCoordinator(Uri baseUri) => Status = new(baseUri, ServerConnectionState.Connected, null, false);
+      public Task ProbeAsync(Uri baseUri, CancellationToken cancellationToken = default) { ProbeCount++; return Task.CompletedTask; }
+      public Task SwitchServerAsync(Uri baseUri, Func<bool> hasUnsavedDraft, CancellationToken cancellationToken = default) { SwitchCount++; return Task.CompletedTask; }
+  }
+
+  private sealed class ClientSettingsStoreStub : IClientSettingsStore
+  {
+      public ClientSettings Load() => ClientSettings.Empty;
+      public Task SaveAsync(ClientSettings settings, CancellationToken cancellationToken = default) => Task.CompletedTask;
+  }
+  ```
+
+  Add state-label, last-sync formatting, Draft blocking, and no-false-healthy-indication cases.
+- [ ] Step 2: Run RED.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~ServerSettingsViewModelTests|FullyQualifiedName~MainHeaderControlStateTests"
   ```
 
-  Confirm failure because the Server settings UI is absent.
-- [ ] GREEN: implement settings Test/Save and real status binding while preserving existing styling, then run the same focused command and:
+  Confirm failure because the Server settings ViewModel and real status bindings are absent.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  public async Task TestConnectionAsync()
+  {
+      var candidate = new Uri(BaseUrl, UriKind.Absolute);
+      await coordinator.ProbeAsync(candidate, CancellationToken.None).ConfigureAwait(false);
+      IsTestSuccessful = true;
+  }
+
+  public async Task SaveAsync()
+  {
+      if (HasUnsavedDraft) return;
+      var candidate = new Uri(BaseUrl, UriKind.Absolute);
+      await coordinator.SwitchServerAsync(candidate, () => HasUnsavedDraft, CancellationToken.None).ConfigureAwait(false);
+  }
+  ```
+
+  Bind localized status and last-sync text to `ServerConnectionStatus`; do not infer health from a previous successful Test.
+- [ ] Step 4: Run focused GREEN.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~ServerSettingsViewModelTests|FullyQualifiedName~MainHeaderControlStateTests"
+  ```
+
+  Confirm PASS.
+- [ ] Step 5: Run the affected suite/build.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
   dotnet build .\VideoMonitor.sln -c Debug
   ```
+- [ ] Step 6: Review the diff.
 
-  Confirm PASS.
-- [ ] Commit the Task 11 files with the stated message, then stop for review.
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 11 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Wpf/ViewModels/ServerSettingsViewModel.cs src/VideoMonitor.Wpf/ViewModels/ServerStatusViewModel.cs src/VideoMonitor.Wpf/Views/ServerSettingsWindow.xaml src/VideoMonitor.Wpf/Views/ServerSettingsWindow.xaml.cs src/VideoMonitor.Wpf/ViewModels/MainViewModel.cs src/VideoMonitor.Wpf/MainWindow.xaml src/VideoMonitor.Wpf/MainWindow.xaml.cs src/VideoMonitor.Wpf/Controls/StatusBar.xaml tests/VideoMonitor.Core.Tests/ViewModels/ServerSettingsViewModelTests.cs tests/VideoMonitor.Core.Tests/ViewModels/MainHeaderControlStateTests.cs
+  git commit -m "feat: add central server settings and status ui"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 12 — Formal Central Composition and SingleCameraTest Compatibility
 
@@ -685,6 +1956,20 @@ Files:
 - Optional only when App size requires it: create `src/VideoMonitor.Wpf/Configuration/ApplicationCatalogComposition.cs` for catalog mode composition/lifecycle only
 - Create tests: `tests/VideoMonitor.Core.Tests/Composition/ApplicationCatalogCompositionTests.cs`
 - Modify tests: `tests/VideoMonitor.Core.Tests/Services/ShutdownCleanupCoordinatorTests.cs` only when shutdown behavior requires it
+
+Interfaces:
+
+Consumes:
+
+- `IClientSettingsStore`, `CatalogApiClient`, `ClientCatalogCache`, `ServerConnectionCoordinator`, `RemoteDeviceCatalogCommandService`, legacy adapters, existing playback composition, and WPF shutdown cleanup contracts.
+- `ClientSettings IClientSettingsStore.Load()`, `Task IClientSettingsStore.SaveAsync(ClientSettings settings, CancellationToken cancellationToken = default)`, `Task ServerConnectionCoordinator.RunAsync(CancellationToken cancellationToken)`, and `ValueTask ServerConnectionCoordinator.DisposeAsync()`.
+- `IDeviceCatalogReadModel`, `IDeviceCatalogCommandService`, and the existing local `JsonDeviceCatalogStore`/`InMemoryDeviceCatalog` composition contracts.
+
+Produces:
+
+- One formal composition of `IClientSettingsStore`, `CatalogApiClient`, `ClientCatalogCache`, `ServerConnectionCoordinator`, and `RemoteDeviceCatalogCommandService`, exposed as `CatalogComposition`.
+- One explicit local composition of `JsonDeviceCatalogStore`, `InMemoryDeviceCatalog`, `DeviceCatalogPersistenceCoordinator`, and `LocalZlmPlaybackSourceProvider` only for `SingleCameraTest=true`.
+- `ApplicationCatalogComposition` only if extracted, with mode composition and lifecycle ownership boundaries.
 
 Formal mode composition:
 
@@ -706,24 +1991,101 @@ Shutdown cancels the central coordinator and disposes HTTP resources. The local 
 
 Commit: `feat: compose formal central catalog client mode`
 
-TDD checklist:
+Execution steps:
 
-- [ ] RED: add composition and shutdown cases for formal and SingleCameraTest modes, then run:
+- [ ] Step 1: Write failing tests.
+
+  ```csharp
+  [Fact]
+  public void FormalMode_DoesNotInstantiateJsonCompatibilityPath()
+  {
+      using var composition = ApplicationCatalogComposition.Create(new SingleCameraTestOptions(false), new CompositionDependencies());
+
+      Assert.False(composition.Services.Any(service => service is JsonDeviceCatalogStore));
+      Assert.IsType<ClientCatalogCache>(composition.ReadModel);
+  }
+
+  [Fact]
+  public void SingleCameraTest_InstantiatesLocalCompatibilityPath()
+  {
+      using var composition = ApplicationCatalogComposition.Create(new SingleCameraTestOptions(true), new CompositionDependencies());
+
+      Assert.IsType<LegacyDeviceCatalogReadModel>(composition.ReadModel);
+      Assert.NotNull(composition.LocalPlaybackSource);
+  }
+
+  private sealed class CompositionDependencies
+  {
+      public CatalogApiClient ApiClient { get; } = null!;
+      public IClientSettingsStore Settings { get; } = null!;
+      public IUiDispatcher UiDispatcher { get; } = null!;
+      // Test-only factories supply isolated settings, HTTP, cache, and legacy Catalog dependencies.
+  }
+  ```
+
+  Add shutdown assertions proving formal coordinator cancellation and local compatibility flush/cleanup are each owned exactly once.
+- [ ] Step 2: Run RED.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~ApplicationCatalogCompositionTests|FullyQualifiedName~ShutdownCleanupCoordinatorTests"
   ```
 
-  Confirm failure because the central composition is not wired.
-- [ ] GREEN: implement the two explicit mode compositions and lifecycle ownership only, then run the same focused command and:
+  Confirm failure because the two explicit Catalog modes are not composed by the application.
+- [ ] Step 3: Write the minimal implementation.
+
+  ```csharp
+  public static class ApplicationCatalogComposition
+  {
+      public static CatalogComposition Create(
+          SingleCameraTestOptions options,
+          CompositionDependencies dependencies) => options.Enabled
+              ? CreateLocalCompatibility(dependencies)
+              : CreateFormalCentralMode(dependencies);
+
+      private static CatalogComposition CreateFormalCentralMode(CompositionDependencies dependencies)
+      {
+          var cache = new ClientCatalogCache(EmptySnapshot(), dependencies.UiDispatcher);
+          var coordinator = new ServerConnectionCoordinator(dependencies.ApiClient, cache, dependencies.Settings);
+          return new CatalogComposition(cache, coordinator, localPlaybackSource: null);
+      }
+  }
+
+  public sealed record CatalogComposition(
+      IDeviceCatalogReadModel ReadModel,
+      ServerConnectionCoordinator Coordinator,
+      object? LocalPlaybackSource)
+  {
+      public IReadOnlyList<object> Services { get; init; } = Array.Empty<object>();
+  }
+  ```
+
+  Keep App.xaml.cs as the caller, preserve one lifetime owner per mode, and do not instantiate local JSON services in formal mode.
+- [ ] Step 4: Run focused GREEN.
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~ApplicationCatalogCompositionTests|FullyQualifiedName~ShutdownCleanupCoordinatorTests"
+  ```
+
+  Confirm PASS.
+- [ ] Step 5: Run the affected suite/build.
 
   ```powershell
   dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
   dotnet build .\VideoMonitor.sln -c Debug
   ```
+- [ ] Step 6: Review the diff.
 
-  Confirm PASS.
-- [ ] Commit the Task 12 files with the stated message, then stop for review.
+  ```powershell
+  git diff --check
+  git status --short
+  ```
+- [ ] Step 7: Commit the exact Task 12 paths.
+
+  ```powershell
+  git add src/VideoMonitor.Wpf/App.xaml.cs src/VideoMonitor.Wpf/Configuration/ApplicationCatalogComposition.cs tests/VideoMonitor.Core.Tests/Composition/ApplicationCatalogCompositionTests.cs tests/VideoMonitor.Core.Tests/Services/ShutdownCleanupCoordinatorTests.cs
+  git commit -m "feat: compose formal central catalog client mode"
+  ```
+- [ ] Step 8: STOP and return the branch, SHA, RED evidence, GREEN result, affected-suite result, and `git status --short` for Sol review.
 
 ## Task 13 — Final Acceptance
 
