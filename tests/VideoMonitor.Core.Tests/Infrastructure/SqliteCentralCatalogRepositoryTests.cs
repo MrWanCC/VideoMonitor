@@ -164,6 +164,105 @@ public sealed class SqliteCentralCatalogRepositoryTests
     }
 
     [Fact]
+    public async Task GetDeviceAsync_ReadsOnlyRequestedDeviceChannels_WhenOtherDevicesExist()
+    {
+        await using var context = await TestContext.CreateAsync();
+        var protector = new CountingSecretProtector();
+        var repository = CreateRepository(context, protector);
+        var group = await CreateGroupAsync(repository);
+        var deviceA = CreateDevice(group.Id, string.Empty);
+        var deviceB = CreateDevice(
+            group.Id,
+            string.Empty,
+            deviceId: Guid.Parse("96000000-0000-0000-0000-000000000002"),
+            mainChannelId: Guid.Parse("97000000-0000-0000-0000-000000000003"),
+            subChannelId: Guid.Parse("97000000-0000-0000-0000-000000000004"),
+            name: "Other Camera");
+
+        await InvokeAsync(repository, "CreateDeviceAsync", deviceA, CancellationToken.None);
+        await InvokeAsync(repository, "CreateDeviceAsync", deviceB, CancellationToken.None);
+        protector.ResetUnprotectCalls();
+
+        var loaded = await GetDeviceAsync(repository, deviceA.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Equal(deviceA.Id, loaded!.Id);
+        Assert.Equal(2, loaded.Channels.Count);
+        Assert.All(loaded.Channels, channel => Assert.Equal(deviceA.Id, channel.DeviceId));
+        Assert.Equal(
+            deviceA.Channels.Select(channel => channel.Id),
+            loaded.Channels.Select(channel => channel.Id));
+        Assert.DoesNotContain(
+            loaded.Channels,
+            channel => deviceB.Channels.Any(other => other.Id == channel.Id));
+        Assert.Equal(0, protector.UnprotectCalls);
+    }
+
+    [Fact]
+    public async Task CreateDeviceAsync_DuplicateDeviceId_IsNotChannelConflict()
+    {
+        await using var context = await TestContext.CreateAsync();
+        var repository = CreateRepository(context, new CountingSecretProtector());
+        var group = await CreateGroupAsync(repository);
+        var deviceA = CreateDevice(group.Id, string.Empty);
+        await InvokeAsync(repository, "CreateDeviceAsync", deviceA, CancellationToken.None);
+        var duplicate = CreateDevice(
+            group.Id,
+            string.Empty,
+            mainChannelId: Guid.Parse("97000000-0000-0000-0000-000000000003"),
+            subChannelId: Guid.Parse("97000000-0000-0000-0000-000000000004"),
+            name: "Duplicate Device");
+
+        var exception = await Assert.ThrowsAsync<SqliteException>(() => InvokeAsync(
+            repository,
+            "CreateDeviceAsync",
+            duplicate,
+            CancellationToken.None));
+
+        Assert.NotEqual(2067, exception.SqliteExtendedErrorCode);
+        Assert.Equal("Central Camera", (await GetDeviceAsync(repository, deviceA.Id))!.Name);
+    }
+
+    [Fact]
+    public async Task CreateDeviceAsync_DuplicateChannelPrimaryKey_RollsBackAndIsNotChannelConflict()
+    {
+        await using var context = await TestContext.CreateAsync();
+        var repository = CreateRepository(context, new CountingSecretProtector());
+        var group = await CreateGroupAsync(repository);
+        var deviceA = CreateDevice(group.Id, string.Empty);
+        await InvokeAsync(repository, "CreateDeviceAsync", deviceA, CancellationToken.None);
+        var deviceB = CreateDevice(
+            group.Id,
+            string.Empty,
+            deviceId: Guid.Parse("96000000-0000-0000-0000-000000000002"),
+            mainChannelId: deviceA.Channels[0].Id,
+            subChannelId: Guid.Parse("97000000-0000-0000-0000-000000000004"),
+            name: "Second Device");
+
+        var exception = await Assert.ThrowsAsync<SqliteException>(() => InvokeAsync(
+            repository,
+            "CreateDeviceAsync",
+            deviceB,
+            CancellationToken.None));
+
+        Assert.NotEqual(2067, exception.SqliteExtendedErrorCode);
+        Assert.Equal(
+            "0",
+            await ReadScalarAsync(
+                context,
+                "SELECT COUNT(*) FROM camera_devices WHERE id = $id;",
+                ("$id", deviceB.Id.ToString("N"))));
+        Assert.Equal(
+            "0",
+            await ReadScalarAsync(
+                context,
+                "SELECT COUNT(*) FROM camera_channels WHERE device_id = $id;",
+                ("$id", deviceB.Id.ToString("N"))));
+        Assert.Equal("Central Camera", (await GetDeviceAsync(repository, deviceA.Id))!.Name);
+        Assert.Equal(2, (await GetDeviceAsync(repository, deviceA.Id))!.Channels.Count);
+    }
+
+    [Fact]
     public async Task CreateDeviceAsync_EmptyPasswordStoresEmptyWithoutProtecting()
     {
         await using var context = await TestContext.CreateAsync();
@@ -292,14 +391,25 @@ public sealed class SqliteCentralCatalogRepositoryTests
         return Assert.IsType<DeviceGroupDto>(GetProperty(result, "Value"));
     }
 
-    private static CameraDevice CreateDevice(Guid groupId, string password)
+    private static CameraDevice CreateDevice(
+        Guid groupId,
+        string password,
+        Guid? deviceId = null,
+        Guid? mainChannelId = null,
+        Guid? subChannelId = null,
+        string name = "Central Camera")
     {
-        var deviceId = Guid.Parse("96000000-0000-0000-0000-000000000001");
+        var actualDeviceId = deviceId ??
+            Guid.Parse("96000000-0000-0000-0000-000000000001");
+        var actualMainChannelId = mainChannelId ??
+            Guid.Parse("97000000-0000-0000-0000-000000000001");
+        var actualSubChannelId = subChannelId ??
+            Guid.Parse("97000000-0000-0000-0000-000000000002");
         var device = new CameraDevice
         {
-            Id = deviceId,
+            Id = actualDeviceId,
             Revision = 99,
-            Name = "Central Camera",
+            Name = name,
             GroupId = groupId,
             IpAddress = "192.0.2.10",
             SdkPort = 8000,
@@ -315,8 +425,8 @@ public sealed class SqliteCentralCatalogRepositoryTests
         };
         device.Channels.Add(new CameraChannel
         {
-            Id = Guid.Parse("97000000-0000-0000-0000-000000000001"),
-            DeviceId = deviceId,
+            Id = actualMainChannelId,
+            DeviceId = actualDeviceId,
             ChannelNo = 1,
             ChannelName = "CH1 Main",
             StreamType = StreamType.Main,
@@ -325,8 +435,8 @@ public sealed class SqliteCentralCatalogRepositoryTests
         });
         device.Channels.Add(new CameraChannel
         {
-            Id = Guid.Parse("97000000-0000-0000-0000-000000000002"),
-            DeviceId = deviceId,
+            Id = actualSubChannelId,
+            DeviceId = actualDeviceId,
             ChannelNo = 1,
             ChannelName = "CH1 Sub",
             StreamType = StreamType.Sub,

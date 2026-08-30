@@ -8,8 +8,6 @@ namespace VideoMonitor.Infrastructure.Persistence;
 
 public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
 {
-    private const int SqliteConstraintUnique = 2067;
-
     private readonly SqliteConnectionFactory connectionFactory;
     private readonly ISecretProtector secretProtector;
 
@@ -110,10 +108,10 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
                 return null;
             }
 
-            await ReadChannelsAsync(
+            await ReadChannelsForDeviceAsync(
                     connection,
                     transaction,
-                    [device],
+                    device,
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -176,6 +174,14 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
         if (device.Password is null)
         {
             throw new InvalidDataException("设备密码无效。");
+        }
+
+        if (device.Channels
+            .GroupBy(channel => new { channel.ChannelNo, channel.StreamType })
+            .Any(group => group.Count() > 1))
+        {
+            return new CatalogRepositoryResult<CameraDeviceDto>(
+                CatalogRepositoryStatus.ChannelConflict);
         }
 
         var passwordCiphertext = string.Empty;
@@ -253,12 +259,6 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
             return new CatalogRepositoryResult<CameraDeviceDto>(
                 CatalogRepositoryStatus.Success,
                 ToDeviceDto(device, revision: 1, hasPassword: !string.IsNullOrEmpty(passwordCiphertext)));
-        }
-        catch (SqliteException exception) when (IsChannelConflict(exception))
-        {
-            await RollbackQuietlyAsync(transaction).ConfigureAwait(false);
-            return new CatalogRepositoryResult<CameraDeviceDto>(
-                CatalogRepositoryStatus.ChannelConflict);
         }
         catch
         {
@@ -415,6 +415,43 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
         }
     }
 
+    private static async Task ReadChannelsForDeviceAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        DeviceReadModel device,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT id, device_id, channel_no, channel_name, stream_type, enabled
+            FROM camera_channels
+            WHERE device_id = $deviceId
+            ORDER BY channel_no, stream_type, id;
+            """;
+        command.Parameters.AddWithValue("$deviceId", device.Id.ToString("N"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken)
+            .ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var deviceId = ReadGuid(reader, 1, "camera_channels.device_id");
+            if (deviceId != device.Id)
+            {
+                throw new InvalidDataException("数据库通道所属设备不存在。");
+            }
+
+            device.Channels.Add(new CameraChannelDto(
+                ReadGuid(reader, 0, "camera_channels.id"),
+                deviceId,
+                reader.GetInt32(2),
+                reader.GetString(3),
+                ReadEnum<StreamType>(
+                    reader.GetString(4),
+                    "camera_channels.stream_type"),
+                ReadBoolean(reader, 5, "camera_channels.enabled")));
+        }
+    }
+
     private static DeviceReadModel ReadDevice(DbDataReader reader)
     {
         var deviceId = ReadGuid(reader, 0, "camera_devices.id");
@@ -537,9 +574,6 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
             // Preserve the original repository failure.
         }
     }
-
-    private static bool IsChannelConflict(SqliteException exception) =>
-        exception.SqliteExtendedErrorCode == SqliteConstraintUnique;
 
     private static Guid ReadGuid(
         DbDataReader reader,
