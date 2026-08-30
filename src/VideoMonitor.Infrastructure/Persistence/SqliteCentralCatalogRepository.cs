@@ -267,6 +267,433 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
         }
     }
 
+    public async Task<CatalogRepositoryResult<DeviceGroupDto>> UpdateGroupAsync(
+        DeviceGroup group,
+        long expectedRevision,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(group);
+
+        await using var connection = CreateStoreConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        try
+        {
+            var affectedRows = await ExecuteNonQueryAsync(
+                    connection,
+                    transaction,
+                    """
+                    UPDATE device_groups
+                    SET name = $name,
+                        parent_id = $parentId,
+                        sort = $sort,
+                        enabled = $enabled,
+                        revision = revision + 1
+                    WHERE id = $id AND revision = $expectedRevision;
+                    """,
+                    cancellationToken,
+                    ("$id", group.Id.ToString("N")),
+                    ("$name", group.Name),
+                    ("$parentId", group.ParentId?.ToString("N")),
+                    ("$sort", group.Sort),
+                    ("$enabled", ToDatabaseBoolean(group.Enabled)),
+                    ("$expectedRevision", expectedRevision))
+                .ConfigureAwait(false);
+
+            if (affectedRows == 0)
+            {
+                var currentRevision = await ReadGroupRevisionAsync(
+                        connection,
+                        transaction,
+                        group.Id,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                await RollbackQuietlyAsync(transaction).ConfigureAwait(false);
+                return currentRevision is null
+                    ? new CatalogRepositoryResult<DeviceGroupDto>(
+                        CatalogRepositoryStatus.NotFound)
+                    : new CatalogRepositoryResult<DeviceGroupDto>(
+                        CatalogRepositoryStatus.RevisionConflict,
+                        CurrentRevision: currentRevision);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new CatalogRepositoryResult<DeviceGroupDto>(
+                CatalogRepositoryStatus.Success,
+                ToGroupDto(group, expectedRevision + 1));
+        }
+        catch
+        {
+            await RollbackQuietlyAsync(transaction).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public async Task<CatalogRepositoryDeleteResult> DeleteGroupAsync(
+        Guid id,
+        long expectedRevision,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateStoreConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        try
+        {
+            var affectedRows = await ExecuteNonQueryAsync(
+                    connection,
+                    transaction,
+                    """
+                    DELETE FROM device_groups
+                    WHERE id = $id
+                      AND revision = $expectedRevision
+                      AND NOT EXISTS (
+                          SELECT 1 FROM device_groups child
+                          WHERE child.parent_id = device_groups.id)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM camera_devices device
+                          WHERE device.group_id = device_groups.id);
+                    """,
+                    cancellationToken,
+                    ("$id", id.ToString("N")),
+                    ("$expectedRevision", expectedRevision))
+                .ConfigureAwait(false);
+
+            if (affectedRows == 0)
+            {
+                var state = await ReadGroupStateAsync(
+                        connection,
+                        transaction,
+                        id,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                await RollbackQuietlyAsync(transaction).ConfigureAwait(false);
+
+                if (state is null)
+                {
+                    return new CatalogRepositoryDeleteResult(
+                        CatalogRepositoryStatus.NotFound);
+                }
+
+                if (state.Revision != expectedRevision)
+                {
+                    return new CatalogRepositoryDeleteResult(
+                        CatalogRepositoryStatus.RevisionConflict,
+                        state.Revision);
+                }
+
+                return new CatalogRepositoryDeleteResult(
+                    CatalogRepositoryStatus.GroupNotEmpty);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new CatalogRepositoryDeleteResult(CatalogRepositoryStatus.Success);
+        }
+        catch
+        {
+            await RollbackQuietlyAsync(transaction).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public async Task<CatalogRepositoryResult<CameraDeviceDto>> UpdateDeviceAsync(
+        CameraDevice device,
+        string? newPassword,
+        long expectedRevision,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+
+        if (newPassword is not null && newPassword.Length == 0)
+        {
+            throw new ArgumentException(
+                "更新设备密码不能为空。",
+                nameof(newPassword));
+        }
+
+        if (device.Channels
+            .GroupBy(channel => new { channel.ChannelNo, channel.StreamType })
+            .Any(group => group.Count() > 1))
+        {
+            return new CatalogRepositoryResult<CameraDeviceDto>(
+                CatalogRepositoryStatus.ChannelConflict);
+        }
+
+        var passwordCiphertext = string.Empty;
+        var replacePassword = newPassword is not null;
+        if (replacePassword)
+        {
+            passwordCiphertext = await secretProtector.ProtectAsync(
+                    newPassword!,
+                    $"camera-password:{device.Id:N}",
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (passwordCiphertext is null)
+            {
+                throw new InvalidDataException("设备密码保护结果无效。");
+            }
+        }
+
+        await using var connection = CreateStoreConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        try
+        {
+            var affectedRows = await ExecuteNonQueryAsync(
+                    connection,
+                    transaction,
+                    """
+                    UPDATE camera_devices
+                    SET group_id = $groupId,
+                        name = $name,
+                        ip_address = $ipAddress,
+                        sdk_port = $sdkPort,
+                        rtsp_port = $rtspPort,
+                        username = $username,
+                        password_ciphertext = CASE
+                            WHEN $replacePassword = 1 THEN $passwordCiphertext
+                            ELSE password_ciphertext
+                        END,
+                        manufacturer = $manufacturer,
+                        model = $model,
+                        transport_mode = $transportMode,
+                        enabled = $enabled,
+                        remark = $remark,
+                        revision = revision + 1
+                    WHERE id = $id AND revision = $expectedRevision;
+                    """,
+                    cancellationToken,
+                    ("$id", device.Id.ToString("N")),
+                    ("$groupId", device.GroupId.ToString("N")),
+                    ("$name", device.Name),
+                    ("$ipAddress", device.IpAddress),
+                    ("$sdkPort", device.SdkPort),
+                    ("$rtspPort", device.RtspPort),
+                    ("$username", device.Username),
+                    ("$replacePassword", replacePassword ? 1 : 0),
+                    ("$passwordCiphertext", passwordCiphertext),
+                    ("$manufacturer", device.Manufacturer),
+                    ("$model", device.Model),
+                    ("$transportMode", device.TransportMode.ToString()),
+                    ("$enabled", ToDatabaseBoolean(device.Enabled)),
+                    ("$remark", device.Remark),
+                    ("$expectedRevision", expectedRevision))
+                .ConfigureAwait(false);
+
+            if (affectedRows == 0)
+            {
+                var currentRevision = await ReadDeviceRevisionAsync(
+                        connection,
+                        transaction,
+                        device.Id,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                await RollbackQuietlyAsync(transaction).ConfigureAwait(false);
+                return currentRevision is null
+                    ? new CatalogRepositoryResult<CameraDeviceDto>(
+                        CatalogRepositoryStatus.NotFound)
+                    : new CatalogRepositoryResult<CameraDeviceDto>(
+                        CatalogRepositoryStatus.RevisionConflict,
+                        CurrentRevision: currentRevision);
+            }
+
+            await ExecuteNonQueryAsync(
+                    connection,
+                    transaction,
+                    "DELETE FROM camera_channels WHERE device_id = $deviceId;",
+                    cancellationToken,
+                    ("$deviceId", device.Id.ToString("N")))
+                .ConfigureAwait(false);
+            await InsertChannelsAsync(
+                    connection,
+                    transaction,
+                    device.Channels,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            var hasPassword = await ReadHasPasswordAsync(
+                    connection,
+                    transaction,
+                    device.Id,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new CatalogRepositoryResult<CameraDeviceDto>(
+                CatalogRepositoryStatus.Success,
+                ToDeviceDto(device, expectedRevision + 1, hasPassword));
+        }
+        catch
+        {
+            await RollbackQuietlyAsync(transaction).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public async Task<CatalogRepositoryDeleteResult> DeleteDeviceAsync(
+        Guid id,
+        long expectedRevision,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateStoreConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        try
+        {
+            var affectedRows = await ExecuteNonQueryAsync(
+                    connection,
+                    transaction,
+                    """
+                    DELETE FROM camera_devices
+                    WHERE id = $id AND revision = $expectedRevision;
+                    """,
+                    cancellationToken,
+                    ("$id", id.ToString("N")),
+                    ("$expectedRevision", expectedRevision))
+                .ConfigureAwait(false);
+
+            if (affectedRows == 0)
+            {
+                var currentRevision = await ReadDeviceRevisionAsync(
+                        connection,
+                        transaction,
+                        id,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                await RollbackQuietlyAsync(transaction).ConfigureAwait(false);
+                return currentRevision is null
+                    ? new CatalogRepositoryDeleteResult(
+                        CatalogRepositoryStatus.NotFound)
+                    : new CatalogRepositoryDeleteResult(
+                        CatalogRepositoryStatus.RevisionConflict,
+                        currentRevision);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new CatalogRepositoryDeleteResult(CatalogRepositoryStatus.Success);
+        }
+        catch
+        {
+            await RollbackQuietlyAsync(transaction).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static async Task<long?> ReadGroupRevisionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT revision FROM device_groups WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", id.ToString("N"));
+        var value = await command.ExecuteScalarAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return value is null or DBNull ? null : Convert.ToInt64(value);
+    }
+
+    private static async Task<GroupState?> ReadGroupStateAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT revision,
+                   EXISTS (
+                       SELECT 1 FROM device_groups child
+                       WHERE child.parent_id = device_groups.id),
+                   EXISTS (
+                       SELECT 1 FROM camera_devices device
+                       WHERE device.group_id = device_groups.id)
+            FROM device_groups
+            WHERE id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", id.ToString("N"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return new GroupState(
+            reader.GetInt64(0),
+            reader.GetInt64(1) == 1,
+            reader.GetInt64(2) == 1);
+    }
+
+    private static async Task<long?> ReadDeviceRevisionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT revision FROM camera_devices WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", id.ToString("N"));
+        var value = await command.ExecuteScalarAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return value is null or DBNull ? null : Convert.ToInt64(value);
+    }
+
+    private static async Task InsertChannelsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        IReadOnlyList<CameraChannel> channels,
+        CancellationToken cancellationToken)
+    {
+        foreach (var channel in channels)
+        {
+            await ExecuteNonQueryAsync(
+                    connection,
+                    transaction,
+                    """
+                    INSERT INTO camera_channels (
+                        id, device_id, channel_no, channel_name, stream_type, enabled)
+                    VALUES (
+                        $id, $deviceId, $channelNo, $channelName, $streamType, $enabled);
+                    """,
+                    cancellationToken,
+                    ("$id", channel.Id.ToString("N")),
+                    ("$deviceId", channel.DeviceId.ToString("N")),
+                    ("$channelNo", channel.ChannelNo),
+                    ("$channelName", channel.ChannelName),
+                    ("$streamType", channel.StreamType.ToString()),
+                    ("$enabled", ToDatabaseBoolean(channel.Enabled)))
+                .ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<bool> ReadHasPasswordAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            "SELECT password_ciphertext FROM camera_devices WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", id.ToString("N"));
+        var value = await command.ExecuteScalarAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return value is not null
+            and not DBNull
+            && !string.IsNullOrEmpty(Convert.ToString(value));
+    }
+
     private async Task<List<DeviceGroupDto>> ReadGroupsAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -545,7 +972,7 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
         return connection;
     }
 
-    private static async Task ExecuteNonQueryAsync(
+    private static async Task<int> ExecuteNonQueryAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         string commandText,
@@ -560,7 +987,7 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
             command.Parameters.AddWithValue(name, value ?? DBNull.Value);
         }
 
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task RollbackQuietlyAsync(SqliteTransaction transaction)
@@ -617,6 +1044,11 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
     }
 
     private static int ToDatabaseBoolean(bool value) => value ? 1 : 0;
+
+    private sealed record GroupState(
+        long Revision,
+        bool HasChild,
+        bool HasDevice);
 
     private sealed class DeviceReadModel
     {

@@ -23,4 +23,26 @@ public interface ICentralCatalogRepository
     Task<CatalogRepositoryResult<CameraDeviceDto>> CreateDeviceAsync(
         CameraDevice device,
         CancellationToken cancellationToken = default);
+
+    Task<CatalogRepositoryResult<DeviceGroupDto>> UpdateGroupAsync(
+        DeviceGroup group,
+        long expectedRevision,
+        CancellationToken cancellationToken = default);
+
+    Task<CatalogRepositoryDeleteResult> DeleteGroupAsync(
+        Guid id,
+        long expectedRevision,
+        CancellationToken cancellationToken = default);
+
+    Task<CatalogRepositoryResult<CameraDeviceDto>> UpdateDeviceAsync(
+        CameraDevice device,
+        string? newPassword,
+        long expectedRevision,
+        CancellationToken cancellationToken = default);
+
+    Task<CatalogRepositoryDeleteResult> DeleteDeviceAsync(
+        Guid id,
+        long expectedRevision,
+        CancellationToken cancellationToken = default);
+
 }

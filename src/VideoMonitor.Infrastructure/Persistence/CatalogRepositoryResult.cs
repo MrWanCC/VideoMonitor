@@ -13,3 +13,7 @@ public sealed record CatalogRepositoryResult<T>(
     CatalogRepositoryStatus Status,
     T? Value = default,
     long? CurrentRevision = null);
+
+public sealed record CatalogRepositoryDeleteResult(
+    CatalogRepositoryStatus Status,
+    long? CurrentRevision = null);
