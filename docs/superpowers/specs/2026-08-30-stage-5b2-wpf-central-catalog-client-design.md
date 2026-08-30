@@ -49,7 +49,7 @@ The following boundaries are mandatory:
 - `ServerConnectionCoordinator` owns initial loading, periodic refresh, reconnect, connection state, and endpoint switching.
 - `ClientCatalogCache` is process-local, memory-only, and password-safe by type.
 - `ClientCatalogCache` stores `CatalogSnapshotDto` or an equivalent dedicated password-safe snapshot. It never stores a remapped Core `CameraDevice`, because that type contains a `Password` property. Central cache/read-model types contain no `Password` or `PasswordCiphertext`; they expose only `HasPassword`. The central cache never uses `Password == ""` to represent password state.
-- A read-only boundary such as `IDeviceCatalogReadModel` exposes `GetGroups()`, `GetDevices(groupId)`, `GetDevice(deviceId)`, and `Changed`.
+- A password-safe read-only boundary such as `IDeviceCatalogReadModel` exposes `GetGroups()`, `GetDevices(groupId)`, `GetDevice(deviceId)`, and `Changed`.
 - Formal Monitor and Secondary Monitor do not depend on a synchronous `IDeviceCatalog` with Add/Update/Delete operations.
 - Remote HTTP is never placed behind synchronous `IDeviceCatalog` calls through `.Result`, `.Wait()`, or `GetAwaiter().GetResult()`.
 - Existing `IDeviceCatalog` and JSON persistence remain only for the explicitly enabled `SingleCameraTest` development compatibility path.
@@ -176,7 +176,7 @@ This is not an unlimited tree. A Root has `ParentId == null`; a Business Child G
 The permitted hierarchy operations are:
 
 - Root to Root: Name, Sort, and Enabled may be changed. Once assigned, Root Kind is immutable.
-- Child to Child: Name, Sort, and Enabled may be changed. A child's `ParentId` may be updated only to a Root, never to another Child; after the move it inherits the new Root Kind.
+- Child update / move: Name, Sort, and Enabled may be changed. A child's `ParentId` may be updated only to a Root, never to another Child; after the move it inherits the new Root Kind.
 - Root to Child: rejected.
 - Child to Root: rejected.
 - Child to Child nesting: rejected; an update target for `ParentId` must be a Root, never another Child.
@@ -295,7 +295,16 @@ If a future field deployment requires an explicit default group, that is a separ
 
 The central Catalog describes configuration, not current device health.
 
-When a Server Catalog device is projected into a WPF `CameraDevice`, its initial status is always `CameraStatus.Unknown`. Presence in the Catalog never implies `Online`.
+The formal central path is:
+
+```text
+Server CatalogSnapshotDto
+-> ClientCatalogCache
+-> password-safe IDeviceCatalogReadModel
+-> Monitor / Secondary Monitor ViewModels
+```
+
+The central path must not construct a Core `CameraDevice` merely to satisfy existing ViewModels. Core `CameraDevice` remains limited to the legacy local / `SingleCameraTest` compatibility path. Monitor and Secondary Monitor consume password-safe Catalog configuration; they never use `Password == ""` to represent an unseen password. `CameraStatus` is a runtime overlay, not Catalog data. If runtime status is not available yet, the Monitor projection uses `CameraStatus.Unknown`. Catalog presence never implies `Online`.
 
 `Online`, `Warning`, and `Offline` are produced by a later runtime health/status mechanism. The previous exit-time status is not used as the next startup fact.
 
@@ -414,6 +423,8 @@ input B
 ```
 
 The switch is committed only after the settings replacement succeeds. If settings persistence fails, A's configured BaseUrl, Catalog cache, and connection state remain unchanged, with a clear save-failure result. Probing B never changes A's configuration or cache.
+
+The settings write is atomic in both target-file states: when `client-settings.json` does not yet exist, the client writes `client-settings.tmp`, flushes it, and performs a same-directory atomic rename/create; no pre-existing target is required. When the target exists, the client writes and flushes the temporary file, then performs an atomic replace of `client-settings.json`. Failure at any step leaves A's endpoint, Catalog cache, and connection state unchanged.
 
 The successful switch changes:
 
