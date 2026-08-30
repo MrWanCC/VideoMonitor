@@ -12,7 +12,7 @@ Stage 5B-2 covers:
 4. Remote asynchronous CRUD from Device Management.
 5. Read-only Catalog access for Monitor and Secondary Monitor.
 6. Removing runtime dependence on fixed Chinese group names.
-7. A small Server/Core V3 `MonitorGroupKind` evolution.
+7. A small Server/Core V3 group-kind field evolution using the existing `MonitorGroupType` enum.
 8. The current fixed 4+3 business layout, including empty and incomplete Catalogs.
 9. Clear seams for a future Cloud Control Plane and Site Edge deployment.
 
@@ -33,9 +33,11 @@ ServerConnectionCoordinator
         |
 ClientCatalogCache
         |
-        +--> MonitorViewModel             read only
-        +--> SecondaryMonitorViewModel    read only
-        +--> DeviceManagementViewModel    read model + async API writes
+        +--> password-safe read model
+              |
+              +--> MonitorViewModel             read only
+              +--> SecondaryMonitorViewModel    read only
+              +--> DeviceManagementViewModel    read model + async API writes
 ```
 
 The following boundaries are mandatory:
@@ -45,7 +47,8 @@ The following boundaries are mandatory:
 - `CatalogApiClient` is responsible for HTTP only.
 - Each WPF process has exactly one `ServerConnectionCoordinator`.
 - `ServerConnectionCoordinator` owns initial loading, periodic refresh, reconnect, connection state, and endpoint switching.
-- `ClientCatalogCache` is process-local, memory-only, and password-safe.
+- `ClientCatalogCache` is process-local, memory-only, and password-safe by type.
+- `ClientCatalogCache` stores `CatalogSnapshotDto` or an equivalent dedicated password-safe snapshot. It never stores a remapped Core `CameraDevice`, because that type contains a `Password` property. Central cache/read-model types contain no `Password` or `PasswordCiphertext`; they expose only `HasPassword`. The central cache never uses `Password == ""` to represent password state.
 - A read-only boundary such as `IDeviceCatalogReadModel` exposes `GetGroups()`, `GetDevices(groupId)`, `GetDevice(deviceId)`, and `Changed`.
 - Formal Monitor and Secondary Monitor do not depend on a synchronous `IDeviceCatalog` with Add/Update/Delete operations.
 - Remote HTTP is never placed behind synchronous `IDeviceCatalog` calls through `.Result`, `.Wait()`, or `GetAwaiter().GetResult()`.
@@ -121,13 +124,13 @@ The cache commit itself is atomic from the client perspective: a complete valida
 
 Runtime code must stop identifying group behavior from the Chinese root names `卸矿站监控`, `溜井监控`, and `巷道监控`.
 
-The stable business semantic is `MonitorGroupKind`:
+The stable business semantic is the existing `MonitorGroupType` enum:
 
 - `UnloadingStation`
 - `Chute`
 - `Tunnel`
 
-The implementation uses one semantic enum. If the existing `MonitorGroupType` can be retained only by a direct rename or compatibility-preserving reuse, it is renamed/reused; two overlapping enums must not coexist. Runtime selection and switching use the resulting stable enum and GroupId, never display text.
+No new parallel group-kind enum is introduced and `MonitorGroupType` is not renamed. API, DTO, and domain code use nullable `MonitorGroupType? Kind`; the SQLite column remains `device_groups.group_kind`. Runtime selection and switching use this enum and GroupId, never display text.
 
 ### V3 database field
 
@@ -139,8 +142,8 @@ device_groups.group_kind TEXT NULL
 
 The field has these semantics:
 
-- Root group: `ParentId == null` and `GroupKind != null` in the formal valid state.
-- Child group: `ParentId != null` and `GroupKind == null` in the database; runtime inherits the kind from its root.
+- Root group: `ParentId == null` and `Kind != null` in the formal valid state.
+- Child group: `ParentId` directly references a Root and the child has no separately persisted `Kind`; runtime inherits the Root `Kind`.
 - Multiple roots may use the same kind.
 
 For example, two independent mine areas may each have a root of kind `Chute`:
@@ -160,15 +163,26 @@ The database and domain are not restricted to exactly three global roots. `Name`
 
 The Server is the authoritative validator. WPF validation exists only for user experience.
 
+The formal hierarchy has exactly two group levels followed by devices:
+
+```text
+Root Category
+└─ Business Child Group
+   └─ CameraDevice
+```
+
+This is not an unlimited tree. A Root has `ParentId == null`; a Business Child Group directly references a Root; and every `CameraDevice.GroupId` directly references a Business Child Group.
+
 The permitted hierarchy operations are:
 
 - Root to Root: Name, Sort, and Enabled may be changed. Once assigned, Root Kind is immutable.
-- Child to Child: Name, Sort, and Enabled may be changed. A child may move to another valid root/child hierarchy and then inherits the new root kind.
+- Child to Child: Name, Sort, and Enabled may be changed. A child's `ParentId` may be updated only to a Root, never to another Child; after the move it inherits the new Root Kind.
 - Root to Child: rejected.
 - Child to Root: rejected.
+- Child to Child nesting: rejected; an update target for `ParentId` must be a Root, never another Child.
 - Parent cycles: rejected.
 
-Every `CameraDevice` must belong to an actual business Child group. A device cannot be assigned directly to a Root category.
+Every `CameraDevice` must belong directly to an actual business Child group. A device cannot be assigned to a Root category or another device.
 
 Root categories express monitoring business semantics and directories. Child groups express selectable operational groups.
 
@@ -192,7 +206,7 @@ A new database does not insert three system roots automatically. An empty Catalo
 
 ## 7. Monitor tree semantics
 
-The Monitor tree preserves the actual hierarchy even when roots share a `MonitorGroupKind`.
+The Monitor tree preserves the actual hierarchy even when roots share a `MonitorGroupType`.
 
 ```text
 一矿区溜井 (Chute)
@@ -349,8 +363,10 @@ An advisory or lease edit lock is outside this stage; Revision remains the final
 The client-side settings file is proposed at:
 
 ```text
-C:\ProgramData\VideoMonitor\client-settings.json
+C:\ProgramData\VideoMonitor\Client\client-settings.json
 ```
+
+Installer/deployment creates the `Client` directory and grants the actual WPF runtime user or user group the required Modify permission. WPF does not require administrator rights. Development may inject an isolated path such as `D:\Work\VideoMonitor.devdata\client\`.
 
 It stores only non-sensitive settings, for example:
 
@@ -364,7 +380,7 @@ It stores only non-sensitive settings, for example:
 
 It must not store camera passwords, ZLM secrets, tokens, or Server private secrets. BaseUrl does not need encryption.
 
-Server BaseUrl is parsed as a standard absolute URI. The client does not assume a `192.168.x.x` address or a fixed IP. HTTP is allowed for development/internal debugging; production requires HTTPS.
+Server BaseUrl is parsed as a standard absolute HTTP or HTTPS URI. The client does not assume a `192.168.x.x` address or a fixed IP. Local development and controlled debugging may use HTTP; formal production deployment requires HTTPS.
 
 TLS certificate validation must never be bypassed. In particular, `ServerCertificateCustomValidationCallback = accept all` and equivalent behavior are prohibited.
 
@@ -381,7 +397,25 @@ Both requests must succeed before B is accepted.
 
 If the probe fails, A's settings and Catalog cache remain unchanged.
 
-If the probe succeeds, the switch atomically changes:
+If the probe succeeds, the client first verifies that no unsaved Draft crosses the Server boundary, then persists the new settings and commits the switch as one logical operation:
+
+```text
+input B
+-> temporary probe B
+-> B /health/ready
+-> B /api/v1/catalog
+-> verify no unsaved Draft
+-> write client-settings.tmp
+-> flush
+-> atomic replace client-settings.json
+-> commit Configured BaseUrl B
+   + Catalog Snapshot B
+   + connection state
+```
+
+The switch is committed only after the settings replacement succeeds. If settings persistence fails, A's configured BaseUrl, Catalog cache, and connection state remain unchanged, with a clear save-failure result. Probing B never changes A's configuration or cache.
+
+The successful switch changes:
 
 ```text
 Configured BaseUrl
@@ -424,7 +458,7 @@ The client continues to use Stage 5B-1 machine-readable error codes:
 - `CATALOG_READ_FAILED`
 - `CATALOG_WRITE_FAILED`
 
-If V3 GroupKind or hierarchy validation needs more errors, only stable machine-readable codes are added. WPF does not parse Chinese messages.
+If V3 `group_kind` or hierarchy validation needs more errors, only stable machine-readable codes are added. WPF does not parse Chinese messages.
 
 Responses and logs must not disclose SQL, stack traces, secrets, internal exceptions, or password request bodies.
 
@@ -569,7 +603,7 @@ The implementation stages derived from this specification must cover at least th
 - a failed new-Server probe preserves the old Server and cache;
 - Server switching is atomic;
 - an active unsaved Draft blocks Server switching;
-- HTTP is allowed only in development settings;
+- HTTP is allowed for local development and controlled debugging; production requires HTTPS;
 - HTTPS validation is never bypassed.
 
 ## 23. Six adopted architecture-review corrections
@@ -578,7 +612,7 @@ This design explicitly adopts these corrections:
 
 1. Multiple Roots preserve the real hierarchy and are not merged by Kind into a fixed Chinese directory.
 2. Every selection and reference uses Guid; Name is display text only.
-3. GroupKind has explicit Root/Child hierarchy constraints.
+3. The existing `MonitorGroupType` has explicit Root/Child hierarchy constraints; no parallel enum is introduced.
 4. V3 migration handles historical Roots; Chinese recognition exists only during migration.
 5. Server endpoint switching uses probe plus atomic switch and blocks a Draft from crossing Servers.
 6. Background refresh and the WPF Dispatcher/UI-thread boundary are explicit.
@@ -588,6 +622,7 @@ This design explicitly adopts these corrections:
 The following decisions are fixed for Stage 5B-2:
 
 - Multiple Roots with the same Kind are allowed.
+- The hierarchy has exactly two group levels: Root Category -> Business Child Group -> CameraDevice. Child nesting and direct device-to-Root assignment are prohibited.
 - Root Kind is required in the formal valid state; transitional unclassified legacy Roots are the sole exception.
 - Child Kind is not separately stored and is inherited from the Root.
 - Once a Root Kind is formally assigned, it cannot be changed.
