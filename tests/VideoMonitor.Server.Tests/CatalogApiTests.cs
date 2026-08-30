@@ -212,6 +212,34 @@ public sealed class CatalogApiTests
     }
 
     [Fact]
+    public async Task PostDeviceGroup_WithoutContentType_ReturnsStableValidationError()
+    {
+        using var factory = new TestServerFactory();
+        using var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/api/v1/device-groups");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertErrorAsync(response, "CATALOG_VALIDATION_FAILED");
+    }
+
+    [Fact]
+    public async Task PostDevice_WithNonJsonContentType_ReturnsStableValidationError()
+    {
+        using var factory = new TestServerFactory();
+        using var client = factory.CreateClient();
+        using var content = new StringContent("{\"id\":\"not-json\"}");
+
+        var response = await client.PostAsync("/api/v1/devices", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertErrorAsync(response, "CATALOG_VALIDATION_FAILED");
+    }
+
+    [Fact]
     public async Task InvalidEnum_ReturnsStableValidationError()
     {
         using var factory = new TestServerFactory();
@@ -404,6 +432,27 @@ public sealed class CatalogApiTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, malformedResponse.StatusCode);
         await AssertErrorAsync(invalidGuidResponse, "CATALOG_UNAVAILABLE");
         await AssertErrorAsync(malformedResponse, "CATALOG_UNAVAILABLE");
+        Assert.Equal(0, repository.CallCount);
+    }
+
+    [Fact]
+    public async Task NotReady_NonJsonBody_Returns503BeforeContentTypeValidation()
+    {
+        var repository = new CountingRepository();
+        using var baseFactory = new TestServerFactory(failMachineProtection: true);
+        using var factory = baseFactory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<ICentralCatalogRepository>();
+                services.AddSingleton<ICentralCatalogRepository>(repository);
+            }));
+        using var client = factory.CreateClient();
+        using var content = new StringContent("not-json");
+
+        var response = await client.PostAsync("/api/v1/devices", content);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        await AssertErrorAsync(response, "CATALOG_UNAVAILABLE");
         Assert.Equal(0, repository.CallCount);
     }
 

@@ -272,6 +272,11 @@ public static class CatalogEndpoints
     private static async Task<(T? Value, IResult? Error)> ReadRequestAsync<T>(
         HttpRequest request)
     {
+        if (!request.HasJsonContentType())
+        {
+            return (default, ValidationResult());
+        }
+
         try
         {
             return (
