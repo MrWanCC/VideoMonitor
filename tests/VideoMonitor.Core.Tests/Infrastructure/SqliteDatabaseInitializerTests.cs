@@ -7,7 +7,7 @@ namespace VideoMonitor.Core.Tests.Infrastructure;
 public sealed class SqliteDatabaseInitializerTests
 {
     [Fact]
-    public async Task InitializeAsync_CreatesV1Schema()
+    public async Task InitializeAsync_CreatesCurrentSchema()
     {
         using var context = TestContext.Create();
         var initializer = context.CreateInitializer();
@@ -32,9 +32,12 @@ public sealed class SqliteDatabaseInitializerTests
             },
             tables);
 
-        Assert.Equal(1L, await ReadScalarAsync<long>(
+        Assert.Equal(2L, await ReadScalarAsync<long>(
             connection,
             "SELECT MAX(version) FROM schema_migrations;"));
+
+        await AssertRevisionColumnAsync(connection, "device_groups");
+        await AssertRevisionColumnAsync(connection, "camera_devices");
     }
 
     [Fact]
@@ -52,9 +55,40 @@ public sealed class SqliteDatabaseInitializerTests
         Assert.Equal(1L, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM schema_migrations WHERE version = 1;"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 2;"));
         Assert.Equal(5, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';"));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_UpgradesV1RowsToRevisionOne()
+    {
+        using var context = TestContext.Create();
+        await context.CreateV1DatabaseAsync();
+
+        await context.CreateInitializer().InitializeAsync();
+
+        await using var connection = context.CreateConnection();
+        await connection.OpenAsync();
+
+        Assert.Equal(2L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT MAX(version) FROM schema_migrations;"));
+        Assert.Equal("Legacy Group", await ReadScalarAsync<string>(
+            connection,
+            "SELECT name FROM device_groups WHERE id = 'legacy-group';"));
+        Assert.Equal("Legacy Camera", await ReadScalarAsync<string>(
+            connection,
+            "SELECT name FROM camera_devices WHERE id = 'legacy-device';"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT revision FROM device_groups WHERE id = 'legacy-group';"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT revision FROM camera_devices WHERE id = 'legacy-device';"));
     }
 
     [Fact]
@@ -123,7 +157,7 @@ public sealed class SqliteDatabaseInitializerTests
                     version INTEGER NOT NULL PRIMARY KEY,
                     applied_at_utc TEXT NOT NULL);
                 INSERT INTO schema_migrations (version, applied_at_utc)
-                VALUES (2, '2099-01-01T00:00:00.0000000+00:00');
+                VALUES (3, '2099-01-01T00:00:00.0000000+00:00');
                 """);
         }
 
@@ -134,7 +168,7 @@ public sealed class SqliteDatabaseInitializerTests
 
         await using var verifyConnection = context.CreateConnection();
         await verifyConnection.OpenAsync();
-        Assert.Equal(2L, await ReadScalarAsync<long>(
+        Assert.Equal(3L, await ReadScalarAsync<long>(
             verifyConnection,
             "SELECT MAX(version) FROM schema_migrations;"));
     }
@@ -155,9 +189,36 @@ public sealed class SqliteDatabaseInitializerTests
         Assert.Equal(1L, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM schema_migrations WHERE version = 1;"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 2;"));
         Assert.Equal(5L, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';"));
+    }
+
+    private static async Task AssertRevisionColumnAsync(
+        DbConnection connection,
+        string tableName)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
+        await using var reader = await command.ExecuteReaderAsync();
+        var found = false;
+        while (await reader.ReadAsync())
+        {
+            if (!string.Equals(reader.GetString(1), "revision", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            found = true;
+            Assert.Equal("INTEGER", reader.GetString(2));
+            Assert.Equal(1, reader.GetInt32(3));
+            Assert.Equal("1", Convert.ToString(reader.GetValue(4)));
+        }
+
+        Assert.True(found, $"Table '{tableName}' does not contain a revision column.");
     }
 
     private static async Task InsertChannelAsync(
@@ -225,6 +286,80 @@ public sealed class SqliteDatabaseInitializerTests
         public DbConnection CreateConnection()
         {
             return new SqliteConnectionFactory(Provider).CreateConnection();
+        }
+
+        public async Task CreateV1DatabaseAsync()
+        {
+            await using var connection = CreateConnection();
+            await connection.OpenAsync();
+            await ExecuteAsync(connection, """
+                CREATE TABLE schema_migrations (
+                    version INTEGER NOT NULL PRIMARY KEY,
+                    applied_at_utc TEXT NOT NULL
+                );
+
+                CREATE TABLE device_groups (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    parent_id TEXT NULL,
+                    sort INTEGER NOT NULL,
+                    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                    FOREIGN KEY (parent_id)
+                        REFERENCES device_groups(id)
+                        ON DELETE RESTRICT
+                );
+
+                CREATE TABLE camera_devices (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    group_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    ip_address TEXT NOT NULL,
+                    sdk_port INTEGER NOT NULL CHECK (sdk_port BETWEEN 1 AND 65535),
+                    rtsp_port INTEGER NOT NULL CHECK (rtsp_port BETWEEN 1 AND 65535),
+                    username TEXT NOT NULL,
+                    password_ciphertext TEXT NOT NULL,
+                    manufacturer TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    transport_mode TEXT NOT NULL,
+                    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                    remark TEXT NOT NULL,
+                    FOREIGN KEY (group_id)
+                        REFERENCES device_groups(id)
+                        ON DELETE RESTRICT
+                );
+
+                CREATE TABLE camera_channels (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    device_id TEXT NOT NULL,
+                    channel_no INTEGER NOT NULL CHECK (channel_no > 0),
+                    channel_name TEXT NOT NULL,
+                    stream_type TEXT NOT NULL,
+                    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                    FOREIGN KEY (device_id)
+                        REFERENCES camera_devices(id)
+                        ON DELETE CASCADE,
+                    UNIQUE (device_id, channel_no, stream_type)
+                );
+
+                CREATE TABLE server_settings (
+                    key TEXT NOT NULL PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at_utc TEXT NOT NULL
+                );
+
+                INSERT INTO schema_migrations(version, applied_at_utc)
+                VALUES (1, '2026-08-30T00:00:00.0000000+00:00');
+                INSERT INTO device_groups(id, name, parent_id, sort, enabled)
+                VALUES ('legacy-group', 'Legacy Group', NULL, 1, 1);
+                INSERT INTO camera_devices(
+                    id, group_id, name, ip_address, sdk_port, rtsp_port,
+                    username, password_ciphertext, manufacturer, model,
+                    transport_mode, enabled, remark)
+                VALUES (
+                    'legacy-device', 'legacy-group', 'Legacy Camera', '192.0.2.20',
+                    8000, 554, 'legacy-user', 'legacy-ciphertext', 'Vendor',
+                    'Model', 'Tcp', 1, 'legacy remark');
+                """);
         }
 
         public SqliteDatabaseInitializer CreateInitializer()

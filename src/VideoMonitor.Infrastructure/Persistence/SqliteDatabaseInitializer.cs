@@ -4,7 +4,7 @@ namespace VideoMonitor.Infrastructure.Persistence;
 
 public sealed class SqliteDatabaseInitializer
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     private static readonly SemaphoreSlim InitializationGate = new(1, 1);
 
@@ -59,12 +59,22 @@ public sealed class SqliteDatabaseInitializer
                     $"数据库 SchemaVersion {version} 高于当前支持版本 {CurrentSchemaVersion}。");
             }
 
-            if (version < CurrentSchemaVersion)
+            if (version < 1)
             {
                 await ApplyV1SchemaAsync(connection, transaction, cancellationToken)
                     .ConfigureAwait(false);
 
                 await InsertV1MigrationAsync(connection, transaction, cancellationToken)
+                    .ConfigureAwait(false);
+                version = 1;
+            }
+
+            if (version < 2)
+            {
+                await ApplyV2SchemaAsync(connection, transaction, cancellationToken)
+                    .ConfigureAwait(false);
+
+                await InsertV2MigrationAsync(connection, transaction, cancellationToken)
                     .ConfigureAwait(false);
             }
 
@@ -157,6 +167,37 @@ public sealed class SqliteDatabaseInitializer
         command.CommandText = """
             INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc)
             VALUES (1, $appliedAtUtc);
+            """;
+        command.Parameters.AddWithValue(
+            "$appliedAtUtc",
+            DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task ApplyV2SchemaAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await ExecuteNonQueryAsync(connection, transaction, """
+            ALTER TABLE device_groups
+            ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+
+            ALTER TABLE camera_devices
+            ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+            """, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task InsertV2MigrationAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc)
+            VALUES (2, $appliedAtUtc);
             """;
         command.Parameters.AddWithValue(
             "$appliedAtUtc",

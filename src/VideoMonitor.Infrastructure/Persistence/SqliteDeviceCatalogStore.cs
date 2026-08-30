@@ -321,13 +321,14 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
         CancellationToken cancellationToken)
     {
         await ExecuteNonQueryAsync(connection, transaction, """
-            INSERT INTO device_groups (id, name, parent_id, sort, enabled)
-            VALUES ($id, $name, NULL, $sort, $enabled);
+            INSERT INTO device_groups (id, name, parent_id, sort, enabled, revision)
+            VALUES ($id, $name, NULL, $sort, $enabled, $revision);
             """, cancellationToken,
             ("$id", group.Id.ToString("N")),
             ("$name", group.Name),
             ("$sort", group.Sort),
-            ("$enabled", ToDatabaseBoolean(group.Enabled))).ConfigureAwait(false);
+            ("$enabled", ToDatabaseBoolean(group.Enabled)),
+            ("$revision", group.Revision)).ConfigureAwait(false);
     }
 
     private static async Task UpdateGroupParentAsync(
@@ -356,11 +357,11 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
             INSERT INTO camera_devices (
                 id, group_id, name, ip_address, sdk_port, rtsp_port,
                 username, password_ciphertext, manufacturer, model,
-                transport_mode, enabled, remark)
+                transport_mode, enabled, remark, revision)
             VALUES (
                 $id, $groupId, $name, $ipAddress, $sdkPort, $rtspPort,
                 $username, $passwordCiphertext, $manufacturer, $model,
-                $transportMode, $enabled, $remark);
+                $transportMode, $enabled, $remark, $revision);
             """, cancellationToken,
             ("$id", device.Id.ToString("N")),
             ("$groupId", device.GroupId.ToString("N")),
@@ -374,7 +375,8 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
             ("$model", device.Model),
             ("$transportMode", device.TransportMode.ToString()),
             ("$enabled", ToDatabaseBoolean(device.Enabled)),
-            ("$remark", device.Remark)).ConfigureAwait(false);
+            ("$remark", device.Remark),
+            ("$revision", device.Revision)).ConfigureAwait(false);
     }
 
     private static async Task InsertChannelAsync(
@@ -406,6 +408,7 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
         command.Transaction = transaction;
         command.CommandText = """
             SELECT id, name, parent_id, sort, enabled
+                   , revision
             FROM device_groups
             ORDER BY sort, id;
             """;
@@ -422,7 +425,8 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
                     ? null
                     : ReadGuid(reader, 2, "device_groups.parent_id"),
                 Sort = reader.GetInt32(3),
-                Enabled = ReadBoolean(reader, 4, "device_groups.enabled")
+                Enabled = ReadBoolean(reader, 4, "device_groups.enabled"),
+                Revision = reader.GetInt64(5)
             });
         }
 
@@ -439,7 +443,7 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
         command.CommandText = """
             SELECT id, group_id, name, ip_address, sdk_port, rtsp_port,
                    username, password_ciphertext, manufacturer, model,
-                   transport_mode, enabled, remark
+                   transport_mode, enabled, remark, revision
             FROM camera_devices
             ORDER BY id;
             """;
@@ -473,7 +477,8 @@ public sealed class SqliteDeviceCatalogStore : IDeviceCatalogStore
                 TransportMode = transportMode,
                 Status = CameraStatus.Unknown,
                 Enabled = ReadBoolean(reader, 11, "camera_devices.enabled"),
-                Remark = reader.GetString(12)
+                Remark = reader.GetString(12),
+                Revision = reader.GetInt64(13)
             });
         }
 

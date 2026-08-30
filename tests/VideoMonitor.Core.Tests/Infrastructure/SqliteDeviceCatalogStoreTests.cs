@@ -2,6 +2,7 @@ using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
 using VideoMonitor.Core.Models;
+using VideoMonitor.Core.Services;
 using VideoMonitor.Infrastructure.Paths;
 using VideoMonitor.Infrastructure.Persistence;
 using VideoMonitor.Infrastructure.Security;
@@ -43,6 +44,57 @@ public sealed class SqliteDeviceCatalogStoreTests
             AssertChannelConfigurationEqual(sourceChannel, loadedChannel);
             Assert.Equal(string.Empty, loadedChannel.StreamId);
         }
+    }
+
+    [Fact]
+    public async Task SaveAndLoad_PreservesConfigurationRevisions()
+    {
+        using var context = TestContext.Create();
+        var source = CreateSnapshot();
+        source.Groups[0].Revision = 7;
+        source.Devices[0].Revision = 11;
+
+        await context.CreateStore().SaveAsync(source);
+        var loaded = await context.CreateStore().LoadAsync();
+
+        Assert.NotNull(loaded);
+        Assert.Equal(7L, loaded.Groups[0].Revision);
+        Assert.Equal(11L, Assert.Single(loaded.Devices).Revision);
+
+        await using var connection = context.CreateConnection();
+        await connection.OpenAsync();
+        Assert.Equal("7", await ReadScalarAsync(
+            connection,
+            "SELECT revision FROM device_groups WHERE id = $id;",
+            ("$id", source.Groups[0].Id.ToString("N"))));
+        Assert.Equal("11", await ReadScalarAsync(
+            connection,
+            "SELECT revision FROM camera_devices WHERE id = $id;",
+            ("$id", source.Devices[0].Id.ToString("N"))));
+    }
+
+    [Fact]
+    public void InMemoryCatalog_CopiesConfigurationRevisionsOnUpdate()
+    {
+        var source = CreateSnapshot();
+        var catalog = new InMemoryDeviceCatalog(source.Groups, source.Devices);
+
+        var updatedGroup = new DeviceGroup
+        {
+            Id = source.Groups[0].Id,
+            Name = "Updated Group",
+            Sort = source.Groups[0].Sort,
+            Enabled = source.Groups[0].Enabled
+        };
+        updatedGroup.Revision = 7;
+        catalog.UpdateGroup(updatedGroup);
+
+        var updatedDevice = CreateSnapshot("Updated Camera").Devices[0];
+        updatedDevice.Revision = 11;
+        catalog.UpdateDevice(updatedDevice);
+
+        Assert.Equal(7L, catalog.GetGroups().Single(group => group.Id == updatedGroup.Id).Revision);
+        Assert.Equal(11L, catalog.GetDevice(updatedDevice.Id)!.Revision);
     }
 
     [Fact]
@@ -393,6 +445,7 @@ public sealed class SqliteDeviceCatalogStoreTests
         Assert.Equal(expected.ParentId, actual.ParentId);
         Assert.Equal(expected.Sort, actual.Sort);
         Assert.Equal(expected.Enabled, actual.Enabled);
+        Assert.Equal(expected.Revision, actual.Revision);
     }
 
     private static void AssertDeviceConfigurationEqual(CameraDevice expected, CameraDevice actual)
@@ -410,6 +463,7 @@ public sealed class SqliteDeviceCatalogStoreTests
         Assert.Equal(expected.TransportMode, actual.TransportMode);
         Assert.Equal(expected.Enabled, actual.Enabled);
         Assert.Equal(expected.Remark, actual.Remark);
+        Assert.Equal(expected.Revision, actual.Revision);
     }
 
     private static void AssertChannelConfigurationEqual(CameraChannel expected, CameraChannel actual)

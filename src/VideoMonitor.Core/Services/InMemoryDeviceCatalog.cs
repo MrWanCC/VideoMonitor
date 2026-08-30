@@ -54,6 +54,7 @@ public sealed class InMemoryDeviceCatalog : IDeviceCatalog
         }
 
         existing.Name = group.Name;
+        existing.Revision = group.Revision;
         existing.ParentId = group.ParentId;
         existing.Sort = group.Sort;
         existing.Enabled = group.Enabled;
@@ -198,6 +199,7 @@ public sealed class InMemoryDeviceCatalog : IDeviceCatalog
 
     private static void CopyDevice(CameraDevice target, CameraDevice source)
     {
+        target.Revision = source.Revision;
         target.Name = source.Name;
         target.GroupId = source.GroupId;
         target.IpAddress = source.IpAddress;
