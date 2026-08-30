@@ -335,6 +335,50 @@ public sealed class SqliteCentralCatalogRepositoryTests
     }
 
     [Fact]
+    public async Task UpdateDeviceAsync_DuplicateChannelIdentity_ReturnsChannelConflictWithoutChanges()
+    {
+        await using var context = await TestContext.CreateAsync();
+        var repository = CreateRepository(context, new CountingSecretProtector());
+        var group = await CreateGroupAsync(repository);
+        var device = CreateDevice(group.Id, string.Empty);
+        await InvokeAsync(repository, "CreateDeviceAsync", device, CancellationToken.None);
+
+        var dto = (await GetDeviceAsync(repository, device.Id))!;
+        var model = ToWriteModel(dto, "MUST-NOT-BE-USED");
+        model.Name = "Must Not Persist";
+        var existingMain = model.Channels.Single(channel =>
+            channel.StreamType == StreamType.Main);
+        model.Channels.Add(new CameraChannel
+        {
+            Id = Guid.Parse("97000000-0000-0000-0000-000000000005"),
+            DeviceId = model.Id,
+            ChannelNo = existingMain.ChannelNo,
+            ChannelName = "Duplicate Main",
+            StreamType = existingMain.StreamType,
+            Enabled = true
+        });
+
+        var result = await UpdateDeviceAsync(
+            repository,
+            model,
+            newPassword: null,
+            dto.Revision);
+
+        Assert.Equal(CatalogRepositoryStatus.ChannelConflict, GetStatus(result));
+
+        var loaded = (await GetDeviceAsync(repository, device.Id))!;
+        Assert.Equal(1L, loaded.Revision);
+        Assert.Equal(dto.Name, loaded.Name);
+        Assert.Equal(
+            dto.Channels.Select(channel => channel.Id),
+            loaded.Channels.Select(channel => channel.Id));
+        Assert.Equal(dto.Channels.Count, loaded.Channels.Count);
+        Assert.DoesNotContain(
+            loaded.Channels,
+            channel => channel.Id == Guid.Parse("97000000-0000-0000-0000-000000000005"));
+    }
+
+    [Fact]
     public async Task GetMissingGroupAndDevice_ReturnNull()
     {
         await using var context = await TestContext.CreateAsync();
