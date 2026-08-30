@@ -19,7 +19,8 @@
 - `CameraChannel` has no independent revision; channel changes increment parent `CameraDevice.Revision` exactly once.
 - GET/runtime status changes never increment configuration Revision.
 - Catalog reads never return plaintext password or `password_ciphertext`.
-- `UpdateDeviceRequest.NewPassword == null` preserves the existing protected password; any non-null value, including an explicit empty string, replaces it.
+- `UpdateDeviceRequest.NewPassword == null` preserves the existing protected password; `NewPassword == ""` is rejected; a non-empty value replaces it.
+- Stage 5B provides no clear-password operation; an existing protected credential cannot be cleared in the first version.
 - CameraDevice + channels update atomically in one SQLite transaction.
 - HTTP endpoints contain no SQL and never log secret-bearing request bodies.
 - Preserve all Stage 5A health/readiness/backup/security tests.
@@ -225,7 +226,7 @@ public interface ICentralCatalogRepository
 
 Write methods may accept an internal Server `DeviceGroup`/`CameraDevice` write model plus `newPassword`, but every read, create, and update result is a password-safe Core DTO. Repository reads never call `ISecretProtector.UnprotectAsync`. When reading `camera_devices`, `password_ciphertext` is used only to calculate `HasPassword = !string.IsNullOrEmpty(passwordCiphertext)`; it is never decrypted for a Catalog response. A non-empty create password is protected before INSERT and returns `HasPassword = true`; an explicitly empty create password remains allowed by this plan and returns `HasPassword = false`.
 
-`UpdateDeviceRequest.NewPassword == null` preserves the existing ciphertext without decrypting it. A non-null replacement calls `ProtectAsync(newPassword, ...)`, stores the new ciphertext, and still returns only a safe DTO. Stage 5B adds no password-read repository method. When Stage 5C Playback Resolve actually needs camera credentials, it may add a purpose-specific Server-only credential retrieval boundary; Stage 5B Catalog GET must not decrypt passwords in anticipation of that need.
+`UpdateDeviceRequest.NewPassword == null` preserves the existing ciphertext without decrypting it. A non-empty replacement calls `ProtectAsync(newPassword, ...)`, stores the new ciphertext, and still returns only a safe DTO; an empty replacement is rejected by the application service before the repository write. Stage 5B adds no password-read repository method. When Stage 5C Playback Resolve actually needs camera credentials, it may add a purpose-specific Server-only credential retrieval boundary; Stage 5B Catalog GET must not decrypt passwords in anticipation of that need.
 
 - [ ] **Step 1: Write failing read/create tests**
 
@@ -266,7 +267,7 @@ git commit -m "feat: add central catalog repository"
 
 Read the device twice as safe DTOs, map each DTO in test code to the trusted write model, and then perform the two updates with the DTO revisions. The test mapper does not require or recover a password because update preserves the stored ciphertext when `newPassword` is null. The first update must return revision 2; the second must return `RevisionConflict` with `CurrentRevision=2`.
 
-Also test stale delete, non-empty group delete, duplicate `(device_id, channel_no, stream_type)`, channel failure rollback, and password-protection failure preserving old ciphertext/revision.
+Also test stale delete, non-empty group delete, duplicate `(device_id, channel_no, stream_type)`, channel failure rollback, and password-protection failure preserving old ciphertext/revision. Explicitly test an existing password with `newPassword=null`: the update succeeds with revision +1, the raw `password_ciphertext` is byte/string-identical, and `UnprotectAsync` has zero calls. Test an existing password with `newPassword=""` through the service/API: it returns HTTP 400 `CATALOG_VALIDATION_FAILED`, leaves revision and ciphertext unchanged, and does not call `ProtectAsync`. Test a non-empty replacement: `ProtectAsync` is called, ciphertext changes, revision increases once, and the response exposes only `HasPassword=true`.
 
 - [ ] **Step 2: Run and verify failure**
 
@@ -274,19 +275,23 @@ Same focused repository test command.
 
 - [ ] **Step 3: Implement guarded write inside the transaction**
 
-Device parent row uses:
+Device parent row uses the following conditional password assignment:
 
 ```sql
 UPDATE camera_devices
 SET group_id=$groupId, name=$name, ip_address=$ipAddress,
     sdk_port=$sdkPort, rtsp_port=$rtspPort, username=$username,
-    password_ciphertext=$passwordCiphertext, manufacturer=$manufacturer,
+    password_ciphertext = CASE
+        WHEN $replacePassword = 1 THEN $passwordCiphertext
+        ELSE password_ciphertext
+    END,
+    manufacturer=$manufacturer,
     model=$model, transport_mode=$transportMode, enabled=$enabled,
     remark=$remark, revision=revision+1
 WHERE id=$id AND revision=$expectedRevision;
 ```
 
-If affected rows == 0, determine NotFound vs RevisionConflict inside the same transaction and roll back. Only after the guarded parent update succeeds may the channel set be replaced. Group update/delete follows the same pattern.
+For `NewPassword == null`, set `$replacePassword = 0`, do not call `UnprotectAsync`, and leave the existing ciphertext untouched. For a non-empty replacement, call `ProtectAsync(newPassword, ...)`, set `$replacePassword = 1`, and write the returned ciphertext. The empty-string case is rejected before this repository transaction. If affected rows == 0, determine NotFound vs RevisionConflict inside the same transaction and roll back. Only after the guarded parent update succeeds may the channel set be replaced. Group update/delete follows the same pattern.
 
 - [ ] **Step 4: Run repository tests**
 
@@ -333,7 +338,7 @@ CATALOG_WRITE_FAILED
 
 - [ ] **Step 1: Write failing validation/result tests**
 
-Cover Guid.Empty, missing group, invalid IP, ports outside 1–65535, channel <=0, duplicate channel identity, invalid enum value, explicit empty create password (accepted and stored as no password), missing/null required input as a binding/validation error, `NewPassword=null`, RevisionConflict and GroupNotEmpty mappings.
+Cover Guid.Empty, missing group, invalid IP, ports outside 1–65535, channel <=0, duplicate channel identity, invalid enum value, explicit empty create password (accepted and stored as no password), missing/null required input as a binding/validation error, existing password with `NewPassword=null` (preserved without `UnprotectAsync`), existing password with `NewPassword=""` (HTTP 400 `CATALOG_VALIDATION_FAILED`, no revision/ciphertext change), non-empty password replacement (protected replacement, one revision increment, safe `HasPassword=true` response), RevisionConflict and GroupNotEmpty mappings.
 
 - [ ] **Step 2: Run and verify failure**
 
@@ -343,7 +348,7 @@ dotnet test tests/VideoMonitor.Server.Tests/VideoMonitor.Server.Tests.csproj --f
 
 - [ ] **Step 3: Implement validation and safe DTO mapping**
 
-Map `CameraDeviceDto.HasPassword` from the presence of stored protected ciphertext, not from a plaintext read. Never decrypt or copy a password into a read DTO, error text, or log text. Explicit empty create password is valid and yields `HasPassword=false`; a non-null `NewPassword` replaces the protected value, while null preserves it.
+Map `CameraDeviceDto.HasPassword` from the presence of stored protected ciphertext, not from a plaintext read. Never decrypt or copy a password into a read DTO, error text, or log text. Explicit empty create password is valid, skips `ProtectAsync`, stores an empty ciphertext value, and yields `HasPassword=false`; a non-empty `NewPassword` replaces the protected value, while null preserves it. Reject `NewPassword=""` with HTTP 400 `CATALOG_VALIDATION_FAILED`; Stage 5B has no clear-password operation.
 
 Unexpected repository exceptions are converted to a safe `CatalogOperationResult<T>`: read operations return HTTP 500 with code `CATALOG_READ_FAILED`, and mutation operations return HTTP 500 with code `CATALOG_WRITE_FAILED`. Do not expose exception messages or stack traces.
 
