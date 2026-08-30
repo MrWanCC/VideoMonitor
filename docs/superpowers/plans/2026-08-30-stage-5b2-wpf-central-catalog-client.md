@@ -127,8 +127,8 @@ Files:
 - Modify `src/VideoMonitor.Core/Catalog/CatalogRequests.cs`
 - Modify `src/VideoMonitor.Infrastructure/Persistence/SqliteDatabaseInitializer.cs`
 - Modify `src/VideoMonitor.Infrastructure/Persistence/SqliteCentralCatalogRepository.cs`
-- Tests: `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteDatabaseInitializerTests.cs`
-- Tests: `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteCentralCatalogRepositoryTests.cs`
+- Modify tests: `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteDatabaseInitializerTests.cs`
+- Modify tests: `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteCentralCatalogRepositoryTests.cs`
 
 Contracts:
 
@@ -140,7 +140,15 @@ Contracts:
 - Use `MonitorGroupType` only. Do not add `MonitorGroupKind` or another equivalent enum.
 - V2 to V3 migration is the sole location allowed to recognize historical names: `卸矿站监控 -> UnloadingStation`, `溜井监控 -> Chute`, `巷道监控 -> Tunnel`. Other Roots remain `NULL`.
 
-Tests must prove current version 3, known-root mapping, unknown-root `NULL`, idempotent migration, Root Kind round-trip, Child Kind `NULL` round-trip, and rejection of an invalid stored enum rather than silent coercion.
+Update the existing `SqliteDatabaseInitializerTests.InitializeAsync_CreatesCurrentSchema` assertion so `MAX(schema_migrations.version) == 3`. Update `InitializeAsync_IsIdempotent` and `InitializeAsync_ConcurrentCallsRemainConsistent` so versions 1, 2, and 3 each occur once. Change `NewerSchemaVersion_IsRejected` to insert version 4 because version 3 is now supported. Also prove known-root mapping, unknown-root `NULL`, idempotent migration, Root Kind round-trip, Child Kind `NULL` round-trip, and rejection of an invalid stored enum rather than silent coercion.
+
+Before editing current-schema assertions, locate other assumptions with:
+
+```powershell
+rg -n "SchemaVersion|MAX\(version\)|version = 2|VALUES \(3" tests src
+```
+
+Change only assertions tied to the current schema; do not alter historical migration behavior.
 
 TDD commands:
 
@@ -169,8 +177,8 @@ Files:
 
 - Modify `src/VideoMonitor.Server/Catalog/CatalogApplicationService.cs`
 - Modify `CatalogEndpoints.cs` only if compilation requires an existing DTO signature update
-- Tests: `tests/VideoMonitor.Server.Tests/CatalogApplicationServiceTests.cs`
-- Tests: `tests/VideoMonitor.Server.Tests/CatalogApiTests.cs`
+- Modify tests: `tests/VideoMonitor.Server.Tests/CatalogApplicationServiceTests.cs`
+- Modify tests: `tests/VideoMonitor.Server.Tests/CatalogApiTests.cs`
 
 Validation contract:
 
@@ -200,8 +208,21 @@ Commit: `feat: enforce catalog group hierarchy semantics`
 
 TDD checklist:
 
-- [ ] RED: add the Root/Child/Device validation cases; run the focused command and confirm failure because the existing service accepts an invalid hierarchy.
-- [ ] GREEN: add the smallest service validation and preserve the existing error contract; run the focused command, affected Server suite, and Debug build and confirm PASS.
+- [ ] RED: add the Root/Child/Device validation cases, then run:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter FullyQualifiedName~CatalogApplicationServiceTests
+  ```
+
+  Confirm failure because the existing service accepts an invalid hierarchy.
+- [ ] GREEN: add the smallest service validation and preserve the existing error contract, then run the same focused command, followed by:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+
+  Confirm PASS.
 - [ ] Commit the Task 2 files with the stated message, then stop for review.
 
 ## Task 3 — Client Settings and Atomic Save
@@ -213,7 +234,7 @@ Files:
 - Create `src/VideoMonitor.Wpf/Configuration/ClientSettingsPathProvider.cs`
 - Create `src/VideoMonitor.Wpf/Configuration/JsonClientSettingsStore.cs`
 - Modify `.gitignore` to add `.devdata/`
-- Tests: `tests/VideoMonitor.Core.Tests/Configuration/ClientSettingsStoreTests.cs`
+- Create tests: `tests/VideoMonitor.Core.Tests/Configuration/ClientSettingsStoreTests.cs`
 
 Contracts:
 
@@ -245,8 +266,21 @@ Commit: `feat: add atomic client server settings`
 
 TDD checklist:
 
-- [ ] RED: add first-save, replacement, and failure-preservation cases; run the ClientSettingsStoreTests filter and confirm failure because the settings store does not exist.
-- [ ] GREEN: implement the path provider and atomic write behavior only; run the focused and affected Core test suite and confirm PASS.
+- [ ] RED: add first-save, replacement, and failure-preservation cases, then run:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~ClientSettingsStoreTests
+  ```
+
+  Confirm failure because the settings store does not exist.
+- [ ] GREEN: implement the path provider and atomic write behavior only, then run the same focused command and:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+
+  Confirm PASS.
 - [ ] Commit the Task 3 files with the stated message, then stop for review.
 
 ## Task 4 — CatalogApiClient
@@ -255,7 +289,7 @@ Files:
 
 - Create `src/VideoMonitor.Wpf/Catalog/CatalogApiException.cs`
 - Create `src/VideoMonitor.Wpf/Catalog/CatalogApiClient.cs`
-- Tests: `tests/VideoMonitor.Core.Tests/Catalog/CatalogApiClientTests.cs`
+- Create tests: `tests/VideoMonitor.Core.Tests/Catalog/CatalogApiClientTests.cs`
 
 `CatalogApiClient` never mutates `HttpClient.BaseAddress` during a Server switch. Every operation receives an explicit `Uri baseUri`.
 
@@ -278,8 +312,21 @@ Commit: `feat: add central catalog api client`
 
 TDD checklist:
 
-- [ ] RED: add HTTP handler cases for the listed responses and request rules; run the CatalogApiClientTests filter and confirm failure because the client is absent.
-- [ ] GREEN: implement explicit-URI requests and safe response mapping; run the focused and affected Core test suites and confirm PASS.
+- [ ] RED: add HTTP handler cases for the listed responses and request rules, then run:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~CatalogApiClientTests
+  ```
+
+  Confirm failure because the client is absent.
+- [ ] GREEN: implement explicit-URI requests and safe response mapping, then run the same focused command and:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+
+  Confirm PASS.
 - [ ] Commit the Task 4 files with the stated message, then stop for review.
 
 ## Task 5 — Password-Safe Read Model, Cache, Dispatcher, and Legacy Adapter
@@ -291,7 +338,8 @@ Files:
 - Create `src/VideoMonitor.Wpf/Catalog/WpfUiDispatcher.cs`
 - Create `src/VideoMonitor.Wpf/Catalog/ClientCatalogCache.cs`
 - Create `src/VideoMonitor.Wpf/Catalog/LegacyDeviceCatalogReadModel.cs`
-- Tests: cache, dispatcher, and legacy-adapter tests under `tests/VideoMonitor.Core.Tests/Catalog/`
+- Create tests: `tests/VideoMonitor.Core.Tests/Catalog/ClientCatalogCacheTests.cs`
+- Create tests: `tests/VideoMonitor.Core.Tests/Catalog/LegacyDeviceCatalogReadModelTests.cs`
 
 The read-model contract is:
 
@@ -325,8 +373,21 @@ Commit: `feat: add password safe client catalog cache`
 
 TDD checklist:
 
-- [ ] RED: add cache replacement, dispatcher, DTO-safety, and legacy-adapter cases; run the focused Catalog tests and confirm failure because the read model and cache are absent.
-- [ ] GREEN: implement the safe snapshot cache and adapter boundaries; run focused and affected Core tests and confirm PASS.
+- [ ] RED: add cache replacement, dispatcher, DTO-safety, and legacy-adapter cases, then run:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~ClientCatalogCacheTests|FullyQualifiedName~LegacyDeviceCatalogReadModelTests"
+  ```
+
+  Confirm failure because the read model and cache are absent.
+- [ ] GREEN: implement the safe snapshot cache and adapter boundaries, then run the same focused command and:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+
+  Confirm PASS.
 - [ ] Commit the Task 5 files with the stated message, then stop for review.
 
 ## Task 6 — ServerConnectionCoordinator
@@ -338,7 +399,7 @@ Files:
 - Create `src/VideoMonitor.Wpf/Catalog/SystemClientConnectionClock.cs`
 - Create `src/VideoMonitor.Wpf/Catalog/ServerConnectionCoordinator.cs`
 - Add only a minimal internal client seam to `CatalogApiClient.cs` if deterministic tests require it; do not add a second transport implementation
-- Tests: `tests/VideoMonitor.Core.Tests/Catalog/ServerConnectionCoordinatorTests.cs`
+- Create tests: `tests/VideoMonitor.Core.Tests/Catalog/ServerConnectionCoordinatorTests.cs`
 
 States are `Unconfigured`, `Connecting`, `Connected`, and `Unavailable`. Status is:
 
@@ -365,9 +426,9 @@ public interface IClientConnectionClock
 
 The coordinator exposes `Status`, `StatusChanged`, `RunAsync`, `RefreshNowAsync`, `ProbeAsync`, and `SwitchServerAsync(Uri candidate, Func<bool> hasUnsavedDraft, CancellationToken cancellationToken = default)`.
 
-Use one process loop, a `SemaphoreSlim` single-flight refresh gate, shutdown cancellation, and bounded retry delays `2s -> 5s -> 10s -> 15s -> 15s` with ±20% jitter. Online Catalog refresh uses a configurable 30-second-scale period with ±20% jitter. A failed first connection leaves an empty cache; a post-success failure preserves the stale cache and marks `Unavailable`; reconnect requires a complete Catalog refresh. Unchanged snapshots do not notify.
+Use one process loop, a `SemaphoreSlim` single-flight refresh gate, and shutdown cancellation. `NextJitterUnit()` returns `0.0 <= value < 1.0`; every delay uses the single formula `jitteredDelay = baseDelay * (0.8 + 0.4 * NextJitterUnit())`. Reconnect bases are `2s -> 5s -> 10s -> 15s -> 15s`; the production Catalog refresh base is fixed at 30 seconds, producing `24s <= delay < 36s`. The fake clock/jitter makes these values deterministic in tests. A failed first connection leaves an empty cache; a post-success failure preserves the stale cache and marks `Unavailable`; reconnect requires a complete Catalog refresh. Unchanged snapshots do not notify.
 
-Switching probes B with readiness and Catalog GET without changing A. It checks the Draft before and after probing, persists settings atomically, then commits BaseUri B, Catalog B, and `Connected` together. A settings-save failure leaves A BaseUri, cache, and state unchanged. Once B is accepted, later B failure reconnects to B and never silently returns to A.
+Switching probes B with readiness and Catalog GET without changing A. Probe and Draft checks may honor the caller cancellation token. Immediately before durable settings persistence, call `cancellationToken.ThrowIfCancellationRequested()`. The successful atomic settings write of B is the Server switch commit point. After that point, do not accept the caller token: use `CancellationToken.None` for the Dispatcher commit, perform no network request, no additional disk write, and no new business validation. The final commit only sets Configured BaseUri B, ClientCatalogCache snapshot B, `Connected`, `LastSuccessfulSyncUtc = clock.UtcNow`, and `IsStale = false`. A settings-save failure before the commit point leaves A BaseUri, cache, and state unchanged. Once B is accepted, later B failure reconnects to B and never silently returns to A.
 
 Deterministic tests cover no configuration, first connect, stale mode, reconnect, retry schedule, jitter, periodic refresh, single-flight behavior, failed B probe, settings failure, and Draft blocking.
 
@@ -375,8 +436,21 @@ Commit: `feat: add central server connection coordinator`
 
 TDD checklist:
 
-- [ ] RED: add deterministic coordinator tests for connection, refresh, retry, and switch behavior; run the coordinator filter and confirm failure because the coordinator is absent.
-- [ ] GREEN: implement one loop, single-flight refresh, bounded backoff, and atomic switching; run focused and affected Core tests and confirm PASS.
+- [ ] RED: add deterministic coordinator tests for connection, refresh, retry, and switch behavior, then run:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~ServerConnectionCoordinatorTests
+  ```
+
+  Confirm failure because the coordinator is absent.
+- [ ] GREEN: implement one loop, single-flight refresh, bounded backoff, and atomic switching, then run the same focused command and:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+
+  Confirm PASS.
 - [ ] Commit the Task 6 files with the stated message, then stop for review.
 
 ## Task 7 — Monitor Projection and Fixed Nullable 4+3
@@ -387,8 +461,8 @@ Files:
 - Modify `src/VideoMonitor.Core/Services/MonitorCatalogProjection.cs`
 - Modify `src/VideoMonitor.Core/Services/MonitorLayoutSnapshot.cs`
 - Modify `src/VideoMonitor.Core/Services/MonitorSwitchService.cs`
-- Tests: `tests/VideoMonitor.Core.Tests/Services/MonitorCatalogProjectionTests.cs`
-- Tests: `tests/VideoMonitor.Core.Tests/Services/MonitorSwitchServiceTests.cs`
+- Modify tests: `tests/VideoMonitor.Core.Tests/Services/MonitorCatalogProjectionTests.cs`
+- Modify tests: `tests/VideoMonitor.Core.Tests/Services/MonitorSwitchServiceTests.cs`
 
 `MonitorGroup` contains `GroupId`, `RootGroupId`, `RootName`, `RootSort`, and `Sort`. `MonitorLayoutSnapshot` contains `IReadOnlyList<CameraInfo?> MainSlots` and `IReadOnlyList<CameraInfo?> SecondarySlots`.
 
@@ -404,8 +478,21 @@ Commit: `feat: make monitor layout catalog tolerant`
 
 TDD checklist:
 
-- [ ] RED: add projection, hierarchy filtering, default-order, and nullable-slot cases; run the two focused service filters and confirm failure because the central read-model projection is absent.
-- [ ] GREEN: implement the two-level projection and Guid-based switch behavior; run the focused and affected Core suites and confirm PASS.
+- [ ] RED: add projection, hierarchy filtering, default-order, and nullable-slot cases, then run:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~MonitorCatalogProjectionTests|FullyQualifiedName~MonitorSwitchServiceTests"
+  ```
+
+  Confirm failure because the central read-model projection is absent.
+- [ ] GREEN: implement the two-level projection and Guid-based switch behavior, then run the same focused command and:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+
+  Confirm PASS.
 - [ ] Commit the Task 7 files with the stated message, then stop for review.
 
 ## Task 8 — Monitor, Secondary, and VideoTile DTO Refactor
@@ -417,9 +504,9 @@ Files:
 - Modify `src/VideoMonitor.Wpf/ViewModels/VideoTileViewModel.cs`
 - Modify `src/VideoMonitor.Wpf/ViewModels/MonitorTreeItemViewModel.cs` only if required
 - Modify `src/VideoMonitor.Wpf/Views/SecondaryMonitorWindow.xaml`
-- Tests: `tests/VideoMonitor.Core.Tests/Views/MonitorCatalogRefreshTests.cs`
-- Tests: `tests/VideoMonitor.Core.Tests/Views/MonitorUiStateTests.cs`
-- Create `tests/VideoMonitor.Core.Tests/Views/SecondaryMonitorCatalogTests.cs`
+- Modify tests: `tests/VideoMonitor.Core.Tests/ViewModels/MonitorCatalogRefreshTests.cs`
+- Modify tests: `tests/VideoMonitor.Core.Tests/ViewModels/MonitorUiStateTests.cs`
+- Create tests: `tests/VideoMonitor.Core.Tests/ViewModels/SecondaryMonitorCatalogTests.cs`
 
 Formal `VideoTile` updates consume `CameraInfo`, `CameraDeviceDto?`, `CameraChannelDto?`, and runtime `CameraStatus`; they do not consume Core `CameraDevice`. Add `ResetUnconfigured()` so an empty slot displays `CameraName = "未配置"`, `Status = Unknown`, `IP = "--"`, stream = `"--"`, and the existing unconfigured visual state.
 
@@ -431,8 +518,21 @@ Commit: `feat: bind monitor views to central catalog read model`
 
 TDD checklist:
 
-- [ ] RED: add ViewModel and Secondary Catalog refresh cases; run the affected View tests and confirm failure because the ViewModels still depend on the old source shape.
-- [ ] GREEN: bind the ViewModels and tiles to password-safe DTO/read-model data with nullable slot reset; run the focused and affected WPF test suites and confirm PASS.
+- [ ] RED: add ViewModel and Secondary Catalog refresh cases, then run:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~MonitorCatalogRefreshTests|FullyQualifiedName~MonitorUiStateTests|FullyQualifiedName~SecondaryMonitorCatalogTests"
+  ```
+
+  Confirm failure because the ViewModels still depend on the old source shape.
+- [ ] GREEN: bind the ViewModels and tiles to password-safe DTO/read-model data with nullable slot reset, then run the same focused command and:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+
+  Confirm PASS.
 - [ ] Commit the Task 8 files with the stated message, then stop for review.
 
 ## Task 9 — Async Command Service and Device Management Draft
@@ -445,8 +545,8 @@ Files:
 - Modify `src/VideoMonitor.Wpf/ViewModels/DeviceEditDraftViewModel.cs`
 - Modify `src/VideoMonitor.Wpf/ViewModels/DeviceGroupTreeItemViewModel.cs`
 - Modify `src/VideoMonitor.Wpf/ViewModels/DeviceManagementViewModel.cs`
-- Tests: `tests/VideoMonitor.Core.Tests/Catalog/DeviceCatalogCommandServiceTests.cs`
-- Tests: `tests/VideoMonitor.Core.Tests/Views/DeviceManagementDraftTests.cs`
+- Create tests: `tests/VideoMonitor.Core.Tests/Catalog/DeviceCatalogCommandServiceTests.cs`
+- Create tests: `tests/VideoMonitor.Core.Tests/ViewModels/DeviceManagementDraftTests.cs`
 
 The command contract is:
 
@@ -476,8 +576,21 @@ Commit: `feat: make device management use async catalog drafts`
 
 TDD checklist:
 
-- [ ] RED: add command-service and Draft cases for one-write behavior, timeout ambiguity, password safety, conflicts, and offline mode; run the focused command and confirm failure because the async command boundary is absent.
-- [ ] GREEN: implement the remote/legacy command services and DTO-based Draft flow; run the focused and affected WPF/Core suites and confirm PASS.
+- [ ] RED: add command-service and Draft cases for one-write behavior, timeout ambiguity, password safety, conflicts, and offline mode, then run:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~DeviceCatalogCommandServiceTests|FullyQualifiedName~DeviceManagementDraftTests"
+  ```
+
+  Confirm failure because the async command boundary is absent.
+- [ ] GREEN: implement the remote/legacy command services and DTO-based Draft flow, then run the same focused command and:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+
+  Confirm PASS.
 - [ ] Commit the Task 9 files with the stated message, then stop for review.
 
 ## Task 10 — Root Category Management
@@ -487,7 +600,7 @@ Files:
 - Modify `src/VideoMonitor.Wpf/ViewModels/DeviceManagementViewModel.cs`
 - Modify `src/VideoMonitor.Wpf/Views/Pages/DeviceView.xaml`
 - Modify `src/VideoMonitor.Wpf/Views/Pages/DeviceView.xaml.cs` only if focus handling is required
-- Tests: `tests/VideoMonitor.Core.Tests/Views/DeviceManagementGroupTests.cs`
+- Modify tests: `tests/VideoMonitor.Core.Tests/ViewModels/DeviceManagementGroupTests.cs`
 
 This Task is required because an empty Catalog must allow the user to create the first Root.
 
@@ -503,8 +616,21 @@ Commit: `feat: add root category management`
 
 TDD checklist:
 
-- [ ] RED: add Root draft and command cases; run the focused DeviceManagementGroupTests filter and confirm failure because Root management is absent.
-- [ ] GREEN: implement the smallest Root editor and command bindings without redesigning the page; run focused and affected WPF tests and confirm PASS.
+- [ ] RED: add Root draft and command cases, then run:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter FullyQualifiedName~DeviceManagementGroupTests
+  ```
+
+  Confirm failure because Root management is absent.
+- [ ] GREEN: implement the smallest Root editor and command bindings without redesigning the page, then run the same focused command and:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+
+  Confirm PASS.
 - [ ] Commit the Task 10 files with the stated message, then stop for review.
 
 ## Task 11 — Server Settings UI and Status
@@ -519,8 +645,8 @@ Files:
 - Modify `src/VideoMonitor.Wpf/MainWindow.xaml`
 - Modify `src/VideoMonitor.Wpf/MainWindow.xaml.cs`
 - Modify `src/VideoMonitor.Wpf/Controls/StatusBar.xaml`
-- Tests: `tests/VideoMonitor.Core.Tests/Views/ServerSettingsViewModelTests.cs`
-- Tests: `tests/VideoMonitor.Core.Tests/Views/MainHeaderControlStateTests.cs`
+- Create tests: `tests/VideoMonitor.Core.Tests/ViewModels/ServerSettingsViewModelTests.cs`
+- Modify tests: `tests/VideoMonitor.Core.Tests/ViewModels/MainHeaderControlStateTests.cs`
 
 Display states are Unconfigured = 未配置, Connecting = 连接中, Connected = 已连接, and Unavailable = 连接失败. Null last-sync time displays `--`; otherwise use local `yyyy-MM-dd HH:mm:ss`.
 
@@ -534,8 +660,21 @@ Commit: `feat: add central server settings and status ui`
 
 TDD checklist:
 
-- [ ] RED: add status and settings interaction cases; run the focused settings/header filters and confirm failure because the Server settings UI is absent.
-- [ ] GREEN: implement settings Test/Save and real status binding while preserving existing styling; run focused and affected WPF tests and confirm PASS.
+- [ ] RED: add status and settings interaction cases, then run:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~ServerSettingsViewModelTests|FullyQualifiedName~MainHeaderControlStateTests"
+  ```
+
+  Confirm failure because the Server settings UI is absent.
+- [ ] GREEN: implement settings Test/Save and real status binding while preserving existing styling, then run the same focused command and:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+
+  Confirm PASS.
 - [ ] Commit the Task 11 files with the stated message, then stop for review.
 
 ## Task 12 — Formal Central Composition and SingleCameraTest Compatibility
@@ -544,8 +683,8 @@ Files:
 
 - Modify `src/VideoMonitor.Wpf/App.xaml.cs`
 - Optional only when App size requires it: create `src/VideoMonitor.Wpf/Configuration/ApplicationCatalogComposition.cs` for catalog mode composition/lifecycle only
-- Tests: `tests/VideoMonitor.Core.Tests/Composition/ApplicationCatalogCompositionTests.cs`
-- Update `tests/VideoMonitor.Core.Tests/ShutdownCleanupCoordinatorTests.cs` only when shutdown behavior requires it
+- Create tests: `tests/VideoMonitor.Core.Tests/Composition/ApplicationCatalogCompositionTests.cs`
+- Modify tests: `tests/VideoMonitor.Core.Tests/Services/ShutdownCleanupCoordinatorTests.cs` only when shutdown behavior requires it
 
 Formal mode composition:
 
@@ -569,8 +708,21 @@ Commit: `feat: compose formal central catalog client mode`
 
 TDD checklist:
 
-- [ ] RED: add composition and shutdown cases for formal and SingleCameraTest modes; run the focused composition filters and confirm failure because the central composition is not wired.
-- [ ] GREEN: implement the two explicit mode compositions and lifecycle ownership only; run focused and affected suites and confirm PASS.
+- [ ] RED: add composition and shutdown cases for formal and SingleCameraTest modes, then run:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~ApplicationCatalogCompositionTests|FullyQualifiedName~ShutdownCleanupCoordinatorTests"
+  ```
+
+  Confirm failure because the central composition is not wired.
+- [ ] GREEN: implement the two explicit mode compositions and lifecycle ownership only, then run the same focused command and:
+
+  ```powershell
+  dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj
+  dotnet build .\VideoMonitor.sln -c Debug
+  ```
+
+  Confirm PASS.
 - [ ] Commit the Task 12 files with the stated message, then stop for review.
 
 ## Task 13 — Final Acceptance
@@ -613,6 +765,17 @@ WPF smoke and manual acceptance:
 10. Confirm partial 4+3 data renders unconfigured slots.
 
 Safety verification scans:
+
+```powershell
+rg -n "备用1|Z-1#巷|2#主溜井|3#主溜井" src tests
+rg -n "卸矿站监控|溜井监控|巷道监控" src tests
+rg -n "ServerCertificateCustomValidationCallback|DangerousAcceptAnyServerCertificateValidator" src
+rg -n "\.Result|\.Wait\(\)|GetAwaiter\(\)\.GetResult\(\)" src/VideoMonitor.Wpf
+rg -n "JsonDeviceCatalogStore|DeviceCatalogPersistenceCoordinator" src/VideoMonitor.Wpf/App.xaml.cs src/VideoMonitor.Wpf/Configuration
+git ls-files | Select-String -Pattern "(^|/)\.devdata/"
+```
+
+Expected results:
 
 - hardcoded legacy display names must not be runtime dependencies;
 - the three historical Chinese names may occur only in V3 migration compatibility/tests;
