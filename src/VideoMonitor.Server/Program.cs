@@ -2,6 +2,7 @@ using VideoMonitor.Core.Services;
 using VideoMonitor.Infrastructure.Paths;
 using VideoMonitor.Infrastructure.Persistence;
 using VideoMonitor.Infrastructure.Security;
+using VideoMonitor.Server.Catalog;
 using VideoMonitor.Server.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,6 +30,10 @@ builder.Services.AddSingleton<ISecretProtector, AesGcmSecretProtector>();
 builder.Services.AddSingleton<SqliteConnectionFactory>();
 builder.Services.AddSingleton<SqliteDatabaseInitializer>();
 builder.Services.AddSingleton<IDeviceCatalogStore, SqliteDeviceCatalogStore>();
+builder.Services.AddSingleton<
+    ICentralCatalogRepository,
+    SqliteCentralCatalogRepository>();
+builder.Services.AddSingleton<CatalogApplicationService>();
 builder.Services.AddSingleton<ISqliteBackupService, SqliteBackupService>();
 builder.Services.AddSingleton<ServerReadinessState>();
 builder.Services.AddHostedService<ServerInitializationHostedService>();
@@ -53,6 +58,8 @@ app.MapGet("/health/ready", (ServerReadinessState readiness) =>
         ? Results.Ok(response)
         : Results.Json(response, statusCode: StatusCodes.Status503ServiceUnavailable);
 });
+
+app.MapCatalogEndpoints();
 
 app.Run();
 
