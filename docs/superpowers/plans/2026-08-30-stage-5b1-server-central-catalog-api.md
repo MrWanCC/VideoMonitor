@@ -208,7 +208,6 @@ git commit -m "feat: add central catalog contracts"
 ```csharp
 public enum CatalogRepositoryStatus { Success, NotFound, RevisionConflict, GroupNotEmpty, ChannelConflict }
 public sealed record CatalogRepositoryResult<T>(CatalogRepositoryStatus Status, T? Value = default, long? CurrentRevision = null);
-public sealed record CatalogRepositoryDeleteResult(CatalogRepositoryStatus Status, long? CurrentRevision = null);
 
 public interface ICentralCatalogRepository
 {
@@ -217,16 +216,12 @@ public interface ICentralCatalogRepository
     Task<CameraDeviceDto?> GetDeviceAsync(Guid id, CancellationToken cancellationToken = default);
     Task<CatalogRepositoryResult<DeviceGroupDto>> CreateGroupAsync(DeviceGroup group, CancellationToken cancellationToken = default);
     Task<CatalogRepositoryResult<CameraDeviceDto>> CreateDeviceAsync(CameraDevice device, CancellationToken cancellationToken = default);
-    Task<CatalogRepositoryResult<DeviceGroupDto>> UpdateGroupAsync(DeviceGroup group, long expectedRevision, CancellationToken cancellationToken = default);
-    Task<CatalogRepositoryDeleteResult> DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default);
-    Task<CatalogRepositoryResult<CameraDeviceDto>> UpdateDeviceAsync(CameraDevice device, string? newPassword, long expectedRevision, CancellationToken cancellationToken = default);
-    Task<CatalogRepositoryDeleteResult> DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default);
 }
 ```
 
-Write methods may accept an internal Server `DeviceGroup`/`CameraDevice` write model plus `newPassword`, but every read, create, and update result is a password-safe Core DTO. Repository reads never call `ISecretProtector.UnprotectAsync`. When reading `camera_devices`, `password_ciphertext` is used only to calculate `HasPassword = !string.IsNullOrEmpty(passwordCiphertext)`; it is never decrypted for a Catalog response. A non-empty create password is protected before INSERT and returns `HasPassword = true`; an explicitly empty create password remains allowed by this plan and returns `HasPassword = false`.
+Write methods may accept an internal Server `DeviceGroup`/`CameraDevice` write model plus `newPassword`, but every read and create result is a password-safe Core DTO. Repository reads never call `ISecretProtector.UnprotectAsync`. When reading `camera_devices`, `password_ciphertext` is used only to calculate `HasPassword = !string.IsNullOrEmpty(passwordCiphertext)`; it is never decrypted for a Catalog response. A non-empty create password is protected before INSERT and returns `HasPassword = true`; an explicitly empty create password remains allowed by this plan and returns `HasPassword = false`.
 
-`UpdateDeviceRequest.NewPassword == null` preserves the existing ciphertext without decrypting it. A non-empty replacement calls `ProtectAsync(newPassword, ...)`, stores the new ciphertext, and still returns only a safe DTO; an empty replacement is rejected by the application service before the repository write. Stage 5B adds no password-read repository method. When Stage 5C Playback Resolve actually needs camera credentials, it may add a purpose-specific Server-only credential retrieval boundary; Stage 5B Catalog GET must not decrypt passwords in anticipation of that need.
+Task 4 defines the update password semantics: `UpdateDeviceRequest.NewPassword == null` preserves the existing ciphertext without decrypting it. A non-empty replacement calls `ProtectAsync(newPassword, ...)`, stores the new ciphertext, and still returns only a safe DTO; an empty replacement is rejected by the application service before the repository write. Stage 5B adds no password-read repository method. When Stage 5C Playback Resolve actually needs camera credentials, it may add a purpose-specific Server-only credential retrieval boundary; Stage 5B Catalog GET must not decrypt passwords in anticipation of that need.
 
 - [ ] **Step 1: Write failing read/create tests**
 
@@ -258,10 +253,19 @@ git commit -m "feat: add central catalog repository"
 ### Task 4: Revision-Protected Update/Delete + Atomicity
 
 **Files:**
+- Modify: `src/VideoMonitor.Infrastructure/Persistence/ICentralCatalogRepository.cs`
+- Modify: `src/VideoMonitor.Infrastructure/Persistence/CatalogRepositoryResult.cs`
 - Modify: `src/VideoMonitor.Infrastructure/Persistence/SqliteCentralCatalogRepository.cs`
 - Modify: `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteCentralCatalogRepositoryTests.cs`
 
-**Interfaces:** Task 3's password-safe DTO read/write contract remains unchanged.
+**Interfaces:** After the RED tests, extend the Task 3 contract with the update/delete methods below. Create `CatalogRepositoryDeleteResult` in `CatalogRepositoryResult.cs` at this point; Task 3 must not define an unused delete-result API. Do not add placeholder or `NotSupportedException` implementations.
+
+```csharp
+Task<CatalogRepositoryResult<DeviceGroupDto>> UpdateGroupAsync(DeviceGroup group, long expectedRevision, CancellationToken cancellationToken = default);
+Task<CatalogRepositoryDeleteResult> DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default);
+Task<CatalogRepositoryResult<CameraDeviceDto>> UpdateDeviceAsync(CameraDevice device, string? newPassword, long expectedRevision, CancellationToken cancellationToken = default);
+Task<CatalogRepositoryDeleteResult> DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default);
+```
 
 - [ ] **Step 1: Add failing concurrency/rollback tests**
 
@@ -274,6 +278,8 @@ Also test stale delete, non-empty group delete, duplicate `(device_id, channel_n
 Same focused repository test command.
 
 - [ ] **Step 3: Implement guarded write inside the transaction**
+
+Add the four update/delete methods to `ICentralCatalogRepository` and add `CatalogRepositoryDeleteResult` to `CatalogRepositoryResult.cs`; do not add placeholder implementations. Then implement the guarded write inside the transaction.
 
 Device parent row uses the following conditional password assignment:
 
@@ -300,7 +306,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/VideoMonitor.Infrastructure/Persistence/SqliteCentralCatalogRepository.cs tests/VideoMonitor.Core.Tests/Infrastructure/SqliteCentralCatalogRepositoryTests.cs
+git add src/VideoMonitor.Infrastructure/Persistence/ICentralCatalogRepository.cs src/VideoMonitor.Infrastructure/Persistence/CatalogRepositoryResult.cs src/VideoMonitor.Infrastructure/Persistence/SqliteCentralCatalogRepository.cs tests/VideoMonitor.Core.Tests/Infrastructure/SqliteCentralCatalogRepositoryTests.cs
 git commit -m "feat: protect catalog writes with revisions"
 ```
 
