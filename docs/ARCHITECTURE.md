@@ -69,6 +69,8 @@ V1 keeps `StreamType` on `CameraChannel`; `StreamId` and `CameraStatus` are runt
 
 从 Stage 5B 起，正式 WPF 设备目录读写必须通过 Server。Server 不可用时不能自动退回本地 JSON 继续编辑。现有 JSON Catalog 只允许作为开发期单摄像头验证兼容路径，后续随 ServerPlaybackSourceResolver 完成而退出。
 
+Server 在线期间，WPF 通过带少量客户端 jitter 的 bounded 周期 `GET /api/v1/catalog` 低频刷新远端目录；刷新不可重叠，失败保留现有缓存并进入 bounded reconnect/backoff，不触发 JSON fallback。
+
 ## Catalog concurrency
 
 设备和分组配置采用按 Aggregate 的 Configuration Revision：

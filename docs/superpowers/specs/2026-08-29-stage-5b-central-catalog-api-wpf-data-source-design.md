@@ -119,6 +119,16 @@ No automatic bidirectional synchronization is allowed.
 
 After the Server playback resolver replaces the local ZLM production path, the remaining JSON compatibility path can be removed in a later stage.
 
+### 4.1 Online catalog refresh
+
+While the Server is available, each WPF client also performs a low-frequency background catalog refresh using a bounded periodic `GET /api/v1/catalog`. Stage 5B does not introduce WebSocket, SSE, or SignalR catalog notifications. An initial interval in the 15–30 second range is a suitable implementation starting point, but the interval is a configuration/implementation parameter rather than an architecture constant.
+
+Clients add a small per-client jitter to avoid synchronized requests. A refresh may not overlap another refresh: if the previous request has not completed, the next scheduled attempt is skipped or deferred. The refresh loop observes the application shutdown `CancellationToken` and stops promptly during shutdown.
+
+After a successful refresh, WPF replaces `ClientCatalogCache` and raises its `Changed` event only when the Server snapshot has an actual member or configuration-Revision change. An unchanged snapshot produces no notification storm. Refresh never overwrites an unsubmitted `DeviceManagementViewModel` draft; the draft keeps its original expected Revision and a later save is still resolved by the Server's `409 Conflict` response when stale.
+
+If refresh fails, WPF keeps the existing process cache, marks the Server unavailable, and enters the existing bounded reconnect/backoff flow. Refresh never falls back to editable JSON. Push notification is not required in Stage 5B; a future ETag, global catalog revision, SSE, or similar optimization may reduce polling, but is outside this stage.
+
 ## 5. Aggregate boundaries
 
 ### 5.1 CameraDevice aggregate
@@ -631,7 +641,17 @@ Verify:
 - reconnect refreshes the catalog;
 - no production Server-unavailable path writes to local JSON.
 
-### 18.7 Secret leak checks
+### 18.7 Online catalog refresh
+
+Verify:
+
+- while the Server remains online, Client B's bounded periodic refresh observes a catalog change committed by Client A;
+- the 100-client control-plane simulation includes the periodic catalog refresh request load;
+- periodic refresh requests do not overlap and do not form a tight loop;
+- a refresh never overwrites an unsubmitted device-management draft;
+- an unchanged Server snapshot does not produce meaningless `Changed` notification storms.
+
+### 18.8 Secret leak checks
 
 Search tests/log output/API JSON for:
 

@@ -57,6 +57,7 @@ WPF CatalogApiClient
 process-local ClientCatalogCache
 device management -> Server API
 monitor tree -> same central client cache
+bounded periodic GET /api/v1/catalog refresh while Server is online
 Server unavailable/reconnect handling
 ```
 

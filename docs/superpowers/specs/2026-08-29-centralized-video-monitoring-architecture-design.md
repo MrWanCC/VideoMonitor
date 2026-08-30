@@ -16,7 +16,7 @@ Hikvision RTSP -> ZLMediaKit -> LibVLCSharp -> WPF VideoTile
 
 - 约 100 路注册摄像机；
 - 1 个中心 ZLMediaKit；
-- 约 10 台 WPF Client；
+- WPF Client 数量不按固定 10 台设计；控制面和共享流模型按约 100 台或更多受控内网客户端考虑，实际视频解码压测使用代表性客户端；
 - 每个 Client 最多 4 个主屏 Tile + 3 个副屏 Tile = 7 路同时播放；
 - 不要求 100 路永久拉流，按实际观看需求拉取；
 - 多客户端观看同一路时共享一个 Camera -> ZLM 上游。
@@ -606,7 +606,9 @@ Recovery Secret 不与普通数据库备份长期放在同一公开目录。
 - Export：管理/迁移；
 - 默认 Export 不包含明文密码。
 
-## 14. 现有 JSON -> Server 迁移
+## 14. 历史记录：现有 JSON -> Server 迁移（当前不实施）
+
+> 本节保留为早期设计历史。由于项目尚未现场投产，本迁移方案已被 `docs/superpowers/specs/2026-08-29-stage-5b-central-catalog-api-wpf-data-source-design.md` supersede，当前 Stage 5B 不实现 Legacy JSON Migration。
 
 旧 WPF Catalog 的密码可能用 DPAPI LocalMachine 绑定原电脑，因此不能直接复制 JSON 到 Server 解密。
 
@@ -907,7 +909,7 @@ ZLM 可独立升级，系统状态记录其版本/build。
 14. Hook 丢失后 Reconciler 能纠偏；
 15. Proxy Exists / Media Missing 不返回假 Ready；
 16. 修改 IP/Password 后 Revision 使旧 Runtime Config 失效；
-17. JSON Migration 全成或全回滚；
+17. （历史迁移方案验收项，当前 Stage 5B 不实施）JSON Migration 全成或全回滚；
 18. Replacement Server 能用 Backup + Recovery 机制恢复 Credential；
 19. 日志无凭据泄漏。
 
