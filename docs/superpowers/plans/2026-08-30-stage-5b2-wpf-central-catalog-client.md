@@ -286,46 +286,71 @@ Execution steps:
 - [ ] Step 1: Write failing tests.
 
   ```csharp
-  internal sealed class SqliteTestDatabase : IAsyncDisposable
-  {
-      public SqliteDatabaseInitializer Initializer { get; }
-
-      public static Task<SqliteTestDatabase> CreateV2Async() => throw new NotSupportedException();
-
-      public Task InsertRootAsync(string name) => throw new NotSupportedException();
-
-      public Task<string?> ReadGroupKindAsync() => throw new NotSupportedException();
-
-      public Task<int> ReadMaxSchemaVersionAsync() => throw new NotSupportedException();
-
-      public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-  }
-
   [Fact]
   public async Task InitializeAsync_UpgradesV2KnownRootKind()
   {
-      await using var database = await SqliteTestDatabase.CreateV2Async();
-      await database.InsertRootAsync("溜井监控");
+      using var context = TestContext.Create();
+      await context.CreateV2DatabaseAsync();
+      await context.InsertRootAsync("溜井监控");
 
-      await database.Initializer.InitializeAsync();
+      await context.CreateInitializer().InitializeAsync();
 
-      Assert.Equal("Chute", await database.ReadGroupKindAsync());
+      Assert.Equal("Chute", await context.ReadGroupKindAsync("溜井监控"));
   }
 
   [Fact]
   public async Task InitializeAsync_LeavesUnknownRootKindNull()
   {
-      await using var database = await SqliteTestDatabase.CreateV2Async();
-      await database.InsertRootAsync("现场自定义分类");
+      using var context = TestContext.Create();
+      await context.CreateV2DatabaseAsync();
+      await context.InsertRootAsync("现场自定义分类");
 
-      await database.Initializer.InitializeAsync();
+      await context.CreateInitializer().InitializeAsync();
 
-      Assert.Null(await database.ReadGroupKindAsync());
-      Assert.Equal(3, await database.ReadMaxSchemaVersionAsync());
+      Assert.Null(await context.ReadGroupKindAsync("现场自定义分类"));
+      Assert.Equal(3, await context.ReadMaxSchemaVersionAsync());
+  }
+
+  // Extend the existing TestContext from SqliteDatabaseInitializerTests; these helpers execute real SQLite operations.
+  public async Task CreateV2DatabaseAsync()
+  {
+      await CreateV1DatabaseAsync();
+      await CreateInitializer().InitializeAsync();
+  }
+
+  public async Task InsertRootAsync(string name)
+  {
+      await using var connection = CreateConnection();
+      await connection.OpenAsync();
+      await using var command = connection.CreateCommand();
+      command.CommandText = "INSERT INTO device_groups(id, name, parent_id, sort, enabled) VALUES ($id, $name, NULL, 0, 1);";
+      command.Parameters.Add(new SqliteParameter("$id", Guid.NewGuid().ToString("N")));
+      command.Parameters.Add(new SqliteParameter("$name", name));
+      await command.ExecuteNonQueryAsync();
+  }
+
+  public async Task<string?> ReadGroupKindAsync(string name)
+  {
+      await using var connection = CreateConnection();
+      await connection.OpenAsync();
+      await using var command = connection.CreateCommand();
+      command.CommandText = "SELECT group_kind FROM device_groups WHERE name = $name ORDER BY rowid DESC LIMIT 1;";
+      command.Parameters.Add(new SqliteParameter("$name", name));
+      var value = await command.ExecuteScalarAsync();
+      return value is null || Convert.IsDBNull(value) ? null : (string)value;
+  }
+
+  public async Task<int> ReadMaxSchemaVersionAsync()
+  {
+      await using var connection = CreateConnection();
+      await connection.OpenAsync();
+      await using var command = connection.CreateCommand();
+      command.CommandText = "SELECT MAX(version) FROM schema_migrations;";
+      return Convert.ToInt32(await command.ExecuteScalarAsync());
   }
   ```
 
-  The test fixture uses an in-memory SQLite connection and a `SqliteTestDatabase.CreateV2Async()` helper that creates only the historical V2 schema; it does not change production migration code.
+  Extend the existing `TestContext`/`CreateV1DatabaseAsync` pattern with `CreateV2DatabaseAsync`, which upgrades that real fixture to V2 before inserting the test Roots; do not create a separate empty fixture.
 - [ ] Step 2: Run RED.
 
   ```powershell
@@ -437,34 +462,42 @@ Execution steps:
   [Fact]
   public async Task CreateRootWithoutKind_ReturnsValidationFailure()
   {
-      var service = await CatalogServiceFixture.CreateAsync();
+      var fake = new FakeCentralCatalogRepository();
+      var service = CreateService(fake);
 
-      var result = await service.CreateGroupAsync(
-          new CreateGroupRequest(Guid.NewGuid(), "Root", null, 0, true, null));
+      var result = await InvokeAsync(
+          service,
+          "CreateGroupAsync",
+          new CreateGroupRequest(Guid.NewGuid(), "Root", null, 0, true, null),
+          CancellationToken.None);
 
-      Assert.Equal("CATALOG_VALIDATION_FAILED", result.Code);
+      AssertError(result, "CATALOG_VALIDATION_FAILED", 400);
   }
 
   [Fact]
   public async Task CreateDeviceAgainstRoot_ReturnsValidationFailure()
   {
-      var fixture = await CatalogServiceFixture.CreateWithRootAsync(MonitorGroupType.Chute);
+      var rootId = Guid.NewGuid();
+      var fake = new FakeCentralCatalogRepository
+      {
+          Groups =
+          {
+              [rootId] = new DeviceGroupDto(rootId, "Root", null, 0, true, MonitorGroupType.Chute, 1)
+          }
+      };
+      var service = CreateService(fake);
 
-      var result = await fixture.Service.CreateDeviceAsync(
-          CatalogServiceFixture.ValidDeviceRequest(fixture.RootId));
+      var result = await InvokeAsync(
+          service,
+          "CreateDeviceAsync",
+          ValidCreateDeviceRequest(rootId),
+          CancellationToken.None);
 
-      Assert.Equal("CATALOG_VALIDATION_FAILED", result.Code);
+      AssertError(result, "CATALOG_VALIDATION_FAILED", 400);
   }
 
-  private sealed class CatalogServiceFixture
-  {
-      public CatalogApplicationService Service { get; private init; } = null!;
-      public Guid RootId { get; private init; }
-
-      public static Task<CatalogApplicationService> CreateAsync() => throw new NotSupportedException();
-      public static Task<CatalogServiceFixture> CreateWithRootAsync(MonitorGroupType kind) => throw new NotSupportedException();
-      public static CreateDeviceRequest ValidDeviceRequest(Guid groupId) => throw new NotSupportedException();
-  }
+  // Reuse CreateService, InvokeAsync, AssertError, ValidCreateDeviceRequest, and
+  // FakeCentralCatalogRepository already present in CatalogApplicationServiceTests.
   ```
 
   Add the same fixture pattern for Child-with-Kind, Child-to-Child, Root/Child conversion, Device-to-Root, and a valid Device-to-Child case.
@@ -734,13 +767,13 @@ Execution steps:
   [Fact]
   public async Task ConflictResponse_MapsCodeAndRevision()
   {
-      var handler = new RecordingHttpMessageHandler(HttpStatusCode.Conflict, "{\"code\":\"CATALOG_CONFLICT\",\"currentRevision\":7}");
+      var handler = new RecordingHttpMessageHandler(HttpStatusCode.Conflict, "{\"code\":\"GROUP_REVISION_CONFLICT\",\"currentRevision\":7}");
       var client = new CatalogApiClient(new HttpClient(handler));
 
       var error = await Assert.ThrowsAsync<CatalogApiException>(() =>
           client.UpdateGroupAsync(new Uri("https://server-b/"), Guid.NewGuid(), ValidUpdateRequest()));
 
-      Assert.Equal("CATALOG_CONFLICT", error.Code);
+      Assert.Equal("GROUP_REVISION_CONFLICT", error.Code);
       Assert.Equal(7, error.CurrentRevision);
       Assert.Equal(1, handler.RequestCount);
   }
@@ -896,7 +929,7 @@ public interface IUiDispatcher
 }
 ```
 
-`ClientCatalogCache` stores only a complete `CatalogSnapshotDto` or equivalent password-safe snapshot. It never stores Core `CameraDevice`, `Password`, or `PasswordCiphertext`. Replacement prepares and validates a complete snapshot, atomically swaps the reference, and publishes `Changed` through the dispatcher only when content differs. `GetGroups`, `GetDevices(Guid)`, and `GetDevice(Guid)` use Guid identity. The legacy adapter is restricted to `SingleCameraTest` and maps password to `HasPassword` inside the adapter without exposing it.
+`ClientCatalogCache` stores only a complete `CatalogSnapshotDto` or equivalent password-safe snapshot. It never stores Core `CameraDevice`, `Password`, or `PasswordCiphertext`. Replacement prepares and validates a complete snapshot before dispatch, then performs compare, authoritative reference swap, and `Changed` publication entirely inside `IUiDispatcher`; the background caller never publishes or swaps the authoritative snapshot. `ApplyPreparedSnapshotOnUiThread` performs no I/O, network, asynchronous work, or cancellation check. `GetGroups`, `GetDevices(Guid)`, and `GetDevice(Guid)` use Guid identity. The legacy adapter is restricted to `SingleCameraTest` and maps password to `HasPassword` inside the adapter without exposing it.
 
 Tests cover atomic replacement, no notification for identical snapshots, Guid lookup, dispatcher publication, reflection absence of sensitive DTO properties, and legacy `HasPassword` mapping.
 
@@ -921,6 +954,24 @@ Execution steps:
   }
 
   [Fact]
+  public async Task ChangedHandler_SeesSnapshotOnlyAfterDispatcherCommit()
+  {
+      var dispatcher = new CapturingUiDispatcher();
+      var initial = EmptySnapshot();
+      var next = SnapshotWithOneGroup();
+      var cache = new ClientCatalogCache(initial, dispatcher);
+      CatalogSnapshotDto? observed = null;
+      cache.Changed += (_, _) => observed = cache.Snapshot;
+
+      await cache.ReplaceAsync(next);
+
+      Assert.Same(initial, cache.Snapshot);
+      dispatcher.RunPending();
+      Assert.Same(next, cache.Snapshot);
+      Assert.Same(next, observed);
+  }
+
+  [Fact]
   public async Task CacheType_DoesNotExposePasswordProperties()
   {
       var names = typeof(ClientCatalogCache).GetProperties()
@@ -941,6 +992,20 @@ Execution steps:
           return Task.CompletedTask;
       }
   }
+
+  private sealed class CapturingUiDispatcher : IUiDispatcher
+  {
+      private Action? pending;
+      public Task InvokeAsync(Action action, CancellationToken cancellationToken = default)
+      {
+          pending = action;
+          return Task.CompletedTask;
+      }
+      public void RunPending() => (pending ?? throw new InvalidOperationException()).Invoke();
+  }
+
+  private static CatalogSnapshotDto SnapshotWithOneGroup() =>
+      new([new DeviceGroupDto(Guid.NewGuid(), "Root", null, 0, true, MonitorGroupType.Chute, 1)], []);
   ```
 
   Add a Guid lookup test and a legacy-adapter test proving a non-empty local password becomes only `HasPassword = true` in the read model.
@@ -965,23 +1030,30 @@ Execution steps:
           this.dispatcher = dispatcher;
       }
 
-      public CatalogSnapshotDto Snapshot => Volatile.Read(ref snapshot);
+      public CatalogSnapshotDto Snapshot => snapshot;
       public event EventHandler? Changed;
 
-      public async Task ReplaceAsync(CatalogSnapshotDto next, CancellationToken cancellationToken = default)
+      public Task ReplaceAsync(CatalogSnapshotDto next, CancellationToken cancellationToken = default) =>
+          dispatcher.InvokeAsync(() => ApplyPreparedSnapshotOnUiThread(next), cancellationToken);
+
+      internal bool ApplyPreparedSnapshotOnUiThread(CatalogSnapshotDto next)
       {
-          if (Snapshot.Equals(next)) return;
-          Volatile.Write(ref snapshot, next);
-          await dispatcher.InvokeAsync(() => Changed?.Invoke(this, EventArgs.Empty), cancellationToken).ConfigureAwait(false);
+          if (SnapshotsEqual(snapshot, next)) return false;
+          snapshot = next;
+          Changed?.Invoke(this, EventArgs.Empty);
+          return true;
       }
 
       public IReadOnlyList<DeviceGroupDto> GetGroups() => Snapshot.Groups;
       public IReadOnlyList<CameraDeviceDto> GetDevices(Guid groupId) => Snapshot.Devices.Where(device => device.GroupId == groupId).ToArray();
       public CameraDeviceDto? GetDevice(Guid deviceId) => Snapshot.Devices.SingleOrDefault(device => device.Id == deviceId);
+
+      private static bool SnapshotsEqual(CatalogSnapshotDto left, CatalogSnapshotDto right) =>
+          left.Groups.SequenceEqual(right.Groups) && left.Devices.SequenceEqual(right.Devices);
   }
   ```
 
-  Compare complete DTO snapshots by value, publish after the atomic reference swap, and keep legacy password mapping inside the adapter.
+  Compare complete DTO snapshots by value, perform the compare/swap/publication in the dispatcher action, and keep legacy password mapping inside the adapter.
 - [ ] Step 4: Run focused GREEN.
 
   ```powershell
@@ -1024,7 +1096,7 @@ Interfaces:
 
 Consumes:
 
-- `IClientSettingsStore`, `CatalogApiClient`, `ClientCatalogCache`, `IUiDispatcher`, `IClientConnectionClock`, and `Func<bool> hasUnsavedDraft`.
+- `IClientSettingsStore`, `CatalogApiClient` through the one internal `ICatalogConnectionClient` test seam, `ClientCatalogCache`, `IUiDispatcher`, `IClientConnectionClock`, and `Func<bool> hasUnsavedDraft`.
 - `ClientSettings IClientSettingsStore.Load()` and `Task IClientSettingsStore.SaveAsync(ClientSettings settings, CancellationToken cancellationToken = default)`.
 - `Task CatalogApiClient.CheckReadyAsync(Uri baseUri, CancellationToken cancellationToken = default)` and `Task<CatalogSnapshotDto> CatalogApiClient.GetCatalogAsync(Uri baseUri, CancellationToken cancellationToken = default)`.
 - `CatalogSnapshotDto ClientCatalogCache.Snapshot` and `Task ClientCatalogCache.ReplaceAsync(CatalogSnapshotDto snapshot, CancellationToken cancellationToken = default)`.
@@ -1033,7 +1105,8 @@ Produces:
 
 - `ServerConnectionState` values `Unconfigured`, `Connecting`, `Connected`, and `Unavailable`.
 - `ServerConnectionStatus(Uri? BaseUri, ServerConnectionState State, DateTimeOffset? LastSuccessfulSyncUtc, bool IsStale)`.
-- `ServerConnectionCoordinator.Status`, `StatusChanged`, `RunAsync(CancellationToken)`, `RefreshNowAsync(CancellationToken)`, `ProbeAsync(Uri, CancellationToken)`, and `SwitchServerAsync(Uri, Func<bool>, CancellationToken)`.
+- `ICatalogConnectionClient` with `Task CheckReadyAsync(Uri baseUri, CancellationToken cancellationToken = default)` and `Task<CatalogSnapshotDto> GetCatalogAsync(Uri baseUri, CancellationToken cancellationToken = default)`; production `CatalogApiClient` implements it and tests may provide one fake.
+- `ServerConnectionCoordinator(IClientSettingsStore settingsStore, ICatalogConnectionClient apiClient, ClientCatalogCache cache, IUiDispatcher uiDispatcher, IClientConnectionClock clock)` plus `Status`, `StatusChanged`, `RunAsync(CancellationToken)`, `RefreshNowAsync(CancellationToken)`, `ProbeAsync(Uri, CancellationToken)`, and `SwitchServerAsync(Uri, Func<bool>, CancellationToken)`.
 
 States are `Unconfigured`, `Connecting`, `Connected`, and `Unavailable`. Status is:
 
@@ -1064,7 +1137,7 @@ Use one process loop, a `SemaphoreSlim` single-flight refresh gate, and shutdown
 
 Switching probes B with readiness and Catalog GET without changing A. Probe and Draft checks may honor the caller cancellation token. Immediately before durable settings persistence, call `cancellationToken.ThrowIfCancellationRequested()`. The successful atomic settings write of B is the Server switch commit point. After that point, do not accept the caller token: use `CancellationToken.None` for the Dispatcher commit, perform no network request, no additional disk write, and no new business validation. The final commit only sets Configured BaseUri B, ClientCatalogCache snapshot B, `Connected`, `LastSuccessfulSyncUtc = clock.UtcNow`, and `IsStale = false`. A settings-save failure before the commit point leaves A BaseUri, cache, and state unchanged. Once B is accepted, later B failure reconnects to B and never silently returns to A.
 
-Deterministic tests cover no configuration, first connect, stale mode, reconnect, retry schedule, jitter, periodic refresh, single-flight behavior, failed B probe, settings failure, and Draft blocking.
+Deterministic tests cover no configuration, first connect, stale mode, reconnect, retry schedule, jitter, periodic refresh, single-flight behavior, failed B probe, settings failure, and Draft blocking. A successful-switch test runs the cache `Changed` handler and asserts that it observes the committed Server B `BaseUri` and `Connected` status, never disk B with memory A.
 
 Commit: `feat: add central server connection coordinator`
 
@@ -1099,37 +1172,106 @@ Execution steps:
   }
 
   [Fact]
+  public async Task ChangedHandler_SeesServerBStateDuringSuccessfulSwitch()
+  {
+      var fixture = await ConnectionFixture.ConnectedToAsync("https://server-a");
+      fixture.Api.Snapshot = new CatalogSnapshotDto(
+          [new DeviceGroupDto(Guid.NewGuid(), "Root B", null, 0, true, MonitorGroupType.Chute, 1)], []);
+      ServerConnectionStatus? observedStatus = null;
+      fixture.Cache.Changed += (_, _) => observedStatus = fixture.Coordinator.Status;
+
+      await fixture.Coordinator.SwitchServerAsync(new Uri("https://server-b"), () => false);
+
+      Assert.Equal(new Uri("https://server-b"), observedStatus!.BaseUri);
+      Assert.Equal(ServerConnectionState.Connected, observedStatus.State);
+  }
+
+  [Fact]
   public async Task RetryDelay_UsesBoundedDeterministicJitter()
   {
-      var clock = new FakeConnectionClock(0.5);
-      Assert.Equal(TimeSpan.FromSeconds(3.5), clock.Jitter(TimeSpan.FromSeconds(5)));
-      Assert.Equal(TimeSpan.FromSeconds(21), clock.Jitter(TimeSpan.FromSeconds(30)));
+      var zero = new FakeConnectionClock(0.0);
+      Assert.Equal(TimeSpan.FromSeconds(4), zero.Jitter(TimeSpan.FromSeconds(5)));
+      Assert.Equal(TimeSpan.FromSeconds(24), zero.Jitter(TimeSpan.FromSeconds(30)));
+
+      var half = new FakeConnectionClock(0.5);
+      Assert.Equal(TimeSpan.FromSeconds(5), half.Jitter(TimeSpan.FromSeconds(5)));
+      Assert.Equal(TimeSpan.FromSeconds(30), half.Jitter(TimeSpan.FromSeconds(30)));
+
+      var nearOne = new FakeConnectionClock(0.999999);
+      Assert.True(nearOne.Jitter(TimeSpan.FromSeconds(5)) < TimeSpan.FromSeconds(6));
+      Assert.True(nearOne.Jitter(TimeSpan.FromSeconds(30)) < TimeSpan.FromSeconds(36));
   }
 
   private sealed class ConnectionFixture
   {
-      public ServerConnectionCoordinator Coordinator { get; private init; } = null!;
-      public FakeCatalogApi Api { get; } = new();
-      public FakeClientSettingsStore Settings { get; } = new();
-      public static Task<ConnectionFixture> ConnectedToAsync(string baseUrl) => throw new NotSupportedException();
+      private ConnectionFixture()
+      {
+          Api = new FakeCatalogApi();
+          Settings = new FakeClientSettingsStore();
+          Clock = new FakeConnectionClock(0.5);
+          Cache = new ClientCatalogCache(new CatalogSnapshotDto([], []), new InlineDispatcher());
+          Coordinator = new ServerConnectionCoordinator(Settings, Api, Cache, new InlineDispatcher(), Clock);
+      }
+
+      public ServerConnectionCoordinator Coordinator { get; }
+      public FakeCatalogApi Api { get; }
+      public FakeClientSettingsStore Settings { get; }
+      public FakeConnectionClock Clock { get; }
+      public ClientCatalogCache Cache { get; }
+
+      public static async Task<ConnectionFixture> ConnectedToAsync(string baseUrl)
+      {
+          var fixture = new ConnectionFixture();
+          await fixture.Coordinator.SwitchServerAsync(new Uri(baseUrl), () => false);
+          return fixture;
+      }
   }
 
-  private sealed class FakeCatalogApi
+  private sealed class FakeCatalogApi : ICatalogConnectionClient
   {
       public bool ProbeResult { get; set; } = true;
+      public CatalogSnapshotDto Snapshot { get; set; } = new([], []);
+
+      public Task CheckReadyAsync(Uri baseUri, CancellationToken cancellationToken = default) =>
+          ProbeResult
+              ? Task.CompletedTask
+              : Task.FromException(new CatalogApiException("CATALOG_UNAVAILABLE"));
+
+      public Task<CatalogSnapshotDto> GetCatalogAsync(Uri baseUri, CancellationToken cancellationToken = default) =>
+          ProbeResult
+              ? Task.FromResult(Snapshot)
+              : Task.FromException<CatalogSnapshotDto>(new CatalogApiException("CATALOG_UNAVAILABLE"));
   }
 
-  private sealed class FakeClientSettingsStore
+  private sealed class FakeClientSettingsStore : IClientSettingsStore
   {
       public int SaveCount { get; private set; }
       public Task SaveResult { get; set; } = Task.CompletedTask;
+      public ClientSettings Load() => ClientSettings.Empty;
+      public async Task SaveAsync(ClientSettings settings, CancellationToken cancellationToken = default)
+      {
+          SaveCount++;
+          await SaveResult.ConfigureAwait(false);
+      }
   }
 
-  private sealed class FakeConnectionClock
+  private sealed class FakeConnectionClock : IClientConnectionClock
   {
       private readonly double jitterUnit;
       public FakeConnectionClock(double jitterUnit) => this.jitterUnit = jitterUnit;
+      public DateTimeOffset UtcNow => DateTimeOffset.Parse("2026-08-31T00:00:00Z");
+      public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) => Task.CompletedTask;
+      public double NextJitterUnit() => jitterUnit;
       public TimeSpan Jitter(TimeSpan baseDelay) => baseDelay * (0.8 + 0.4 * jitterUnit);
+  }
+
+  private sealed class InlineDispatcher : IUiDispatcher
+  {
+      public Task InvokeAsync(Action action, CancellationToken cancellationToken = default)
+      {
+          action();
+          return Task.CompletedTask;
+      }
   }
   ```
 
@@ -1148,9 +1290,11 @@ Execution steps:
   {
       private readonly SemaphoreSlim refreshGate = new(1, 1);
       private readonly CancellationTokenSource shutdown = new();
-      private readonly CatalogApiClient apiClient;
+      private readonly ICatalogConnectionClient apiClient;
       private readonly ClientCatalogCache cache;
       private readonly IClientSettingsStore settingsStore;
+      private readonly IUiDispatcher uiDispatcher;
+      private readonly IClientConnectionClock clock;
       private Uri? configuredBaseUri;
 
       public ServerConnectionStatus Status { get; private set; } =
@@ -1158,7 +1302,22 @@ Execution steps:
 
       public Task RunAsync(CancellationToken cancellationToken) => RunLoopAsync(cancellationToken);
       public Task ProbeAsync(Uri baseUri, CancellationToken cancellationToken = default) => ProbeReadyAndCatalogAsync(baseUri, cancellationToken);
-      public Task SwitchServerAsync(Uri candidate, Func<bool> hasUnsavedDraft, CancellationToken cancellationToken = default) => SwitchCoreAsync(candidate, hasUnsavedDraft, cancellationToken);
+
+      public async Task SwitchServerAsync(Uri candidate, Func<bool> hasUnsavedDraft, CancellationToken cancellationToken = default)
+      {
+          var preparedSnapshot = await ProbeAndPrepareAsync(candidate, cancellationToken).ConfigureAwait(false);
+          if (hasUnsavedDraft()) throw new InvalidOperationException("Unsaved Catalog edits block a Server switch.");
+          cancellationToken.ThrowIfCancellationRequested();
+          await settingsStore.SaveAsync(new ClientSettings(new ClientServerSettings(candidate.ToString())), cancellationToken).ConfigureAwait(false);
+
+          await uiDispatcher.InvokeAsync(() =>
+          {
+              configuredBaseUri = candidate;
+              Status = new ServerConnectionStatus(candidate, ServerConnectionState.Connected, clock.UtcNow, false);
+              StatusChanged?.Invoke(this, EventArgs.Empty);
+              cache.ApplyPreparedSnapshotOnUiThread(preparedSnapshot);
+          }, CancellationToken.None).ConfigureAwait(false);
+      }
 
       public async Task RefreshNowAsync(CancellationToken cancellationToken = default)
       {
@@ -1491,7 +1650,8 @@ Produces:
 
 - `IDeviceCatalogCommandService` with `CanWrite`, `AvailabilityChanged`, `CreateGroupAsync(CreateGroupRequest, CancellationToken)`, `UpdateGroupAsync(Guid, UpdateGroupRequest, CancellationToken)`, `DeleteGroupAsync(Guid, long, CancellationToken)`, `CreateDeviceAsync(CreateDeviceRequest, CancellationToken)`, `UpdateDeviceAsync(Guid, UpdateDeviceRequest, CancellationToken)`, and `DeleteDeviceAsync(Guid, long, CancellationToken)`.
 - `CatalogMutationUncertainException(string operation, Guid entityId, Exception? innerException = null)` with `Operation` and `EntityId`.
-- DTO-based Device Management Draft commands that retain password safety and Revision conflict state.
+- `DeviceManagementViewModel(IDeviceCatalogReadModel catalog, IDeviceCatalogCommandService commands)` with `DeviceEditDraftViewModel EditDraft`, `IAsyncRelayCommand SaveDeviceCommand`, `bool HasUnsavedDraft`, `string? OperationErrorCode`, `bool HasOperationError`, and `bool LastOperationSucceeded`.
+- `DeviceEditDraftViewModel` as pure local draft state; it does not hold `IDeviceCatalogCommandService` and does not expose `SaveAsync`.
 
 The command contract is:
 
@@ -1536,7 +1696,7 @@ The constructor message is fixed safe text and never includes a password, reques
 
 Remote commands use only the coordinator's current Connected BaseUri, issue one write, and then run a full refresh. They do not blindly retry. After an ambiguous Create/Delete timeout, a refresh checks known identity presence/absence. An ambiguous Update, especially one containing `NewPassword`, raises a safe uncertainty exception and retains the Draft because GET cannot prove a password write.
 
-The legacy command adapter is async-shaped but only supports local `SingleCameraTest`. Device Management receives `IDeviceCatalogReadModel` and `IDeviceCatalogCommandService`, uses DTO collections and `AsyncRelayCommand`, and exposes `IsSaving`, `IsServerAvailable`, `OperationError`, and `HasUnsavedDraft`. Add Child remains UI-only until Save. Cancel performs zero writes. Device edits preserve existing channel IDs and unedited channels; new IDs are generated before POST. Blank password maps to `NewPassword = null`; non-empty replaces it; old password is never shown. Offline and 409 states disable writes or preserve the Draft as appropriate.
+The legacy command adapter is async-shaped but only supports local `SingleCameraTest`. Device Management receives `IDeviceCatalogReadModel` and `IDeviceCatalogCommandService`, uses DTO collections and `AsyncRelayCommand`, and exposes `IsSaving`, `IsServerAvailable`, `OperationError`, `HasUnsavedDraft`, and `SaveDeviceCommand`. `DeviceEditDraftViewModel` remains pure local state. Add Child remains UI-only until Save. Cancel performs zero writes. Device edits preserve existing channel IDs and unedited channels; new IDs are generated before POST. Blank password maps to `NewPassword = null`; non-empty replaces it; old password is never shown. Offline and 409 states disable writes or preserve the Draft as appropriate.
 
 Tests cover one-write behavior, timeout identity checks, uncertainty for password updates, Draft retention, 409 handling, and offline command availability.
 
@@ -1551,9 +1711,11 @@ Execution steps:
   public async Task BlankPassword_MapsToNoPasswordChange()
   {
       var commands = new FakeCatalogCommandService();
-      var draft = new DeviceEditDraftViewModel(commands) { Password = "" };
+      var readModel = new DeviceReadModelStub(ExistingDevice());
+      var viewModel = new DeviceManagementViewModel(readModel, commands);
+      viewModel.EditDraft.Password = "";
 
-      await draft.SaveAsync();
+      await viewModel.SaveDeviceCommand.ExecuteAsync(null);
 
       Assert.Null(commands.LastUpdate!.NewPassword);
   }
@@ -1561,24 +1723,46 @@ Execution steps:
   [Fact]
   public async Task Conflict_RetainsDraft()
   {
-      var commands = new FakeCatalogCommandService { NextFailure = new CatalogApiException("CATALOG_CONFLICT", 9) };
-      var draft = new DeviceEditDraftViewModel(commands) { Name = "Unsubmitted" };
+      var commands = new FakeCatalogCommandService { NextFailure = new CatalogApiException("DEVICE_REVISION_CONFLICT", 9) };
+      var readModel = new DeviceReadModelStub(ExistingDevice());
+      var viewModel = new DeviceManagementViewModel(readModel, commands);
+      viewModel.EditDraft.Name = "Unsubmitted";
 
-      await Assert.ThrowsAsync<CatalogApiException>(() => draft.SaveAsync());
+      await viewModel.SaveDeviceCommand.ExecuteAsync(null);
 
-      Assert.True(draft.HasUnsavedDraft);
-      Assert.Equal("Unsubmitted", draft.Name);
+      Assert.True(viewModel.HasUnsavedDraft);
+      Assert.Equal("Unsubmitted", viewModel.EditDraft.Name);
+      Assert.Equal("DEVICE_REVISION_CONFLICT", viewModel.OperationErrorCode);
+      Assert.False(viewModel.LastOperationSucceeded);
   }
 
   [Fact]
-  public async Task AmbiguousUpdate_ThrowsSafeUncertaintyAndRetainsDraft()
+  public async Task AmbiguousUpdate_SetsSafeErrorAndRetainsDraft()
   {
       var commands = new FakeCatalogCommandService { NextFailure = new CatalogMutationUncertainException("update-device", Guid.NewGuid()) };
-      var draft = new DeviceEditDraftViewModel(commands) { Password = "new-secret" };
+      var readModel = new DeviceReadModelStub(ExistingDevice());
+      var viewModel = new DeviceManagementViewModel(readModel, commands);
+      viewModel.EditDraft.Password = "new-secret";
 
-      await Assert.ThrowsAsync<CatalogMutationUncertainException>(() => draft.SaveAsync());
+      await viewModel.SaveDeviceCommand.ExecuteAsync(null);
 
-      Assert.True(draft.HasUnsavedDraft);
+      Assert.True(viewModel.HasUnsavedDraft);
+      Assert.True(viewModel.HasOperationError);
+      Assert.False(viewModel.LastOperationSucceeded);
+  }
+
+  private static CameraDeviceDto ExistingDevice() =>
+      new(Guid.NewGuid(), Guid.NewGuid(), "Camera", "192.0.2.10", 8000, 554, "user", true,
+          "Maker", "Model", TransportMode.Tcp, true, "remark", 8, []);
+
+  private sealed class DeviceReadModelStub : IDeviceCatalogReadModel
+  {
+      private readonly CameraDeviceDto device;
+      public DeviceReadModelStub(CameraDeviceDto device) => this.device = device;
+      public event EventHandler? Changed;
+      public IReadOnlyList<DeviceGroupDto> GetGroups() => [];
+      public IReadOnlyList<CameraDeviceDto> GetDevices(Guid groupId) => [device];
+      public CameraDeviceDto? GetDevice(Guid deviceId) => device.Id == deviceId ? device : null;
   }
 
   private sealed class FakeCatalogCommandService : IDeviceCatalogCommandService
@@ -1587,16 +1771,16 @@ Execution steps:
       public Exception? NextFailure { get; init; }
       public bool CanWrite => true;
       public event EventHandler? AvailabilityChanged;
-      public Task<DeviceGroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-      public Task<DeviceGroupDto> UpdateGroupAsync(Guid id, UpdateGroupRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-      public Task DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-      public Task<CameraDeviceDto> CreateDeviceAsync(CreateDeviceRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+      public Task<DeviceGroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken cancellationToken = default) => Task.FromResult<DeviceGroupDto>(null!);
+      public Task<DeviceGroupDto> UpdateGroupAsync(Guid id, UpdateGroupRequest request, CancellationToken cancellationToken = default) => Task.FromResult<DeviceGroupDto>(null!);
+      public Task DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default) => Task.CompletedTask;
+      public Task<CameraDeviceDto> CreateDeviceAsync(CreateDeviceRequest request, CancellationToken cancellationToken = default) => Task.FromResult<CameraDeviceDto>(null!);
       public Task<CameraDeviceDto> UpdateDeviceAsync(Guid id, UpdateDeviceRequest request, CancellationToken cancellationToken = default)
       {
           LastUpdate = request;
           return NextFailure is null ? Task.FromResult<CameraDeviceDto>(null!) : Task.FromException<CameraDeviceDto>(NextFailure);
       }
-      public Task DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+      public Task DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default) => Task.CompletedTask;
   }
   ```
 
@@ -1682,7 +1866,7 @@ Interfaces:
 
 Consumes:
 
-- `IDeviceCatalogReadModel`, `IDeviceCatalogCommandService`, `MonitorGroupType`, and the existing Device Management tree bindings.
+- `IDeviceCatalogReadModel`, `IDeviceCatalogCommandService`, `MonitorGroupType`, and the existing Device Management tree bindings. Construct `DeviceManagementViewModel` with `(IDeviceCatalogReadModel catalog, IDeviceCatalogCommandService commands)`; root editing remains a ViewModel concern while reads and writes use the two explicit boundaries.
 - `IReadOnlyList<DeviceGroupDto> IDeviceCatalogReadModel.GetGroups()` and `Task<DeviceGroupDto> IDeviceCatalogCommandService.CreateGroupAsync(CreateGroupRequest request, CancellationToken cancellationToken = default)`.
 - `Task<DeviceGroupDto> IDeviceCatalogCommandService.UpdateGroupAsync(Guid id, UpdateGroupRequest request, CancellationToken cancellationToken = default)` and `Task IDeviceCatalogCommandService.DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default)`.
 
@@ -1711,28 +1895,28 @@ Execution steps:
   [Fact]
   public async Task CancelRootDraft_PerformsZeroWrites()
   {
-      var commands = new RecordingCatalogCommandService();
-      var viewModel = new DeviceManagementViewModel(commands);
+      var fixture = DeviceManagementViewModelFixture.Empty();
+      var viewModel = fixture.ViewModel;
 
       viewModel.BeginAddRootCommand.Execute(null);
       viewModel.RootEditName = "未提交分类";
       viewModel.CancelRootEditCommand.Execute(null);
 
-      Assert.Equal(0, commands.WriteCount);
+      Assert.Equal(0, fixture.Commands.WriteCount);
   }
 
   [Fact]
   public async Task LegacyRootKind_MayBeAssignedOnlyOnce()
   {
-      var commands = new RecordingCatalogCommandService();
-      var viewModel = DeviceManagementViewModelFixture.WithLegacyRoot(commands, Guid.NewGuid());
+      var fixture = DeviceManagementViewModelFixture.WithLegacyRoot(Guid.NewGuid());
+      var viewModel = fixture.ViewModel;
 
-      viewModel.BeginEditRootCommand.Execute(viewModel.EditingRootId);
+      viewModel.BeginEditRootCommand.Execute(fixture.RootId);
       viewModel.RootEditKind = MonitorGroupType.Chute;
       await viewModel.SaveRootCommand.ExecuteAsync(null);
 
-      Assert.Equal(1, commands.WriteCount);
-      Assert.Equal(MonitorGroupType.Chute, commands.LastGroupUpdate!.Kind);
+      Assert.Equal(1, fixture.Commands.WriteCount);
+      Assert.Equal(MonitorGroupType.Chute, fixture.Commands.LastGroupUpdate!.Kind);
   }
 
   private sealed class RecordingCatalogCommandService : IDeviceCatalogCommandService
@@ -1744,14 +1928,52 @@ Execution steps:
       public Task<DeviceGroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken cancellationToken = default) { WriteCount++; return Task.FromResult<DeviceGroupDto>(null!); }
       public Task<DeviceGroupDto> UpdateGroupAsync(Guid id, UpdateGroupRequest request, CancellationToken cancellationToken = default) { WriteCount++; LastGroupUpdate = request; return Task.FromResult<DeviceGroupDto>(null!); }
       public Task DeleteGroupAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default) { WriteCount++; return Task.CompletedTask; }
-      public Task<CameraDeviceDto> CreateDeviceAsync(CreateDeviceRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-      public Task<CameraDeviceDto> UpdateDeviceAsync(Guid id, UpdateDeviceRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-      public Task DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+      public Task<CameraDeviceDto> CreateDeviceAsync(CreateDeviceRequest request, CancellationToken cancellationToken = default) { return Task.FromResult<CameraDeviceDto>(null!); }
+      public Task<CameraDeviceDto> UpdateDeviceAsync(Guid id, UpdateDeviceRequest request, CancellationToken cancellationToken = default) { return Task.FromResult<CameraDeviceDto>(null!); }
+      public Task DeleteDeviceAsync(Guid id, long expectedRevision, CancellationToken cancellationToken = default) { return Task.CompletedTask; }
   }
 
-  private static class DeviceManagementViewModelFixture
+  private sealed class DeviceManagementViewModelFixture
   {
-      public static DeviceManagementViewModel WithLegacyRoot(RecordingCatalogCommandService commands, Guid rootId) => throw new NotSupportedException();
+      private DeviceManagementViewModelFixture(DeviceManagementViewModel viewModel, RecordingCatalogCommandService commands, Guid rootId)
+      {
+          ViewModel = viewModel;
+          Commands = commands;
+          RootId = rootId;
+      }
+
+      public DeviceManagementViewModel ViewModel { get; }
+      public RecordingCatalogCommandService Commands { get; }
+      public Guid RootId { get; }
+
+      public static DeviceManagementViewModelFixture Empty()
+      {
+          var commands = new RecordingCatalogCommandService();
+          var readModel = new DeviceManagementReadModelStub(Array.Empty<DeviceGroupDto>());
+          return new(new DeviceManagementViewModel(readModel, commands), commands, Guid.Empty);
+      }
+
+      public static DeviceManagementViewModelFixture WithLegacyRoot(Guid rootId)
+      {
+          var commands = new RecordingCatalogCommandService();
+          var readModel = new DeviceManagementReadModelStub(new[]
+          {
+              new DeviceGroupDto(rootId, "Legacy Root", null, 0, true, null, 1)
+          });
+          return new(new DeviceManagementViewModel(readModel, commands), commands, rootId);
+      }
+  }
+
+  private sealed class DeviceManagementReadModelStub : IDeviceCatalogReadModel
+  {
+      private readonly IReadOnlyList<DeviceGroupDto> groups;
+
+      public DeviceManagementReadModelStub(IReadOnlyList<DeviceGroupDto> groups) => this.groups = groups;
+
+      public event EventHandler? Changed;
+      public IReadOnlyList<DeviceGroupDto> GetGroups() => groups;
+      public IReadOnlyList<CameraDeviceDto> GetDevices(Guid groupId) => Array.Empty<CameraDeviceDto>();
+      public CameraDeviceDto? GetDevice(Guid id) => null;
   }
   ```
 
