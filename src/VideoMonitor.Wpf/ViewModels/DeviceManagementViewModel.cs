@@ -2,8 +2,10 @@ using System.Collections.ObjectModel;
 using System.Net;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Core.Services;
+using VideoMonitor.Wpf.Catalog;
 
 namespace VideoMonitor.Wpf.ViewModels;
 
@@ -24,13 +26,29 @@ public sealed class DeviceManagementViewModel : ObservableObject
     private bool isEditPanelOpen;
     private bool isEditing;
     private string validationMessage = string.Empty;
+    private readonly IDeviceCatalogReadModel? readModel;
+    private readonly IDeviceCatalogCommandService? commandService;
+    private readonly bool centralMode;
+    private CameraDeviceDto? editingCatalogDevice;
+    private bool suppressDraftTracking;
+    private bool isSaving;
+    private bool isServerAvailable;
+    private bool hasUnsavedDraft;
+    private string? operationErrorCode;
+    private string operationError = string.Empty;
+    private bool lastOperationSucceeded;
 
     public DeviceManagementViewModel(IDeviceCatalog catalog)
     {
         this.catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
+        readModel = new LegacyDeviceCatalogReadModel(this.catalog);
+        commandService = new LegacyDeviceCatalogCommandService(this.catalog);
         Groups = [];
         Devices = [];
         GroupSections = [];
+        CatalogGroupSections = [];
+        CatalogGroups = [];
+        CatalogDevices = [];
         EditDraft = new DeviceEditDraftViewModel();
 
         SelectGroupCommand = new RelayCommand<DeviceGroup>(SelectGroup);
@@ -44,18 +62,61 @@ public sealed class DeviceManagementViewModel : ObservableObject
         AddDeviceCommand = new RelayCommand(AddDevice);
         EditDeviceCommand = new RelayCommand<CameraDevice>(EditDevice);
         DeleteDeviceCommand = new RelayCommand<CameraDevice>(DeleteDevice);
-        SaveDeviceCommand = new RelayCommand(SaveDevice);
+        SaveDeviceCommand = new AsyncRelayCommand(SaveDeviceAsync, CanSaveDevice);
         CancelEditCommand = new RelayCommand(CancelEdit);
 
         catalog.Changed += OnCatalogChanged;
+        EditDraft.PropertyChanged += OnEditDraftPropertyChanged;
         RefreshCatalogView();
+    }
+
+    public DeviceManagementViewModel(
+        IDeviceCatalogReadModel catalog,
+        IDeviceCatalogCommandService commands)
+    {
+        readModel = catalog ?? throw new ArgumentNullException(nameof(catalog));
+        commandService = commands ?? throw new ArgumentNullException(nameof(commands));
+        this.catalog = null!;
+        centralMode = true;
+        Groups = [];
+        Devices = [];
+        GroupSections = [];
+        CatalogGroupSections = [];
+        CatalogGroups = [];
+        CatalogDevices = [];
+        EditDraft = new DeviceEditDraftViewModel();
+
+        SelectGroupCommand = new RelayCommand<DeviceGroup>(SelectGroup);
+        BeginAddGroupCommand = new RelayCommand<DeviceGroup>(BeginAddGroup);
+        BeginRenameGroupCommand = new RelayCommand<DeviceGroup>(BeginRenameGroup);
+        CommitGroupEditCommand = new RelayCommand(CommitGroupEdit);
+        CancelGroupEditCommand = new RelayCommand(CancelGroupEdit);
+        DeleteGroupCommand = new RelayCommand<DeviceGroup>(DeleteGroup);
+        ConfirmDialogCommand = new RelayCommand(ConfirmDialog);
+        CancelDialogCommand = new RelayCommand(ClearDialog);
+        AddDeviceCommand = new RelayCommand(AddDevice);
+        EditDeviceCommand = new RelayCommand<CameraDevice>(EditDevice);
+        DeleteDeviceCommand = new RelayCommand<CameraDevice>(DeleteDevice);
+        SaveDeviceCommand = new AsyncRelayCommand(SaveDeviceAsync, CanSaveDevice);
+        CancelEditCommand = new RelayCommand(CancelEdit);
+
+        readModel.Changed += OnReadModelChanged;
+        commandService.AvailabilityChanged += OnCommandAvailabilityChanged;
+        EditDraft.PropertyChanged += OnEditDraftPropertyChanged;
+        RefreshCentralCatalogView();
     }
 
     public ObservableCollection<DeviceGroup> Groups { get; }
 
     public ObservableCollection<DeviceGroupTreeItemViewModel> GroupSections { get; }
 
+    public ObservableCollection<DeviceGroupTreeItemViewModel> CatalogGroupSections { get; }
+
     public ObservableCollection<CameraDevice> Devices { get; }
+
+    public ObservableCollection<DeviceGroupDto> CatalogGroups { get; }
+
+    public ObservableCollection<CameraDeviceDto> CatalogDevices { get; }
 
     public DeviceEditDraftViewModel EditDraft { get; }
 
@@ -63,6 +124,11 @@ public sealed class DeviceManagementViewModel : ObservableObject
         .Where(group => group.ParentId is not null && group.Enabled)
         .OrderBy(group => Groups.First(root => root.Id == group.ParentId).Sort)
         .ThenBy(group => group.Sort);
+
+    public IEnumerable<DeviceGroupDto> EditableCatalogGroups => CatalogGroups
+        .Where(group => group.ParentId is not null && group.Enabled)
+        .OrderBy(group => group.Sort)
+        .ThenBy(group => group.Id);
 
     public IReadOnlyList<StreamType> StreamTypes { get; } = Enum.GetValues<StreamType>();
 
@@ -94,9 +160,71 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
     public IRelayCommand<CameraDevice> DeleteDeviceCommand { get; }
 
-    public IRelayCommand SaveDeviceCommand { get; }
+    public IAsyncRelayCommand SaveDeviceCommand { get; }
 
     public IRelayCommand CancelEditCommand { get; }
+
+    public bool IsSaving
+    {
+        get => isSaving;
+        private set
+        {
+            if (SetProperty(ref isSaving, value))
+            {
+                ((AsyncRelayCommand)SaveDeviceCommand).NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool IsServerAvailable
+    {
+        get => isServerAvailable;
+        private set
+        {
+            if (SetProperty(ref isServerAvailable, value))
+            {
+                ((AsyncRelayCommand)SaveDeviceCommand).NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool HasUnsavedDraft
+    {
+        get => hasUnsavedDraft;
+        private set => SetProperty(ref hasUnsavedDraft, value);
+    }
+
+    public string? OperationErrorCode
+    {
+        get => operationErrorCode;
+        private set
+        {
+            if (SetProperty(ref operationErrorCode, value))
+            {
+                OnPropertyChanged(nameof(HasOperationError));
+            }
+        }
+    }
+
+    public string OperationError
+    {
+        get => operationError;
+        private set
+        {
+            if (SetProperty(ref operationError, value))
+            {
+                OnPropertyChanged(nameof(HasOperationError));
+            }
+        }
+    }
+
+    public bool HasOperationError => !string.IsNullOrEmpty(OperationErrorCode);
+
+    public bool LastOperationSucceeded
+    {
+        get => lastOperationSucceeded;
+        private set => SetProperty(ref lastOperationSucceeded, value);
+    }
 
     public DeviceGroup? SelectedGroup
     {
@@ -424,6 +552,331 @@ public sealed class DeviceManagementViewModel : ObservableObject
         OnPropertyChanged(nameof(EditorTitle));
     }
 
+    private bool CanSaveDevice() =>
+        !IsSaving && (!centralMode || IsServerAvailable);
+
+    private async Task SaveDeviceAsync()
+    {
+        if (!centralMode)
+        {
+            SaveDevice();
+            LastOperationSucceeded = true;
+            return;
+        }
+
+        OperationErrorCode = null;
+        OperationError = string.Empty;
+        LastOperationSucceeded = false;
+
+        if (!TryValidateCatalogDraft(out var groupId, out var sdkPort, out var rtspPort, out var channelNo))
+        {
+            return;
+        }
+
+        if (!IsServerAvailable || commandService is null)
+        {
+            SetOperationError("CATALOG_UNAVAILABLE", "Catalog API is unavailable.");
+            return;
+        }
+
+        IsSaving = true;
+        try
+        {
+            if (editingCatalogDevice is { } existing)
+            {
+                var request = BuildUpdateRequest(
+                    existing,
+                    groupId,
+                    sdkPort,
+                    rtspPort,
+                    channelNo);
+                var updated = await commandService.UpdateDeviceAsync(
+                        existing.Id,
+                        request)
+                    .ConfigureAwait(true);
+                editingCatalogDevice = updated;
+                RefreshCentralCatalogView();
+            }
+            else
+            {
+                var request = BuildCreateRequest(
+                    groupId,
+                    sdkPort,
+                    rtspPort,
+                    channelNo);
+                var created = await commandService.CreateDeviceAsync(request)
+                    .ConfigureAwait(true);
+                editingCatalogDevice = created;
+                RefreshCentralCatalogView();
+            }
+
+            HasUnsavedDraft = false;
+            LastOperationSucceeded = true;
+            CloseCentralEditor();
+        }
+        catch (CatalogMutationUncertainException exception)
+        {
+            SetOperationError("CATALOG_MUTATION_UNCERTAIN", exception.Message);
+        }
+        catch (CatalogApiException exception)
+        {
+            SetOperationError(exception.Code, exception.Code);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            SetOperationError("CATALOG_WRITE_FAILED", "Catalog write failed.");
+        }
+        finally
+        {
+            IsSaving = false;
+        }
+    }
+
+    private bool TryValidateCatalogDraft(
+        out Guid groupId,
+        out int sdkPort,
+        out int rtspPort,
+        out int channelNo)
+    {
+        groupId = Guid.Empty;
+        sdkPort = 0;
+        rtspPort = 0;
+        channelNo = 0;
+
+        if (string.IsNullOrWhiteSpace(EditDraft.Name))
+        {
+            ValidationMessage = "请输入设备名称。";
+            return false;
+        }
+
+        if (EditDraft.GroupId is not { } selectedGroupId || selectedGroupId == Guid.Empty)
+        {
+            ValidationMessage = "请选择所属分组。";
+            return false;
+        }
+
+        if (CatalogGroups.Count > 0
+            && CatalogGroups.All(group => group.Id != selectedGroupId))
+        {
+            ValidationMessage = "请选择所属分组。";
+            return false;
+        }
+
+        if (!IPAddress.TryParse(EditDraft.IpAddress.Trim(), out _))
+        {
+            ValidationMessage = "请输入有效的设备IP地址。";
+            return false;
+        }
+
+        if (!int.TryParse(EditDraft.SdkPort, out sdkPort) || sdkPort is < 1 or > 65535)
+        {
+            ValidationMessage = "SDK端口必须在1到65535之间。";
+            return false;
+        }
+
+        if (!int.TryParse(EditDraft.RtspPort, out rtspPort) || rtspPort is < 1 or > 65535)
+        {
+            ValidationMessage = "RTSP端口必须在1到65535之间。";
+            return false;
+        }
+
+        if (!int.TryParse(EditDraft.ChannelNo, out channelNo) || channelNo <= 0)
+        {
+            ValidationMessage = "通道号必须大于0。";
+            return false;
+        }
+
+        groupId = selectedGroupId;
+        ValidationMessage = string.Empty;
+        return true;
+    }
+
+    private UpdateDeviceRequest BuildUpdateRequest(
+        CameraDeviceDto source,
+        Guid groupId,
+        int sdkPort,
+        int rtspPort,
+        int channelNo)
+    {
+        var channels = source.Channels.Count == 0
+            ? [new CameraChannelInput(
+                Guid.NewGuid(),
+                channelNo,
+                GetChannelName(channelNo),
+                EditDraft.StreamType,
+                true)]
+            : source.Channels.Select((channel, index) => index == 0
+                ? new CameraChannelInput(
+                    channel.Id,
+                    channelNo,
+                    GetChannelName(channelNo),
+                    EditDraft.StreamType,
+                    channel.Enabled)
+                : new CameraChannelInput(
+                    channel.Id,
+                    channel.ChannelNo,
+                    channel.ChannelName,
+                    channel.StreamType,
+                    channel.Enabled)).ToArray();
+
+        return new UpdateDeviceRequest(
+            groupId,
+            EditDraft.Name.Trim(),
+            EditDraft.IpAddress.Trim(),
+            sdkPort,
+            rtspPort,
+            EditDraft.Username.Trim(),
+            EditDraft.Password.Length == 0 ? null : EditDraft.Password,
+            EditDraft.Manufacturer.Trim(),
+            EditDraft.Model.Trim(),
+            EditDraft.TransportMode,
+            true,
+            EditDraft.Remark.Trim(),
+            source.Revision,
+            channels);
+    }
+
+    private CreateDeviceRequest BuildCreateRequest(
+        Guid groupId,
+        int sdkPort,
+        int rtspPort,
+        int channelNo)
+    {
+        var deviceId = Guid.NewGuid();
+        return new CreateDeviceRequest(
+            deviceId,
+            groupId,
+            EditDraft.Name.Trim(),
+            EditDraft.IpAddress.Trim(),
+            sdkPort,
+            rtspPort,
+            EditDraft.Username.Trim(),
+            EditDraft.Password,
+            EditDraft.Manufacturer.Trim(),
+            EditDraft.Model.Trim(),
+            EditDraft.TransportMode,
+            true,
+            EditDraft.Remark.Trim(),
+            [new CameraChannelInput(
+                Guid.NewGuid(),
+                channelNo,
+                GetChannelName(channelNo),
+                EditDraft.StreamType,
+                true)]);
+    }
+
+    private string GetChannelName(int channelNo) =>
+        string.IsNullOrWhiteSpace(EditDraft.ChannelName)
+            ? $"通道{channelNo}"
+            : EditDraft.ChannelName.Trim();
+
+    private void SetOperationError(string code, string message)
+    {
+        OperationErrorCode = code;
+        OperationError = message;
+        HasUnsavedDraft = true;
+        LastOperationSucceeded = false;
+    }
+
+    private void OnEditDraftPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (centralMode && !suppressDraftTracking)
+        {
+            HasUnsavedDraft = true;
+        }
+    }
+
+    private void OnReadModelChanged(object? sender, EventArgs e) => RefreshCentralCatalogView();
+
+    private void OnCommandAvailabilityChanged(object? sender, EventArgs e)
+    {
+        IsServerAvailable = commandService?.CanWrite == true;
+    }
+
+    private void RefreshCentralCatalogView()
+    {
+        if (!centralMode || readModel is null)
+        {
+            return;
+        }
+
+        CatalogGroups.Clear();
+        foreach (var group in readModel.GetGroups())
+        {
+            CatalogGroups.Add(group);
+        }
+
+        CatalogDevices.Clear();
+        var groupIds = CatalogGroups.Select(group => group.Id).ToList();
+        if (groupIds.Count == 0)
+        {
+            groupIds.Add(Guid.Empty);
+        }
+
+        foreach (var groupId in groupIds)
+        {
+            foreach (var device in readModel.GetDevices(groupId))
+            {
+                if (CatalogDevices.All(existing => existing.Id != device.Id))
+                {
+                    CatalogDevices.Add(device);
+                }
+            }
+        }
+
+        CatalogGroupSections.Clear();
+        foreach (var root in CatalogGroups
+                     .Where(group => group.ParentId is null)
+                     .OrderBy(group => group.Sort)
+                     .ThenBy(group => group.Id))
+        {
+            var children = CatalogGroups
+                .Where(group => group.ParentId == root.Id)
+                .OrderBy(group => group.Sort)
+                .ThenBy(group => group.Id)
+                .Select(group => new DeviceGroupTreeItemViewModel(group));
+            CatalogGroupSections.Add(new DeviceGroupTreeItemViewModel(root, children));
+        }
+
+        if (editingCatalogDevice is null && CatalogDevices.Count > 0)
+        {
+            LoadCatalogDraft(CatalogDevices[0]);
+        }
+
+        IsServerAvailable = commandService?.CanWrite == true;
+        OnPropertyChanged(nameof(EditableCatalogGroups));
+    }
+
+    private void LoadCatalogDraft(CameraDeviceDto device)
+    {
+        editingCatalogDevice = device;
+        suppressDraftTracking = true;
+        try
+        {
+            EditDraft.Load(device);
+            HasUnsavedDraft = false;
+        }
+        finally
+        {
+            suppressDraftTracking = false;
+        }
+
+        IsEditing = true;
+    }
+
+    private void CloseCentralEditor()
+    {
+        IsEditPanelOpen = false;
+        IsEditing = false;
+        editingCatalogDevice = null;
+        HasUnsavedDraft = false;
+        OnPropertyChanged(nameof(EditorTitle));
+    }
+
     private void SaveDevice()
     {
         if (!TryValidateDraft(out var groupId, out var sdkPort, out var rtspPort, out var channelNo))
@@ -516,7 +969,10 @@ public sealed class DeviceManagementViewModel : ObservableObject
         device.SdkPort = sdkPort;
         device.RtspPort = rtspPort;
         device.Username = EditDraft.Username.Trim();
-        device.Password = EditDraft.Password;
+        if (!IsEditing || EditDraft.Password.Length > 0)
+        {
+            device.Password = EditDraft.Password;
+        }
         device.Manufacturer = EditDraft.Manufacturer.Trim();
         device.Model = EditDraft.Model.Trim();
         device.Remark = EditDraft.Remark.Trim();

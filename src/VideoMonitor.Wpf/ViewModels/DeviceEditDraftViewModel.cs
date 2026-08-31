@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Models;
 
 namespace VideoMonitor.Wpf.ViewModels;
@@ -80,7 +81,26 @@ public sealed partial class DeviceEditDraftViewModel : ObservableObject
         SdkPort = device.SdkPort.ToString();
         RtspPort = device.RtspPort.ToString();
         Username = device.Username;
-        Password = device.Password;
+        Password = string.Empty;
+        Manufacturer = device.Manufacturer;
+        Model = device.Model;
+        Remark = device.Remark;
+        ChannelNo = (channel?.ChannelNo ?? 1).ToString();
+        ChannelName = channel?.ChannelName ?? "通道1";
+        StreamType = channel?.StreamType ?? StreamType.Main;
+        TransportMode = device.TransportMode;
+    }
+
+    public void Load(CameraDeviceDto device)
+    {
+        var channel = device.Channels.FirstOrDefault();
+        Name = device.Name;
+        GroupId = device.GroupId;
+        IpAddress = device.IpAddress;
+        SdkPort = device.SdkPort.ToString();
+        RtspPort = device.RtspPort.ToString();
+        Username = device.Username;
+        Password = string.Empty;
         Manufacturer = device.Manufacturer;
         Model = device.Model;
         Remark = device.Remark;

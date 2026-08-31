@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Models;
 
 namespace VideoMonitor.Wpf.ViewModels;
@@ -18,11 +19,22 @@ public sealed class DeviceGroupTreeItemViewModel : ObservableObject
         Children = new ObservableCollection<DeviceGroupTreeItemViewModel>(children ?? []);
     }
 
-    public DeviceGroup Group { get; }
+    public DeviceGroupTreeItemViewModel(
+        DeviceGroupDto group,
+        IEnumerable<DeviceGroupTreeItemViewModel>? children = null)
+    {
+        CatalogGroup = group;
+        Children = new ObservableCollection<DeviceGroupTreeItemViewModel>(children ?? []);
+    }
+
+    public DeviceGroup? Group { get; }
+
+    public DeviceGroupDto? CatalogGroup { get; }
 
     public ObservableCollection<DeviceGroupTreeItemViewModel> Children { get; }
 
-    public bool IsRoot => Group.ParentId is null;
+    public bool IsRoot => CatalogGroup?.ParentId is null && CatalogGroup is not null
+        || Group?.ParentId is null;
 
     public bool IsExpanded
     {
