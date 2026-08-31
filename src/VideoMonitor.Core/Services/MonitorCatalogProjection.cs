@@ -1,9 +1,34 @@
+using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Models;
 
 namespace VideoMonitor.Core.Services;
 
 public static class MonitorCatalogProjection
 {
+    public static IReadOnlyList<MonitorGroup> CreateGroups(
+        IDeviceCatalogReadModel catalog)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+
+        var groups = catalog.GetGroups();
+        var roots = groups
+            .Where(IsFormalRoot)
+            .ToDictionary(group => group.Id);
+
+        return groups
+            .Where(child => child.Enabled
+                && child.ParentId is { } parentId
+                && roots.ContainsKey(parentId))
+            .Select(child => CreateGroup(catalog, roots[child.ParentId!.Value], child))
+            .OrderBy(group => group.RootSort)
+            .ThenBy(group => group.RootGroupId)
+            .ThenBy(group => group.Sort)
+            .ThenBy(group => group.GroupId)
+            .ToArray();
+    }
+
+    // Compatibility overload for the pre-central local WPF path. Central callers
+    // must use the password-safe IDeviceCatalogReadModel overload above.
     public static IReadOnlyList<MonitorGroup> CreateGroups(IDeviceCatalog catalog)
     {
         ArgumentNullException.ThrowIfNull(catalog);
@@ -13,16 +38,56 @@ public static class MonitorCatalogProjection
             .Where(group => group.ParentId is not null)
             .OrderBy(group => GetRootSort(groups, group.ParentId!.Value))
             .ThenBy(group => group.Sort)
-            .Select(group => CreateGroup(catalog, groups, group))
+            .Select(group => CreateLegacyGroup(catalog, groups, group))
             .ToArray();
     }
 
     private static MonitorGroup CreateGroup(
+        IDeviceCatalogReadModel catalog,
+        DeviceGroupDto root,
+        DeviceGroupDto child)
+    {
+        var cameras = (catalog.GetDevices(child.Id) ?? [])
+            .Where(device => device.Enabled)
+            .OrderBy(device => device.Name, StringComparer.Ordinal)
+            .ThenBy(device => device.Id)
+            .SelectMany(device => (device.Channels ?? [])
+                .Where(channel => channel.Enabled)
+                .OrderBy(channel => channel.ChannelNo)
+                .ThenBy(channel => channel.Id)
+                .Select(channel => (Device: device, Channel: channel)))
+            .Select((entry, index) => new CameraInfo(
+                root.Kind == MonitorGroupType.Tunnel
+                    ? child.Name
+                    : entry.Device.Name,
+                child.Name,
+                index + 1,
+                CameraStatus.Unknown,
+                DefaultBitrate(index + 1),
+                ToDisplayStreamType(entry.Channel.StreamType))
+            {
+                DeviceId = entry.Device.Id,
+                ChannelId = entry.Channel.Id
+            })
+            .ToArray();
+
+        return new MonitorGroup(child.Name, root.Kind!.Value, cameras)
+        {
+            GroupId = child.Id,
+            RootGroupId = root.Id,
+            RootName = root.Name,
+            RootSort = root.Sort,
+            Sort = child.Sort
+        };
+    }
+
+    private static MonitorGroup CreateLegacyGroup(
         IDeviceCatalog catalog,
         IReadOnlyList<DeviceGroup> groups,
         DeviceGroup group)
     {
         var type = GetMonitorGroupType(groups, group);
+        var root = groups.Single(parent => parent.Id == group.ParentId);
         var cameras = catalog.GetDevices(group.Id)
             .Where(device => device.Enabled)
             .OrderBy(device => device.Name)
@@ -45,9 +110,19 @@ public static class MonitorCatalogProjection
 
         return new MonitorGroup(group.Name, type, cameras)
         {
-            GroupId = group.Id
+            GroupId = group.Id,
+            RootGroupId = root.Id,
+            RootName = root.Name,
+            RootSort = root.Sort,
+            Sort = group.Sort
         };
     }
+
+    private static bool IsFormalRoot(DeviceGroupDto group) =>
+        group.ParentId is null
+        && group.Enabled
+        && group.Kind is { } kind
+        && Enum.IsDefined(kind);
 
     private static MonitorGroupType GetMonitorGroupType(
         IReadOnlyList<DeviceGroup> groups,

@@ -9,6 +9,93 @@ public sealed class MonitorSwitchServiceTests
     private readonly IReadOnlyList<MonitorGroup> groups = CreateGroups();
 
     [Fact]
+    public void ReplaceGroups_PreservesSelectedGuidWhenStillValid()
+    {
+        var first = SwitchGroup(
+            Guid.Parse("10000000-0000-0000-0000-000000000001"),
+            "First",
+            MonitorGroupType.Chute,
+            Camera("first"));
+        var selected = SwitchGroup(
+            Guid.Parse("10000000-0000-0000-0000-000000000002"),
+            "Selected",
+            MonitorGroupType.Chute,
+            Camera("selected"));
+        var service = new MonitorSwitchService(new[] { first, selected });
+
+        service.SwitchChuteGroup(selected.GroupId);
+        var replacement = selected with
+        {
+            Name = "Selected renamed",
+            Cameras = [Camera("replacement")]
+        };
+
+        service.ReplaceGroups(new[] { first, replacement });
+
+        Assert.Equal(selected.GroupId, service.SelectedChuteGroupId);
+        Assert.Equal("replacement", service.CurrentLayout.MainSlots[0]!.Name);
+    }
+
+    [Fact]
+    public void ReplaceGroups_DeletedSelectionFallsBackDeterministically()
+    {
+        var first = SwitchGroup(
+            Guid.Parse("20000000-0000-0000-0000-000000000001"),
+            "First",
+            MonitorGroupType.Chute,
+            Camera("first"));
+        var deleted = SwitchGroup(
+            Guid.Parse("20000000-0000-0000-0000-000000000002"),
+            "Deleted",
+            MonitorGroupType.Chute,
+            Camera("deleted"));
+        var service = new MonitorSwitchService(new[] { first, deleted });
+
+        service.SwitchChuteGroup(deleted.GroupId);
+        service.ReplaceGroups(new[] { first });
+
+        Assert.Equal(first.GroupId, service.SelectedChuteGroupId);
+        Assert.Equal("first", service.CurrentLayout.MainSlots[0]!.Name);
+    }
+
+    [Fact]
+    public void SwitchChuteGroup_RejectsTunnelGuid()
+    {
+        var chute = SwitchGroup(
+            Guid.NewGuid(),
+            "Chute",
+            MonitorGroupType.Chute,
+            Camera("chute"));
+        var tunnel = SwitchGroup(
+            Guid.NewGuid(),
+            "Tunnel",
+            MonitorGroupType.Tunnel,
+            Camera("tunnel"));
+        var service = new MonitorSwitchService(new[] { chute, tunnel });
+        var before = service.CurrentLayout;
+
+        Assert.Throws<ArgumentException>(
+            () => service.SwitchChuteGroup(tunnel.GroupId));
+        Assert.Same(before, service.CurrentLayout);
+    }
+
+    [Fact]
+    public void SwitchGroup_RejectsMissingGuidWithoutChangingLayout()
+    {
+        var chute = SwitchGroup(
+            Guid.NewGuid(),
+            "Chute",
+            MonitorGroupType.Chute,
+            Camera("chute"));
+        var service = new MonitorSwitchService(new[] { chute });
+        var before = service.CurrentLayout;
+
+        Assert.Throws<ArgumentException>(
+            () => service.SwitchChuteGroup(Guid.NewGuid()));
+        Assert.Same(before, service.CurrentLayout);
+    }
+
+    [Fact]
     public void SwitchChuteGroup_ReplacesSlotsOneToThree_AndKeepsSlotFour()
     {
         var service = CreateService();
@@ -61,4 +148,19 @@ public sealed class MonitorSwitchServiceTests
     }
 
     private MonitorGroup Group(string name) => groups.Single(group => group.Name == name);
+
+    private static MonitorGroup SwitchGroup(
+        Guid id,
+        string name,
+        MonitorGroupType type,
+        params CameraInfo[] cameras) =>
+        new(name, type, cameras)
+        {
+            GroupId = id,
+            RootGroupId = id,
+            RootName = $"{name} root"
+        };
+
+    private static CameraInfo Camera(string name) =>
+        new(name, "group", 1, CameraStatus.Unknown);
 }
