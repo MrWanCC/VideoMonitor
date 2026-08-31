@@ -7,6 +7,113 @@ namespace VideoMonitor.Core.Tests.Catalog;
 public sealed class ClientCatalogCacheTests
 {
     [Fact]
+    public async Task InvalidReplacement_WithNullGroups_IsRejectedBeforeDispatcher()
+    {
+        var initial = EmptySnapshot();
+        var dispatcher = new TrackingUiDispatcher();
+        var cache = new ClientCatalogCache(initial, dispatcher);
+        var changed = 0;
+        cache.Changed += (_, _) => changed++;
+        var invalid = new CatalogSnapshotDto(
+            null!,
+            Array.Empty<CameraDeviceDto>());
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => cache.ReplaceAsync(invalid));
+
+        Assert.Equal(0, dispatcher.InvocationCount);
+        Assert.Same(initial, cache.Snapshot);
+        Assert.Equal(0, changed);
+    }
+
+    [Fact]
+    public async Task InvalidReplacement_WithNullDevices_IsRejectedBeforeDispatcher()
+    {
+        var initial = EmptySnapshot();
+        var dispatcher = new TrackingUiDispatcher();
+        var cache = new ClientCatalogCache(initial, dispatcher);
+        var changed = 0;
+        cache.Changed += (_, _) => changed++;
+        var invalid = new CatalogSnapshotDto(
+            Array.Empty<DeviceGroupDto>(),
+            null!);
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => cache.ReplaceAsync(invalid));
+
+        Assert.Equal(0, dispatcher.InvocationCount);
+        Assert.Same(initial, cache.Snapshot);
+        Assert.Equal(0, changed);
+    }
+
+    [Fact]
+    public async Task InvalidReplacement_WithNullChannels_IsRejectedBeforeDispatcher()
+    {
+        var initial = EmptySnapshot();
+        var dispatcher = new TrackingUiDispatcher();
+        var cache = new ClientCatalogCache(initial, dispatcher);
+        var changed = 0;
+        cache.Changed += (_, _) => changed++;
+        var invalid = new CatalogSnapshotDto(
+            Array.Empty<DeviceGroupDto>(),
+            [DeviceDto(Guid.NewGuid(), Guid.NewGuid(), "Device", channels: null!)]);
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => cache.ReplaceAsync(invalid));
+
+        Assert.Equal(0, dispatcher.InvocationCount);
+        Assert.Same(initial, cache.Snapshot);
+        Assert.Equal(0, changed);
+    }
+
+    [Fact]
+    public void InvalidInitialSnapshot_IsRejected()
+    {
+        var invalid = new CatalogSnapshotDto(
+            null!,
+            Array.Empty<CameraDeviceDto>());
+
+        var exception = Assert.Throws<InvalidDataException>(
+            () => new ClientCatalogCache(invalid, new TrackingUiDispatcher()));
+
+        Assert.Equal("Catalog snapshot is invalid.", exception.Message);
+    }
+
+    [Fact]
+    public async Task InvalidReplacement_WithNullGroupItem_IsRejectedBeforeDispatcher()
+    {
+        var initial = EmptySnapshot();
+        var dispatcher = new TrackingUiDispatcher();
+        var cache = new ClientCatalogCache(initial, dispatcher);
+        var invalid = new CatalogSnapshotDto(
+            new DeviceGroupDto[] { null! },
+            Array.Empty<CameraDeviceDto>());
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => cache.ReplaceAsync(invalid));
+
+        Assert.Equal(0, dispatcher.InvocationCount);
+        Assert.Same(initial, cache.Snapshot);
+    }
+
+    [Fact]
+    public async Task InvalidReplacement_WithNullDeviceItem_IsRejectedBeforeDispatcher()
+    {
+        var initial = EmptySnapshot();
+        var dispatcher = new TrackingUiDispatcher();
+        var cache = new ClientCatalogCache(initial, dispatcher);
+        var invalid = new CatalogSnapshotDto(
+            Array.Empty<DeviceGroupDto>(),
+            new CameraDeviceDto[] { null! });
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => cache.ReplaceAsync(invalid));
+
+        Assert.Equal(0, dispatcher.InvocationCount);
+        Assert.Same(initial, cache.Snapshot);
+    }
+
+    [Fact]
     public async Task IdenticalSnapshot_DoesNotRaiseChanged()
     {
         var initial = EmptySnapshot();
@@ -190,6 +297,20 @@ public sealed class ClientCatalogCacheTests
             Action action,
             CancellationToken cancellationToken = default)
         {
+            action();
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class TrackingUiDispatcher : IUiDispatcher
+    {
+        public int InvocationCount { get; private set; }
+
+        public Task InvokeAsync(
+            Action action,
+            CancellationToken cancellationToken = default)
+        {
+            InvocationCount++;
             action();
             return Task.CompletedTask;
         }

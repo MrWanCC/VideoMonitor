@@ -1,3 +1,4 @@
+using System.IO;
 using VideoMonitor.Core.Catalog;
 
 namespace VideoMonitor.Wpf.Catalog;
@@ -12,6 +13,7 @@ public sealed class ClientCatalogCache : IDeviceCatalogReadModel
         IUiDispatcher dispatcher)
     {
         ArgumentNullException.ThrowIfNull(initial);
+        ValidateSnapshot(initial);
         this.dispatcher = dispatcher
             ?? throw new ArgumentNullException(nameof(dispatcher));
         snapshot = initial;
@@ -26,6 +28,7 @@ public sealed class ClientCatalogCache : IDeviceCatalogReadModel
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(next);
+        ValidateSnapshot(next);
 
         return dispatcher.InvokeAsync(
             () => ApplyPreparedSnapshotOnUiThread(next),
@@ -83,4 +86,20 @@ public sealed class ClientCatalogCache : IDeviceCatalogReadModel
         && left.Remark == right.Remark
         && left.Revision == right.Revision
         && left.Channels.SequenceEqual(right.Channels);
+
+    private static void ValidateSnapshot(CatalogSnapshotDto snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        if (snapshot.Groups is null
+            || snapshot.Devices is null
+            || snapshot.Groups.Any(group => group is null)
+            || snapshot.Devices.Any(
+                device => device is null
+                    || device.Channels is null
+                    || device.Channels.Any(channel => channel is null)))
+        {
+            throw new InvalidDataException("Catalog snapshot is invalid.");
+        }
+    }
 }
