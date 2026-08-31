@@ -23,10 +23,14 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
     private readonly IUiDispatcher uiDispatcher;
     private readonly IClientConnectionClock clock;
     private readonly SemaphoreSlim refreshGate = new(1, 1);
+    private readonly SemaphoreSlim stateGate = new(1, 1);
+    private readonly SemaphoreSlim wakeSignal = new(0, 1);
     private readonly CancellationTokenSource shutdown = new();
     private readonly object lifecycleLock = new();
     private Task? runTask;
     private Uri? configuredBaseUri;
+    private long endpointGeneration;
+    private bool endpointConnected;
     private DateTimeOffset? lastSuccessfulSyncUtc;
     private bool hasSuccessfulSync;
     private bool disposed;
@@ -71,11 +75,9 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
     public async Task RefreshNowAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        var endpoint = configuredBaseUri;
-        if (endpoint is null)
-        {
+        var endpointState = await GetEndpointStateAsync().ConfigureAwait(false);
+        if (endpointState.Endpoint is null)
             return;
-        }
 
         if (!await refreshGate
                 .WaitAsync(0, cancellationToken)
@@ -89,12 +91,13 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
             try
             {
                 var snapshot = await GetCatalogSnapshotAsync(
-                        endpoint,
+                        endpointState.Endpoint,
                         cancellationToken)
                     .ConfigureAwait(false);
-                await CommitConnectedAsync(
-                        endpoint,
+                _ = await CommitConnectedAsync(
+                        endpointState.Endpoint,
                         snapshot,
+                        endpointState.Generation,
                         cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -104,7 +107,10 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
             }
             catch (Exception)
             {
-                await PublishUnavailableAsync(endpoint).ConfigureAwait(false);
+                await PublishUnavailableAsync(
+                        endpointState.Endpoint,
+                        endpointState.Generation)
+                    .ConfigureAwait(false);
             }
         }
         finally
@@ -149,22 +155,33 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
                 cancellationToken)
             .ConfigureAwait(false);
 
-        await uiDispatcher.InvokeAsync(
-                () =>
-                {
-                    configuredBaseUri = candidate;
-                    lastSuccessfulSyncUtc = clock.UtcNow;
-                    hasSuccessfulSync = true;
-                    Status = new ServerConnectionStatus(
-                        candidate,
-                        ServerConnectionState.Connected,
-                        lastSuccessfulSyncUtc,
-                        false);
-                    cache.ApplyPreparedSnapshotOnUiThread(preparedSnapshot);
-                    StatusChanged?.Invoke(this, EventArgs.Empty);
-                },
-                CancellationToken.None)
-            .ConfigureAwait(false);
+        await stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            endpointGeneration++;
+            await uiDispatcher.InvokeAsync(
+                    () =>
+                    {
+                        configuredBaseUri = candidate;
+                        endpointConnected = true;
+                        lastSuccessfulSyncUtc = clock.UtcNow;
+                        hasSuccessfulSync = true;
+                        Status = new ServerConnectionStatus(
+                            candidate,
+                            ServerConnectionState.Connected,
+                            lastSuccessfulSyncUtc,
+                            false);
+                        cache.ApplyPreparedSnapshotOnUiThread(preparedSnapshot);
+                        StatusChanged?.Invoke(this, EventArgs.Empty);
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            stateGate.Release();
+        }
+        SignalWake();
     }
 
     public async ValueTask DisposeAsync()
@@ -201,31 +218,57 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         try
         {
             var configuredValue = settingsStore.Load().Server.BaseUrl;
+            var waitsForEndpoint = false;
+            Uri? initialEndpoint = null;
             if (string.IsNullOrWhiteSpace(configuredValue))
             {
                 await PublishUnconfiguredAsync().ConfigureAwait(false);
-                return;
+                waitsForEndpoint = true;
             }
-
-            if (!TryParseBaseUri(configuredValue, out var endpoint))
+            else if (!TryParseBaseUri(configuredValue, out initialEndpoint))
             {
-                await PublishUnavailableAsync(null).ConfigureAwait(false);
-                return;
+                var state = await GetEndpointStateAsync().ConfigureAwait(false);
+                await PublishUnavailableAsync(
+                        null,
+                        state.Generation)
+                    .ConfigureAwait(false);
+                waitsForEndpoint = true;
             }
 
-            configuredBaseUri = endpoint;
+            if (initialEndpoint is not null)
+            {
+                await SetInitialEndpointAsync(initialEndpoint).ConfigureAwait(false);
+            }
+
+            if (waitsForEndpoint)
+            {
+                var state = await GetEndpointStateAsync().ConfigureAwait(false);
+                if (state.Endpoint is null)
+                {
+                    await wakeSignal.WaitAsync(token).ConfigureAwait(false);
+                }
+            }
+
             var retryIndex = 0;
+            var initialConnectionPending = true;
 
             while (!token.IsCancellationRequested)
             {
-                endpoint = configuredBaseUri;
-                if (endpoint is null)
+                var endpointState = await GetEndpointStateAsync()
+                    .ConfigureAwait(false);
+                if (endpointState.Endpoint is null)
                 {
                     await PublishUnconfiguredAsync().ConfigureAwait(false);
-                    return;
+                    await wakeSignal.WaitAsync(token).ConfigureAwait(false);
+                    continue;
                 }
 
-                if (!await TryConnectAsync(endpoint, token).ConfigureAwait(false))
+                if ((initialConnectionPending || !endpointState.Connected)
+                    && !await TryConnectAsync(
+                            endpointState.Endpoint,
+                            endpointState.Generation,
+                            token)
+                        .ConfigureAwait(false))
                 {
                     await DelayWithJitterAsync(
                             ReconnectBaseDelays[retryIndex],
@@ -236,6 +279,8 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
                         ReconnectBaseDelays.Length - 1);
                     continue;
                 }
+
+                initialConnectionPending = false;
 
                 retryIndex = 0;
                 while (!token.IsCancellationRequested)
@@ -249,17 +294,30 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
                         return;
                     }
 
-                    endpoint = configuredBaseUri;
-                    if (endpoint is null)
+                    endpointState = await GetEndpointStateAsync()
+                        .ConfigureAwait(false);
+                    if (endpointState.Endpoint is null)
                     {
                         await PublishUnconfiguredAsync().ConfigureAwait(false);
-                        return;
+                        break;
+                    }
+
+                    if (!endpointState.Connected)
+                    {
+                        break;
                     }
 
                     try
                     {
-                        await RunRefreshAndCommitAsync(endpoint, token)
-                            .ConfigureAwait(false);
+                        if (!await RunRefreshAndCommitAsync(
+                                    endpointState.Endpoint,
+                                    endpointState.Generation,
+                                    token)
+                                .ConfigureAwait(false))
+                        {
+                            break;
+                        }
+
                         retryIndex = 0;
                     }
                     catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -268,7 +326,10 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
                     }
                     catch (Exception)
                     {
-                        await PublishUnavailableAsync(endpoint).ConfigureAwait(false);
+                        await PublishUnavailableAsync(
+                                endpointState.Endpoint,
+                                endpointState.Generation)
+                            .ConfigureAwait(false);
                         await DelayWithJitterAsync(
                                 ReconnectBaseDelays[retryIndex],
                                 token)
@@ -288,9 +349,11 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
 
     private async Task<bool> TryConnectAsync(
         Uri endpoint,
+        long expectedGeneration,
         CancellationToken cancellationToken)
     {
-        await PublishConnectingAsync(endpoint).ConfigureAwait(false);
+        await PublishConnectingAsync(endpoint, expectedGeneration)
+            .ConfigureAwait(false);
         try
         {
             await refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -303,9 +366,10 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
                         cancellationToken)
                     .ConfigureAwait(false);
                 var prepared = cache.PrepareSnapshot(snapshot);
-                await CommitConnectedAsync(
+                _ = await CommitConnectedAsync(
                         endpoint,
                         prepared,
+                        expectedGeneration,
                         cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -322,13 +386,15 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         }
         catch (Exception)
         {
-            await PublishUnavailableAsync(endpoint).ConfigureAwait(false);
+            await PublishUnavailableAsync(endpoint, expectedGeneration)
+                .ConfigureAwait(false);
             return false;
         }
     }
 
-    private async Task RunRefreshAndCommitAsync(
+    private async Task<bool> RunRefreshAndCommitAsync(
         Uri endpoint,
+        long expectedGeneration,
         CancellationToken cancellationToken)
     {
         await refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -336,9 +402,10 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         {
             var snapshot = await GetCatalogSnapshotAsync(endpoint, cancellationToken)
                 .ConfigureAwait(false);
-            await CommitConnectedAsync(
+            return await CommitConnectedAsync(
                     endpoint,
                     snapshot,
+                    expectedGeneration,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -372,74 +439,190 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         return cache.PrepareSnapshot(snapshot);
     }
 
-    private async Task CommitConnectedAsync(
+    private async Task<bool> CommitConnectedAsync(
         Uri endpoint,
         CatalogSnapshotDto snapshot,
+        long expectedGeneration,
         CancellationToken dispatcherCancellationToken)
     {
-        await uiDispatcher.InvokeAsync(
-                () =>
-                {
-                    lastSuccessfulSyncUtc = clock.UtcNow;
-                    hasSuccessfulSync = true;
-                    Status = new ServerConnectionStatus(
-                        endpoint,
-                        ServerConnectionState.Connected,
-                        lastSuccessfulSyncUtc,
-                        false);
-                    cache.ApplyPreparedSnapshotOnUiThread(snapshot);
-                    StatusChanged?.Invoke(this, EventArgs.Empty);
-                },
-                dispatcherCancellationToken)
+        await stateGate.WaitAsync(dispatcherCancellationToken)
             .ConfigureAwait(false);
+        try
+        {
+            if (expectedGeneration != endpointGeneration
+                || !Equals(configuredBaseUri, endpoint))
+            {
+                return false;
+            }
+
+            await uiDispatcher.InvokeAsync(
+                    () =>
+                    {
+                        lastSuccessfulSyncUtc = clock.UtcNow;
+                        hasSuccessfulSync = true;
+                        endpointConnected = true;
+                        Status = new ServerConnectionStatus(
+                            endpoint,
+                            ServerConnectionState.Connected,
+                            lastSuccessfulSyncUtc,
+                            false);
+                        cache.ApplyPreparedSnapshotOnUiThread(snapshot);
+                        StatusChanged?.Invoke(this, EventArgs.Empty);
+                    },
+                    dispatcherCancellationToken)
+                .ConfigureAwait(false);
+            return true;
+        }
+        finally
+        {
+            stateGate.Release();
+        }
     }
 
-    private async Task PublishConnectingAsync(Uri endpoint)
+    private async Task PublishConnectingAsync(
+        Uri endpoint,
+        long expectedGeneration)
     {
-        await uiDispatcher.InvokeAsync(
-                () =>
-                {
-                    Status = new ServerConnectionStatus(
-                        endpoint,
-                        ServerConnectionState.Connecting,
-                        lastSuccessfulSyncUtc,
-                        hasSuccessfulSync);
-                    StatusChanged?.Invoke(this, EventArgs.Empty);
-                },
-                CancellationToken.None)
-            .ConfigureAwait(false);
+        await stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            if (expectedGeneration != endpointGeneration
+                || !Equals(configuredBaseUri, endpoint))
+            {
+                return;
+            }
+
+            await uiDispatcher.InvokeAsync(
+                    () =>
+                    {
+                        endpointConnected = false;
+                        Status = new ServerConnectionStatus(
+                            endpoint,
+                            ServerConnectionState.Connecting,
+                            lastSuccessfulSyncUtc,
+                            hasSuccessfulSync);
+                        StatusChanged?.Invoke(this, EventArgs.Empty);
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            stateGate.Release();
+        }
     }
 
-    private async Task PublishUnavailableAsync(Uri? endpoint)
+    private async Task PublishUnavailableAsync(
+        Uri? endpoint,
+        long? expectedGeneration = null)
     {
-        await uiDispatcher.InvokeAsync(
-                () =>
-                {
-                    Status = new ServerConnectionStatus(
-                        endpoint,
-                        ServerConnectionState.Unavailable,
-                        lastSuccessfulSyncUtc,
-                        hasSuccessfulSync);
-                    StatusChanged?.Invoke(this, EventArgs.Empty);
-                },
-                CancellationToken.None)
-            .ConfigureAwait(false);
+        await stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            if ((expectedGeneration.HasValue
+                    && expectedGeneration.Value != endpointGeneration)
+                || (endpoint is null && configuredBaseUri is not null)
+                || (endpoint is not null
+                    && !Equals(configuredBaseUri, endpoint)))
+            {
+                return;
+            }
+
+            await uiDispatcher.InvokeAsync(
+                    () =>
+                    {
+                        endpointConnected = false;
+                        Status = new ServerConnectionStatus(
+                            endpoint,
+                            ServerConnectionState.Unavailable,
+                            lastSuccessfulSyncUtc,
+                            hasSuccessfulSync);
+                        StatusChanged?.Invoke(this, EventArgs.Empty);
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            stateGate.Release();
+        }
     }
 
     private async Task PublishUnconfiguredAsync()
     {
-        await uiDispatcher.InvokeAsync(
-                () =>
-                {
-                    Status = new ServerConnectionStatus(
-                        null,
-                        ServerConnectionState.Unconfigured,
-                        null,
-                        false);
-                    StatusChanged?.Invoke(this, EventArgs.Empty);
-                },
-                CancellationToken.None)
-            .ConfigureAwait(false);
+        await stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            if (configuredBaseUri is not null)
+            {
+                return;
+            }
+
+            await uiDispatcher.InvokeAsync(
+                    () =>
+                    {
+                        endpointConnected = false;
+                        Status = new ServerConnectionStatus(
+                            null,
+                            ServerConnectionState.Unconfigured,
+                            null,
+                            false);
+                        StatusChanged?.Invoke(this, EventArgs.Empty);
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            stateGate.Release();
+        }
+    }
+
+    private async Task<EndpointState> GetEndpointStateAsync()
+    {
+        await stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            return new EndpointState(
+                configuredBaseUri,
+                endpointGeneration,
+                endpointConnected);
+        }
+        finally
+        {
+            stateGate.Release();
+        }
+    }
+
+    private async Task SetInitialEndpointAsync(Uri endpoint)
+    {
+        await stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            if (configuredBaseUri is null)
+            {
+                configuredBaseUri = endpoint;
+                endpointConnected = false;
+            }
+        }
+        finally
+        {
+            stateGate.Release();
+        }
+    }
+
+    private void SignalWake()
+    {
+        try
+        {
+            wakeSignal.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     private async Task DelayWithJitterAsync(
@@ -494,4 +677,9 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
             throw new ObjectDisposedException(nameof(ServerConnectionCoordinator));
         }
     }
+
+    private readonly record struct EndpointState(
+        Uri? Endpoint,
+        long Generation,
+        bool Connected);
 }

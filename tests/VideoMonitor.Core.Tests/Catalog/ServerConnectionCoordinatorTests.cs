@@ -11,11 +11,30 @@ public sealed class ServerConnectionCoordinatorTests
     private static readonly Uri ServerB = new("https://server-b");
 
     [Fact]
+    public async Task UnconfiguredRun_RemainsAliveUntilCancellation()
+    {
+        var fixture = new ConnectionFixture();
+        using var cancellation = new CancellationTokenSource();
+
+        var run = fixture.Coordinator.RunAsync(cancellation.Token);
+
+        Assert.Equal(
+            ServerConnectionState.Unconfigured,
+            fixture.Coordinator.Status.State);
+        Assert.False(run.IsCompleted);
+        Assert.Empty(fixture.Api.ReadyCalls);
+        Assert.Empty(fixture.Api.CatalogCalls);
+
+        cancellation.Cancel();
+        await run;
+    }
+
+    [Fact]
     public async Task NoConfiguration_IsUnconfiguredAndDoesNotCallApi()
     {
         var fixture = new ConnectionFixture();
-
-        await fixture.Coordinator.RunAsync(CancellationToken.None);
+        using var cancellation = new CancellationTokenSource();
+        var run = fixture.Coordinator.RunAsync(cancellation.Token);
 
         Assert.Equal(
             new ServerConnectionStatus(
@@ -26,6 +45,118 @@ public sealed class ServerConnectionCoordinatorTests
             fixture.Coordinator.Status);
         Assert.Empty(fixture.Api.ReadyCalls);
         Assert.Empty(fixture.Api.CatalogCalls);
+        Assert.False(run.IsCompleted);
+
+        cancellation.Cancel();
+        await run;
+    }
+
+    [Fact]
+    public async Task ConcurrentRefreshFromServerA_CannotOverwriteSuccessfulSwitchToServerB()
+    {
+        var snapshotA1 = Snapshot("A1");
+        var snapshotA2 = Snapshot("A2");
+        var snapshotB = Snapshot("B");
+        var fixture = await ConnectionFixture.ConnectedToAsync(ServerA, snapshotA1);
+        var aRefreshEntered = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var bSwitchStarted = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseARefresh = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Api.ReadyHandler = (uri, _) =>
+        {
+            if (uri == ServerB)
+            {
+                bSwitchStarted.TrySetResult(null);
+            }
+
+            return Task.CompletedTask;
+        };
+        fixture.Api.CatalogHandler = async (uri, _) =>
+        {
+            if (uri == ServerA)
+            {
+                aRefreshEntered.TrySetResult(null);
+                await releaseARefresh.Task;
+                return snapshotA2;
+            }
+
+            return snapshotB;
+        };
+        var bCommitted = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Coordinator.StatusChanged += (_, _) =>
+        {
+            if (fixture.Coordinator.Status.BaseUri == ServerB
+                && fixture.Coordinator.Status.State == ServerConnectionState.Connected)
+            {
+                bCommitted.TrySetResult(null);
+            }
+        };
+
+        var refresh = fixture.Coordinator.RefreshNowAsync();
+        await aRefreshEntered.Task;
+        var switchTask = fixture.Coordinator.SwitchServerAsync(ServerB, () => false);
+        await bSwitchStarted.Task;
+        await bCommitted.Task;
+        releaseARefresh.SetResult(null);
+        await Task.WhenAll(refresh, switchTask);
+
+        Assert.Equal(ServerB, fixture.Coordinator.Status.BaseUri);
+        Assert.Equal(ServerConnectionState.Connected, fixture.Coordinator.Status.State);
+        Assert.Same(snapshotB, fixture.Cache.Snapshot);
+        Assert.Equal(ServerB.ToString(), fixture.Settings.Settings.Server.BaseUrl);
+    }
+
+    [Fact]
+    public async Task PeriodicRefreshFromServerA_CannotOverwriteSuccessfulSwitchToServerB()
+    {
+        var snapshotA1 = Snapshot("A1");
+        var snapshotA2 = Snapshot("A2");
+        var snapshotB = Snapshot("B");
+        var fixture = new ConnectionFixture();
+        fixture.Settings.Settings = SettingsFor(ServerA);
+        var aCatalogCall = 0;
+        var periodicAEntered = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseARefresh = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Api.CatalogHandler = async (uri, _) =>
+        {
+            if (uri == ServerA)
+            {
+                aCatalogCall++;
+                if (aCatalogCall == 2)
+                {
+                    periodicAEntered.TrySetResult(null);
+                    await releaseARefresh.Task;
+                    return snapshotA2;
+                }
+
+                return snapshotA1;
+            }
+
+            return snapshotB;
+        };
+        fixture.Clock.DelayHandler = (_, _) => Task.CompletedTask;
+        using var cancellation = new CancellationTokenSource();
+        var run = fixture.Coordinator.RunAsync(cancellation.Token);
+        await periodicAEntered.Task;
+
+        var switchTask = fixture.Coordinator.SwitchServerAsync(ServerB, () => false);
+        await switchTask;
+        releaseARefresh.SetResult(null);
+        fixture.Clock.DelayHandler = (_, _) =>
+        {
+            cancellation.Cancel();
+            return Task.CompletedTask;
+        };
+        await run;
+
+        Assert.Equal(ServerB, fixture.Coordinator.Status.BaseUri);
+        Assert.Equal(ServerConnectionState.Connected, fixture.Coordinator.Status.State);
+        Assert.Same(snapshotB, fixture.Cache.Snapshot);
     }
 
     [Fact]
@@ -250,6 +381,79 @@ public sealed class ServerConnectionCoordinatorTests
         Assert.Empty(fixture.Api.ReadyCalls);
         Assert.Empty(fixture.Api.CatalogCalls);
         Assert.Equal(ServerConnectionState.Unconfigured, fixture.Coordinator.Status.State);
+    }
+
+    [Fact]
+    public async Task SuccessfulSwitchFromUnconfigured_WakesExistingRunLoop()
+    {
+        var fixture = new ConnectionFixture();
+        using var cancellation = new CancellationTokenSource();
+        var run = fixture.Coordinator.RunAsync(cancellation.Token);
+        Assert.Equal(ServerConnectionState.Unconfigured, fixture.Coordinator.Status.State);
+        Assert.False(run.IsCompleted);
+
+        var switched = Snapshot("B");
+        var refreshed = Snapshot("B refreshed");
+        fixture.Api.Snapshot = switched;
+        await fixture.Coordinator.SwitchServerAsync(ServerB, () => false);
+        fixture.Api.ResetCounters();
+        fixture.Api.CatalogHandler = (_, _) => Task.FromResult(refreshed);
+        fixture.Clock.DelayHandler = (_, _) =>
+        {
+            if (fixture.Clock.Delays.Count == 2)
+            {
+                cancellation.Cancel();
+            }
+
+            return Task.CompletedTask;
+        };
+
+        await run;
+
+        Assert.NotEmpty(fixture.Api.CatalogCalls);
+        Assert.All(fixture.Api.CatalogCalls, uri => Assert.Equal(ServerB, uri));
+        Assert.Equal(ServerB, fixture.Coordinator.Status.BaseUri);
+        Assert.Equal(ServerConnectionState.Connected, fixture.Coordinator.Status.State);
+        Assert.Same(refreshed, fixture.Cache.Snapshot);
+    }
+
+    [Fact]
+    public async Task InvalidConfiguredBaseUrl_WaitsForLaterValidSwitch()
+    {
+        var fixture = new ConnectionFixture();
+        fixture.Settings.Settings = new ClientSettings(
+            new ClientServerSettings("not a server uri"));
+        using var cancellation = new CancellationTokenSource();
+        var run = fixture.Coordinator.RunAsync(cancellation.Token);
+
+        Assert.Equal(ServerConnectionState.Unavailable, fixture.Coordinator.Status.State);
+        Assert.False(run.IsCompleted);
+        Assert.Empty(fixture.Api.ReadyCalls);
+        Assert.Empty(fixture.Api.CatalogCalls);
+
+        var switched = Snapshot("B");
+        var refreshed = Snapshot("B refreshed");
+        fixture.Api.Snapshot = switched;
+        await fixture.Coordinator.SwitchServerAsync(ServerB, () => false);
+        fixture.Api.ResetCounters();
+        fixture.Api.CatalogHandler = (_, _) => Task.FromResult(refreshed);
+        fixture.Clock.DelayHandler = (_, _) =>
+        {
+            if (fixture.Clock.Delays.Count == 2)
+            {
+                cancellation.Cancel();
+            }
+
+            return Task.CompletedTask;
+        };
+
+        await run;
+
+        Assert.NotEmpty(fixture.Api.CatalogCalls);
+        Assert.All(fixture.Api.CatalogCalls, uri => Assert.Equal(ServerB, uri));
+        Assert.Equal(ServerB, fixture.Coordinator.Status.BaseUri);
+        Assert.Equal(ServerConnectionState.Connected, fixture.Coordinator.Status.State);
+        Assert.Same(refreshed, fixture.Cache.Snapshot);
     }
 
     [Fact]
