@@ -264,6 +264,16 @@ public sealed class ServerConnectionCoordinatorTests
             TaskCreationOptions.RunContinuationsAsynchronously);
         var reconnectDelayEntered = new TaskCompletionSource<object?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        var unavailableObserved = new TaskCompletionSource<ServerConnectionStatus>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Coordinator.StatusChanged += (_, _) =>
+        {
+            if (fixture.Coordinator.Status.State
+                == ServerConnectionState.Unavailable)
+            {
+                unavailableObserved.TrySetResult(fixture.Coordinator.Status);
+            }
+        };
         using var cancellation = new CancellationTokenSource();
         var periodicWaitCount = 0;
         TimeSpan? reconnectDelay = null;
@@ -301,9 +311,10 @@ public sealed class ServerConnectionCoordinatorTests
 
             await fixture.Coordinator.RefreshNowAsync();
 
-            Assert.Equal(ServerConnectionState.Unavailable, fixture.Coordinator.Status.State);
-            Assert.Equal(ServerA, fixture.Coordinator.Status.BaseUri);
-            Assert.True(fixture.Coordinator.Status.IsStale);
+            var unavailable = await unavailableObserved.Task;
+            Assert.Equal(ServerConnectionState.Unavailable, unavailable.State);
+            Assert.Equal(ServerA, unavailable.BaseUri);
+            Assert.True(unavailable.IsStale);
             Assert.False(periodicWait.Task.IsCompleted);
 
             await reconnectDelayEntered.Task.WaitAsync(TimeSpan.FromSeconds(1));
@@ -794,6 +805,128 @@ public sealed class ServerConnectionCoordinatorTests
         await fixture.Coordinator.DisposeAsync();
 
         Assert.Single(fixture.Api.CatalogCalls);
+    }
+
+    [Fact]
+    public async Task DisposeDuringManualRefresh_CancelsAndAwaitsRefreshSafely()
+    {
+        var fixture = new ConnectionFixture();
+        fixture.Settings.Settings = SettingsFor(ServerA);
+        var initialSnapshot = Snapshot("A");
+        var postShutdownSnapshot = Snapshot("must not commit");
+        var catalogCall = 0;
+        var refreshEntered = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var shutdownObserved = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRefresh = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRefreshCleanup = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var refreshCleanup = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Api.CatalogHandler = async (_, cancellationToken) =>
+        {
+            if (Interlocked.Increment(ref catalogCall) == 1)
+            {
+                return initialSnapshot;
+            }
+
+            refreshEntered.TrySetResult(null);
+            try
+            {
+                await releaseRefresh.Task.WaitAsync(cancellationToken);
+                return postShutdownSnapshot;
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                shutdownObserved.TrySetResult(null);
+                throw;
+            }
+            finally
+            {
+                await releaseRefreshCleanup.Task;
+                refreshCleanup.TrySetResult(null);
+            }
+        };
+
+        var periodicWaitEntered = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var periodicWait = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var periodicWaitCount = 0;
+        fixture.Clock.DelayHandler = (delay, cancellationToken) =>
+        {
+            if (delay == TimeSpan.FromSeconds(30)
+                && Interlocked.Increment(ref periodicWaitCount) == 1)
+            {
+                periodicWaitEntered.TrySetResult(null);
+                return periodicWait.Task.WaitAsync(cancellationToken);
+            }
+
+            return Task.CompletedTask;
+        };
+
+        using var cancellation = new CancellationTokenSource();
+        var run = fixture.Coordinator.RunAsync(cancellation.Token);
+        await periodicWaitEntered.Task;
+        var statusBeforeDispose = fixture.Coordinator.Status;
+        var cacheBeforeDispose = fixture.Cache.Snapshot;
+        var refresh = fixture.Coordinator.RefreshNowAsync(CancellationToken.None);
+        await refreshEntered.Task;
+
+        var dispose = fixture.Coordinator.DisposeAsync().AsTask();
+        var disposeCompletedBeforeRefreshCleanup = false;
+        var disposeObservation = dispose.ContinueWith(
+            _ => disposeCompletedBeforeRefreshCleanup =
+                !refreshCleanup.Task.IsCompleted,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        try
+        {
+            await shutdownObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.False(dispose.IsCompleted);
+            Assert.False(refreshCleanup.Task.IsCompleted);
+
+            releaseRefreshCleanup.TrySetResult(null);
+            await Task.WhenAll(refresh, dispose, disposeObservation);
+            await run;
+
+            Assert.False(disposeCompletedBeforeRefreshCleanup);
+            Assert.Equal(statusBeforeDispose, fixture.Coordinator.Status);
+            Assert.Same(cacheBeforeDispose, fixture.Cache.Snapshot);
+            Assert.False(periodicWait.Task.IsCompleted);
+        }
+        finally
+        {
+            releaseRefreshCleanup.TrySetResult(null);
+            releaseRefresh.TrySetResult(null);
+            await Task.WhenAll(refresh, dispose, disposeObservation);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task RefreshNowAfterDispose_IsRejected()
+    {
+        var fixture = await ConnectionFixture.ConnectedToAsync(
+            ServerA,
+            Snapshot("A"));
+        var statusBeforeDispose = fixture.Coordinator.Status;
+        var cacheBeforeDispose = fixture.Cache.Snapshot;
+        var catalogCallsBeforeDispose = fixture.Api.CatalogCalls.Count;
+
+        await fixture.Coordinator.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => fixture.Coordinator.RefreshNowAsync());
+
+        Assert.Equal(statusBeforeDispose, fixture.Coordinator.Status);
+        Assert.Same(cacheBeforeDispose, fixture.Cache.Snapshot);
+        Assert.Equal(catalogCallsBeforeDispose, fixture.Api.CatalogCalls.Count);
     }
 
     private static ClientSettings SettingsFor(Uri uri) =>

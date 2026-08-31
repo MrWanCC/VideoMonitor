@@ -33,6 +33,9 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
     private bool endpointConnected;
     private DateTimeOffset? lastSuccessfulSyncUtc;
     private bool hasSuccessfulSync;
+    private int activeOperations;
+    private TaskCompletionSource<object?>? operationsDrained;
+    private TaskCompletionSource<object?>? disposalCompleted;
     private bool disposed;
 
     public ServerConnectionCoordinator(
@@ -65,52 +68,72 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
 
     public Task RunAsync(CancellationToken cancellationToken)
     {
-        ThrowIfDisposed();
         lock (lifecycleLock)
         {
+            ThrowIfDisposed();
             return runTask ??= RunLoopAsync(cancellationToken);
         }
     }
 
     public async Task RefreshNowAsync(CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
-        var endpointState = await GetEndpointStateAsync().ConfigureAwait(false);
-        if (endpointState.Endpoint is null)
-            return;
-
-        if (!await refreshGate
-                .WaitAsync(0, cancellationToken)
-                .ConfigureAwait(false))
-        {
-            return;
-        }
-
+        EnterOperation();
+        var gateEntered = false;
         try
         {
+            using var operationCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    shutdown.Token);
+            var operationToken = operationCancellation.Token;
+            var endpointState = await GetEndpointStateAsync()
+                .ConfigureAwait(false);
+            if (endpointState.Endpoint is null)
+            {
+                return;
+            }
+
+            if (!await refreshGate
+                    .WaitAsync(0, operationToken)
+                    .ConfigureAwait(false))
+            {
+                return;
+            }
+
+            gateEntered = true;
             try
             {
+                operationToken.ThrowIfCancellationRequested();
                 var snapshot = await GetCatalogSnapshotAsync(
                         endpointState.Endpoint,
-                        cancellationToken)
+                        operationToken)
                     .ConfigureAwait(false);
+                operationToken.ThrowIfCancellationRequested();
                 _ = await CommitConnectedAsync(
                         endpointState.Endpoint,
                         snapshot,
                         endpointState.Generation,
-                        cancellationToken)
+                        operationToken)
                     .ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested
+                    && !shutdown.IsCancellationRequested)
             {
                 throw;
             }
+            catch (OperationCanceledException)
+                when (shutdown.IsCancellationRequested)
+            {
+            }
             catch (Exception)
             {
-                if (await PublishUnavailableAsync(
+                if (!shutdown.IsCancellationRequested
+                    && await PublishUnavailableAsync(
                             endpointState.Endpoint,
                             endpointState.Generation)
-                        .ConfigureAwait(false))
+                        .ConfigureAwait(false)
+                    && !shutdown.IsCancellationRequested)
                 {
                     SignalWake();
                 }
@@ -118,7 +141,12 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         }
         finally
         {
-            refreshGate.Release();
+            if (gateEntered)
+            {
+                refreshGate.Release();
+            }
+
+            ExitOperation();
         }
     }
 
@@ -126,9 +154,17 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         Uri candidate,
         CancellationToken cancellationToken = default)
     {
-        ValidateBaseUri(candidate);
-        _ = await ProbeAndPrepareAsync(candidate, cancellationToken)
-            .ConfigureAwait(false);
+        EnterOperation();
+        try
+        {
+            ValidateBaseUri(candidate);
+            _ = await ProbeAndPrepareAsync(candidate, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            ExitOperation();
+        }
     }
 
     public async Task SwitchServerAsync(
@@ -136,79 +172,128 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         Func<bool> hasUnsavedDraft,
         CancellationToken cancellationToken = default)
     {
-        ThrowIfDisposed();
-        ArgumentNullException.ThrowIfNull(hasUnsavedDraft);
-        ValidateBaseUri(candidate);
-
-        var preparedSnapshot = await ProbeAndPrepareAsync(
-                candidate,
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        if (hasUnsavedDraft())
-        {
-            throw new InvalidOperationException(
-                "Unsaved Catalog edits block a Server switch.");
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        await settingsStore.SaveAsync(
-                new ClientSettings(
-                    new ClientServerSettings(candidate.ToString())),
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        await stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        EnterOperation();
         try
         {
-            endpointGeneration++;
-            await uiDispatcher.InvokeAsync(
-                    () =>
-                    {
-                        configuredBaseUri = candidate;
-                        endpointConnected = true;
-                        lastSuccessfulSyncUtc = clock.UtcNow;
-                        hasSuccessfulSync = true;
-                        Status = new ServerConnectionStatus(
-                            candidate,
-                            ServerConnectionState.Connected,
-                            lastSuccessfulSyncUtc,
-                            false);
-                        cache.ApplyPreparedSnapshotOnUiThread(preparedSnapshot);
-                        StatusChanged?.Invoke(this, EventArgs.Empty);
-                    },
-                    CancellationToken.None)
+            ArgumentNullException.ThrowIfNull(hasUnsavedDraft);
+            ValidateBaseUri(candidate);
+
+            var preparedSnapshot = await ProbeAndPrepareAsync(
+                    candidate,
+                    cancellationToken)
                 .ConfigureAwait(false);
+
+            if (hasUnsavedDraft())
+            {
+                throw new InvalidOperationException(
+                    "Unsaved Catalog edits block a Server switch.");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            await settingsStore.SaveAsync(
+                    new ClientSettings(
+                        new ClientServerSettings(candidate.ToString())),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            await stateGate.WaitAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+            try
+            {
+                endpointGeneration++;
+                await uiDispatcher.InvokeAsync(
+                        () =>
+                        {
+                            configuredBaseUri = candidate;
+                            endpointConnected = true;
+                            lastSuccessfulSyncUtc = clock.UtcNow;
+                            hasSuccessfulSync = true;
+                            Status = new ServerConnectionStatus(
+                                candidate,
+                                ServerConnectionState.Connected,
+                                lastSuccessfulSyncUtc,
+                                false);
+                            cache.ApplyPreparedSnapshotOnUiThread(preparedSnapshot);
+                            StatusChanged?.Invoke(this, EventArgs.Empty);
+                        },
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                stateGate.Release();
+            }
+            SignalWake();
         }
         finally
         {
-            stateGate.Release();
+            ExitOperation();
         }
-        SignalWake();
     }
 
     public async ValueTask DisposeAsync()
     {
         Task? activeRun;
+        Task? activeOperationsTask;
+        TaskCompletionSource<object?> disposalCompletion;
+        var ownsDisposal = false;
         lock (lifecycleLock)
         {
             if (disposed)
             {
-                return;
+                disposalCompletion = disposalCompleted!;
+                activeRun = null;
+                activeOperationsTask = null;
+            }
+            else
+            {
+                disposed = true;
+                disposalCompletion = disposalCompleted =
+                    new TaskCompletionSource<object?>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                activeRun = runTask;
+                activeOperationsTask = null;
+                if (activeOperations > 0)
+                {
+                    operationsDrained = new TaskCompletionSource<object?>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    activeOperationsTask = operationsDrained.Task;
+                }
+
+                ownsDisposal = true;
+            }
+        }
+
+        if (!ownsDisposal)
+        {
+            await disposalCompletion.Task.ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            shutdown.Cancel();
+            if (activeRun is not null)
+            {
+                await activeRun.ConfigureAwait(false);
             }
 
-            disposed = true;
-            activeRun = runTask;
-        }
+            if (activeOperationsTask is not null)
+            {
+                await activeOperationsTask.ConfigureAwait(false);
+            }
 
-        shutdown.Cancel();
-        if (activeRun is not null)
+            refreshGate.Dispose();
+            stateGate.Dispose();
+            wakeSignal.Dispose();
+            shutdown.Dispose();
+            disposalCompletion.TrySetResult(null);
+        }
+        catch (Exception exception)
         {
-            await activeRun.ConfigureAwait(false);
+            disposalCompletion.TrySetException(exception);
+            throw;
         }
-
-        refreshGate.Dispose();
-        shutdown.Dispose();
     }
 
     private async Task RunLoopAsync(CancellationToken cancellationToken)
@@ -485,7 +570,8 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
             .ConfigureAwait(false);
         try
         {
-            if (expectedGeneration != endpointGeneration
+            if (shutdown.IsCancellationRequested
+                || expectedGeneration != endpointGeneration
                 || !Equals(configuredBaseUri, endpoint))
             {
                 return false;
@@ -522,7 +608,8 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         await stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            if (expectedGeneration != endpointGeneration
+            if (shutdown.IsCancellationRequested
+                || expectedGeneration != endpointGeneration
                 || !Equals(configuredBaseUri, endpoint))
             {
                 return;
@@ -555,7 +642,8 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         await stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            if ((expectedGeneration.HasValue
+            if (shutdown.IsCancellationRequested
+                || (expectedGeneration.HasValue
                     && expectedGeneration.Value != endpointGeneration)
                 || (endpoint is null && configuredBaseUri is not null)
                 || (endpoint is not null
@@ -592,7 +680,8 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         await stateGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            if (configuredBaseUri is not null)
+            if (shutdown.IsCancellationRequested
+                || configuredBaseUri is not null)
             {
                 return;
             }
@@ -730,6 +819,27 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         }
         catch (Exception)
         {
+        }
+    }
+
+    private void EnterOperation()
+    {
+        lock (lifecycleLock)
+        {
+            ThrowIfDisposed();
+            activeOperations++;
+        }
+    }
+
+    private void ExitOperation()
+    {
+        lock (lifecycleLock)
+        {
+            activeOperations--;
+            if (disposed && activeOperations == 0)
+            {
+                operationsDrained?.TrySetResult(null);
+            }
         }
     }
 
