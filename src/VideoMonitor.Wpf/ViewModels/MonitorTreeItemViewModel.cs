@@ -13,11 +13,13 @@ public sealed class MonitorTreeItemViewModel : ObservableObject
         MonitorGroup? group = null,
         IEnumerable<MonitorTreeItemViewModel>? children = null,
         string countText = "",
-        CameraStatus status = CameraStatus.Online,
-        bool isExpanded = false)
+        CameraStatus status = CameraStatus.Unknown,
+        bool isExpanded = false,
+        Guid? itemId = null)
     {
         Name = name;
         Group = group;
+        ItemId = itemId ?? group?.GroupId;
         Children = new ObservableCollection<MonitorTreeItemViewModel>(children ?? []);
         CountText = countText;
         Status = status;
@@ -27,6 +29,8 @@ public sealed class MonitorTreeItemViewModel : ObservableObject
     public string Name { get; }
 
     public MonitorGroup? Group { get; }
+
+    public Guid? ItemId { get; }
 
     public ObservableCollection<MonitorTreeItemViewModel> Children { get; }
 

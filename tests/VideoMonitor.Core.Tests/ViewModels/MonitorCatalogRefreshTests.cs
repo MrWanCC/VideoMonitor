@@ -1,6 +1,8 @@
 using VideoMonitor.Core.Mock;
+using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Core.Services;
+using VideoMonitor.Wpf.Catalog;
 using VideoMonitor.Wpf.ViewModels;
 
 namespace VideoMonitor.Core.Tests.ViewModels;
@@ -113,6 +115,165 @@ public sealed class MonitorCatalogRefreshTests
         Assert.Equal(device.Id, groups.Single(item => item.Name == "西401溜井").Cameras[0].DeviceId);
     }
 
+    [Fact]
+    public void SameKindRoots_RenderAsSeparateRootSections()
+    {
+        var rootA = Guid.NewGuid();
+        var rootB = Guid.NewGuid();
+        var childA = Guid.NewGuid();
+        var childB = Guid.NewGuid();
+        var readModel = new MutableReadModelStub(
+        [
+            new DeviceGroupDto(rootA, "Root A", null, 0, true, MonitorGroupType.Chute, 1),
+            new DeviceGroupDto(rootB, "Root B", null, 1, true, MonitorGroupType.Chute, 1),
+            new DeviceGroupDto(childA, "401", rootA, 0, true, null, 1),
+            new DeviceGroupDto(childB, "501", rootB, 0, true, null, 1)
+        ]);
+        var groups = MonitorCatalogProjection.CreateGroups(readModel);
+        var viewModel = new MonitorViewModel(new MonitorSwitchService(groups), readModel);
+
+        Assert.Equal(2, viewModel.TreeSections.Count);
+        Assert.Equal(
+            new[] { rootA, rootB },
+            viewModel.TreeSections.Select(item => item.ItemId!.Value).ToArray());
+        Assert.Equal("401", viewModel.TreeSections[0].Children.Single().Name);
+        Assert.Equal("501", viewModel.TreeSections[1].Children.Single().Name);
+    }
+
+    [Fact]
+    public void DuplicateRootNames_RemainIndependentByGuid()
+    {
+        var rootA = Guid.NewGuid();
+        var rootB = Guid.NewGuid();
+        var readModel = new MutableReadModelStub(
+        [
+            new DeviceGroupDto(rootA, "一号区域", null, 0, true, MonitorGroupType.Chute, 1),
+            new DeviceGroupDto(rootB, "一号区域", null, 1, true, MonitorGroupType.Chute, 1),
+            new DeviceGroupDto(Guid.NewGuid(), "401", rootA, 0, true, null, 1),
+            new DeviceGroupDto(Guid.NewGuid(), "501", rootB, 0, true, null, 1)
+        ]);
+        var groups = MonitorCatalogProjection.CreateGroups(readModel);
+        var viewModel = new MonitorViewModel(new MonitorSwitchService(groups), readModel);
+
+        Assert.Equal(2, viewModel.TreeSections.Count);
+        Assert.Equal(
+            new[] { rootA, rootB },
+            viewModel.TreeSections.Select(item => item.ItemId!.Value).ToArray());
+        Assert.All(viewModel.TreeSections, item => Assert.Equal("一号区域", item.Name));
+    }
+
+    [Fact]
+    public void DuplicateChildNames_SelectByGuid()
+    {
+        var rootId = Guid.NewGuid();
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        var readModel = new MutableReadModelStub(
+        [
+            new DeviceGroupDto(rootId, "Chute Root", null, 0, true, MonitorGroupType.Chute, 1),
+            new DeviceGroupDto(firstId, "同名分组", rootId, 0, true, null, 1),
+            new DeviceGroupDto(secondId, "同名分组", rootId, 1, true, null, 1)
+        ]);
+        var groups = MonitorCatalogProjection.CreateGroups(readModel);
+        var service = new MonitorSwitchService(groups);
+        var viewModel = new MonitorViewModel(service, readModel);
+        var secondItem = viewModel.TreeSections
+            .SelectMany(section => section.Children)
+            .Single(item => item.ItemId == secondId);
+
+        viewModel.SelectGroupCommand.Execute(secondItem);
+
+        Assert.Equal(secondId, service.SelectedChuteGroupId);
+    }
+
+    [Fact]
+    public void CatalogChange_RenamePreservesSelectedGuid()
+    {
+        var rootId = Guid.NewGuid();
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        var initial = new[]
+        {
+            new DeviceGroupDto(rootId, "Chute Root", null, 0, true, MonitorGroupType.Chute, 1),
+            new DeviceGroupDto(firstId, "A", rootId, 0, true, null, 1),
+            new DeviceGroupDto(secondId, "B", rootId, 1, true, null, 1)
+        };
+        var readModel = new MutableReadModelStub(initial);
+        var groups = MonitorCatalogProjection.CreateGroups(readModel);
+        var service = new MonitorSwitchService(groups);
+        var viewModel = new MonitorViewModel(service, readModel);
+        var selected = viewModel.TreeSections.SelectMany(section => section.Children)
+            .Single(item => item.ItemId == secondId);
+        viewModel.SelectGroupCommand.Execute(selected);
+
+        readModel.Replace(
+        [
+            initial[0],
+            initial[1],
+            new DeviceGroupDto(secondId, "B renamed", rootId, 1, true, null, 2)
+        ]);
+        readModel.RaiseChanged();
+
+        var renamed = viewModel.TreeSections.SelectMany(section => section.Children)
+            .Single(item => item.ItemId == secondId);
+        Assert.True(renamed.IsSelected);
+        Assert.Equal(secondId, service.SelectedChuteGroupId);
+        Assert.Equal("B renamed", viewModel.CurrentChuteName);
+    }
+
+    [Fact]
+    public void CatalogChange_DeletedSelectedGroupFallsBackByGuid()
+    {
+        var rootId = Guid.NewGuid();
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        var initial = new[]
+        {
+            new DeviceGroupDto(rootId, "Chute Root", null, 0, true, MonitorGroupType.Chute, 1),
+            new DeviceGroupDto(firstId, "A", rootId, 0, true, null, 1),
+            new DeviceGroupDto(secondId, "B", rootId, 1, true, null, 1)
+        };
+        var readModel = new MutableReadModelStub(initial);
+        var groups = MonitorCatalogProjection.CreateGroups(readModel);
+        var service = new MonitorSwitchService(groups);
+        var viewModel = new MonitorViewModel(service, readModel);
+        var selected = viewModel.TreeSections.SelectMany(section => section.Children)
+            .Single(item => item.ItemId == secondId);
+        viewModel.SelectGroupCommand.Execute(selected);
+
+        readModel.Replace(initial.Take(2).ToArray());
+        readModel.RaiseChanged();
+
+        Assert.Equal(firstId, service.SelectedChuteGroupId);
+        var fallback = viewModel.TreeSections.SelectMany(section => section.Children)
+            .Single(item => item.ItemId == firstId);
+        Assert.True(fallback.IsSelected);
+    }
+
+    [Fact]
+    public void CatalogChange_PreservesRootExpansionByRootGuid()
+    {
+        var rootA = Guid.NewGuid();
+        var rootB = Guid.NewGuid();
+        var initial = new[]
+        {
+            new DeviceGroupDto(rootA, "同名 Root", null, 0, true, MonitorGroupType.Chute, 1),
+            new DeviceGroupDto(rootB, "同名 Root", null, 1, true, MonitorGroupType.Chute, 1),
+            new DeviceGroupDto(Guid.NewGuid(), "A", rootA, 0, true, null, 1),
+            new DeviceGroupDto(Guid.NewGuid(), "B", rootB, 0, true, null, 1)
+        };
+        var readModel = new MutableReadModelStub(initial);
+        var groups = MonitorCatalogProjection.CreateGroups(readModel);
+        var viewModel = new MonitorViewModel(new MonitorSwitchService(groups), readModel);
+        viewModel.TreeSections.Single(item => item.ItemId == rootA).IsExpanded = false;
+        viewModel.TreeSections.Single(item => item.ItemId == rootB).IsExpanded = true;
+
+        readModel.RaiseChanged();
+
+        Assert.False(viewModel.TreeSections.Single(item => item.ItemId == rootA).IsExpanded);
+        Assert.True(viewModel.TreeSections.Single(item => item.ItemId == rootB).IsExpanded);
+    }
+
     private static CameraDevice Clone(CameraDevice source)
     {
         var clone = new CameraDevice
@@ -147,5 +308,24 @@ public sealed class MonitorCatalogRefreshTests
         }
 
         return clone;
+    }
+
+    private sealed class MutableReadModelStub : IDeviceCatalogReadModel
+    {
+        private IReadOnlyList<DeviceGroupDto> groups;
+
+        public MutableReadModelStub(IReadOnlyList<DeviceGroupDto> groups) => this.groups = groups;
+
+        public event EventHandler? Changed;
+
+        public IReadOnlyList<DeviceGroupDto> GetGroups() => groups;
+
+        public IReadOnlyList<CameraDeviceDto> GetDevices(Guid groupId) => [];
+
+        public CameraDeviceDto? GetDevice(Guid deviceId) => null;
+
+        public void Replace(IReadOnlyList<DeviceGroupDto> next) => groups = next;
+
+        public void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
     }
 }

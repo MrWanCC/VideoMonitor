@@ -1,17 +1,20 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Core.Services;
+using VideoMonitor.Wpf.Catalog;
 
 namespace VideoMonitor.Wpf.ViewModels;
 
 public sealed class MonitorViewModel : ObservableObject
 {
-    private readonly IDeviceCatalog deviceCatalog;
+    private readonly IDeviceCatalogReadModel catalog;
+    private readonly Func<IReadOnlyList<MonitorGroup>> projectGroups;
     private readonly MonitorSwitchService switchService;
-    private string currentChuteName = string.Empty;
-    private string currentTunnelName = string.Empty;
+    private string currentChuteName = "未配置";
+    private string currentTunnelName = "未配置";
     private MonitorTreeItemViewModel? selectedTreeItem;
     private bool isSingleTileMode;
     private bool isDetailPanelCollapsed = true;
@@ -20,15 +23,40 @@ public sealed class MonitorViewModel : ObservableObject
 
     public MonitorViewModel(
         MonitorSwitchService switchService,
+        IDeviceCatalogReadModel catalog)
+    {
+        this.switchService = switchService
+            ?? throw new ArgumentNullException(nameof(switchService));
+        this.catalog = catalog
+            ?? throw new ArgumentNullException(nameof(catalog));
+        projectGroups = () => MonitorCatalogProjection.CreateGroups(this.catalog);
+        var projectedGroups = projectGroups();
+        this.switchService.ReplaceGroups(projectedGroups);
+        Initialize(projectedGroups);
+    }
+
+    // Compatibility constructor for the pre-central local WPF path.
+    public MonitorViewModel(
+        MonitorSwitchService switchService,
         IReadOnlyList<MonitorGroup> groups,
         IDeviceCatalog deviceCatalog)
     {
-        this.switchService = switchService;
-        this.deviceCatalog = deviceCatalog ?? throw new ArgumentNullException(nameof(deviceCatalog));
-        Groups = groups;
+        this.switchService = switchService
+            ?? throw new ArgumentNullException(nameof(switchService));
+        ArgumentNullException.ThrowIfNull(groups);
+        ArgumentNullException.ThrowIfNull(deviceCatalog);
+        catalog = new LegacyDeviceCatalogReadModel(deviceCatalog);
+        projectGroups = () => MonitorCatalogProjection.CreateGroups(deviceCatalog);
+        this.switchService.ReplaceGroups(groups);
+        Initialize(groups);
+    }
+
+    private void Initialize(IReadOnlyList<MonitorGroup> initialGroups)
+    {
+        Groups = initialGroups.ToArray();
         MainTiles = new ObservableCollection<VideoTileViewModel>(
             Enumerable.Range(0, 4).Select(_ => new VideoTileViewModel()));
-        TreeSections = CreateTree(groups);
+        TreeSections = CreateTree(Groups);
         SelectGroupCommand = new RelayCommand<MonitorTreeItemViewModel>(SelectGroup);
         ToggleSingleTileCommand = new RelayCommand<VideoTileViewModel>(ToggleSingleTile);
         ExitSingleTileModeCommand = new RelayCommand(() => IsSingleTileMode = false);
@@ -36,16 +64,10 @@ public sealed class MonitorViewModel : ObservableObject
         SelectedVideoSlot = MainTiles[0];
 
         switchService.LayoutChanged += OnLayoutChanged;
-        deviceCatalog.Changed += OnCatalogChanged;
+        catalog.Changed += OnCatalogChanged;
         Render(switchService.Current);
-        var initialGroup = TreeSections
-            .SelectMany(section => section.Children)
-            .FirstOrDefault(item => item.Name == switchService.Current.MainSlots[0].GroupName);
-        selectedTreeItem = initialGroup;
-        if (selectedTreeItem is not null)
-        {
-            selectedTreeItem.IsSelected = true;
-        }
+        var initialSelection = GetInitialSelection();
+        RestoreSelectedTreeItem(initialSelection.Id, initialSelection.Type);
     }
 
     public IReadOnlyList<MonitorGroup> Groups
@@ -54,18 +76,17 @@ public sealed class MonitorViewModel : ObservableObject
         private set => SetProperty(ref groups, value);
     }
 
-    public ObservableCollection<VideoTileViewModel> MainTiles { get; }
+    public ObservableCollection<VideoTileViewModel> MainTiles { get; private set; } = null!;
 
-    public ObservableCollection<MonitorTreeItemViewModel> TreeSections { get; }
+    public ObservableCollection<MonitorTreeItemViewModel> TreeSections { get; private set; } = null!;
 
-    public IRelayCommand<MonitorTreeItemViewModel> SelectGroupCommand { get; }
+    public IRelayCommand<MonitorTreeItemViewModel> SelectGroupCommand { get; private set; } = null!;
 
-    public IRelayCommand<VideoTileViewModel> ToggleSingleTileCommand { get; }
+    public IRelayCommand<VideoTileViewModel> ToggleSingleTileCommand { get; private set; } = null!;
 
-    public IRelayCommand ExitSingleTileModeCommand { get; }
+    public IRelayCommand ExitSingleTileModeCommand { get; private set; } = null!;
 
-    public IRelayCommand ToggleDetailPanelCommand { get; }
-
+    public IRelayCommand ToggleDetailPanelCommand { get; private set; } = null!;
 
     public string CurrentChuteName
     {
@@ -100,27 +121,38 @@ public sealed class MonitorViewModel : ObservableObject
     private static ObservableCollection<MonitorTreeItemViewModel> CreateTree(
         IEnumerable<MonitorGroup> groups)
     {
-        var groupList = groups.ToArray();
-        return
-        [
-            CreateSection("卸矿站监控", MonitorGroupType.UnloadingStation, groupList),
-            CreateSection("溜井监控", MonitorGroupType.Chute, groupList),
-            CreateSection("巷道监控", MonitorGroupType.Tunnel, groupList)
-        ];
-    }
+        var rootGroups = groups
+            .GroupBy(group => group.RootGroupId)
+            .OrderBy(group => group.Min(item => item.RootSort))
+            .ThenBy(group => group.Key)
+            .ToArray();
+        var sections = new ObservableCollection<MonitorTreeItemViewModel>();
 
-    private static MonitorTreeItemViewModel CreateSection(
-        string title,
-        MonitorGroupType type,
-        IEnumerable<MonitorGroup> groups)
-    {
-        var matchingGroups = groups.Where(group => group.Type == type).ToArray();
-        var children = matchingGroups.Select(group => new MonitorTreeItemViewModel(group.Name, group));
-        var total = type == MonitorGroupType.Chute
-            ? matchingGroups.Sum(group => group.Cameras.Count)
-            : matchingGroups.Length;
+        foreach (var rootGroup in rootGroups)
+        {
+            var orderedChildren = rootGroup
+                .OrderBy(group => group.Sort)
+                .ThenBy(group => group.GroupId)
+                .ToArray();
+            var first = orderedChildren[0];
+            var children = orderedChildren.Select(group =>
+                new MonitorTreeItemViewModel(
+                    group.Name,
+                    group,
+                    itemId: group.GroupId,
+                    status: CameraStatus.Unknown));
+            var total = orderedChildren.Sum(group => group.Cameras.Count);
 
-        return new MonitorTreeItemViewModel(title, children: children, countText: $"({total}/{total})", isExpanded: true);
+            sections.Add(new MonitorTreeItemViewModel(
+                first.RootName,
+                children: children,
+                countText: $"({total}/{total})",
+                status: CameraStatus.Unknown,
+                isExpanded: true,
+                itemId: first.RootGroupId));
+        }
+
+        return sections;
     }
 
     private void SelectGroup(MonitorTreeItemViewModel? item)
@@ -130,6 +162,21 @@ public sealed class MonitorViewModel : ObservableObject
             return;
         }
 
+        switch (group.Type)
+        {
+            case MonitorGroupType.Chute:
+                switchService.SwitchChuteGroup(group.GroupId);
+                break;
+            case MonitorGroupType.Tunnel:
+                switchService.SwitchTunnelGroup(group.GroupId);
+                break;
+            case MonitorGroupType.UnloadingStation:
+                switchService.SwitchUnloadingGroup(group.GroupId);
+                break;
+            default:
+                return;
+        }
+
         if (selectedTreeItem is not null)
         {
             selectedTreeItem.IsSelected = false;
@@ -137,19 +184,6 @@ public sealed class MonitorViewModel : ObservableObject
 
         selectedTreeItem = item;
         selectedTreeItem.IsSelected = true;
-
-        switch (group.Type)
-        {
-            case MonitorGroupType.Chute:
-                switchService.SwitchChuteGroup(group);
-                break;
-            case MonitorGroupType.Tunnel:
-                switchService.SwitchTunnel(group);
-                break;
-            case MonitorGroupType.UnloadingStation:
-                switchService.SwitchUnloadingGroup(group);
-                break;
-        }
     }
 
     private void ToggleSingleTile(VideoTileViewModel? slot)
@@ -173,67 +207,115 @@ public sealed class MonitorViewModel : ObservableObject
 
     private void OnCatalogChanged(object? sender, EventArgs e)
     {
-        RefreshCatalogProjection();
-        Render(switchService.Current);
-    }
+        var expandedRoots = TreeSections
+            .Where(section => section.ItemId is not null)
+            .ToDictionary(section => section.ItemId!.Value, section => section.IsExpanded);
+        var selectedGroupId = GetSelectedGroupId();
+        var selectedGroupType = GetSelectedGroupType();
 
-    private void Render(MonitorLayoutSnapshot snapshot)
-    {
-        var mainCameras = snapshot.MainSlots
-            .Select(ResolveProjectedCamera)
-            .ToArray();
-        for (var index = 0; index < MainTiles.Count; index++)
-        {
-            var camera = mainCameras[index];
-            var device = deviceCatalog.GetDevice(camera.DeviceId);
-            var channel = device?.Channels.SingleOrDefault(item => item.Id == camera.ChannelId);
-            MainTiles[index].Update(camera, device, channel);
-        }
-
-        CurrentChuteName = mainCameras[0].GroupName;
-        CurrentTunnelName = mainCameras[3].GroupName;
-    }
-
-    private void RefreshCatalogProjection()
-    {
-        var expandedSections = TreeSections.ToDictionary(
-            section => section.Name,
-            section => section.IsExpanded);
-        var selectedGroupId = selectedTreeItem?.Group?.GroupId;
         if (selectedTreeItem is not null)
         {
             selectedTreeItem.IsSelected = false;
         }
 
-        var refreshedGroups = MonitorCatalogProjection.CreateGroups(deviceCatalog);
+        var refreshedGroups = projectGroups();
         Groups = refreshedGroups;
+        switchService.ReplaceGroups(refreshedGroups);
         TreeSections.Clear();
-        selectedTreeItem = null;
-
         foreach (var section in CreateTree(refreshedGroups))
         {
-            if (expandedSections.TryGetValue(section.Name, out var isExpanded))
+            if (section.ItemId is { } rootId
+                && expandedRoots.TryGetValue(rootId, out var isExpanded))
             {
                 section.IsExpanded = isExpanded;
             }
 
-            var selectedItem = section.Children.FirstOrDefault(item =>
-                item.Group?.GroupId == selectedGroupId);
-            if (selectedItem is not null)
-            {
-                selectedItem.IsSelected = true;
-                selectedTreeItem = selectedItem;
-            }
-
             TreeSections.Add(section);
+        }
+
+        RestoreSelectedTreeItem(selectedGroupId, selectedGroupType);
+        Render(switchService.Current);
+    }
+
+    private void RestoreSelectedTreeItem(Guid? selectedGroupId, MonitorGroupType? selectedGroupType)
+    {
+        var fallbackId = selectedGroupType switch
+        {
+            MonitorGroupType.Chute => switchService.SelectedChuteGroupId,
+            MonitorGroupType.Tunnel => switchService.SelectedTunnelGroupId,
+            MonitorGroupType.UnloadingStation => switchService.SelectedUnloadingGroupId,
+            _ => GetSelectedGroupId()
+        };
+        var targetId = selectedGroupId is { } requested
+            && Groups.Any(group => group.GroupId == requested && group.Type == selectedGroupType)
+            ? requested
+            : fallbackId;
+        var target = targetId is { } id
+            ? TreeSections
+                .SelectMany(section => section.Children)
+                .FirstOrDefault(item => item.ItemId == id)
+            : null;
+
+        if (selectedTreeItem is not null)
+        {
+            selectedTreeItem.IsSelected = false;
+        }
+
+        selectedTreeItem = target;
+        if (selectedTreeItem is not null)
+        {
+            selectedTreeItem.IsSelected = true;
         }
     }
 
-    private CameraInfo ResolveProjectedCamera(CameraInfo camera) =>
-        Groups
-            .SelectMany(group => group.Cameras)
-            .FirstOrDefault(item =>
-                item.DeviceId == camera.DeviceId
-                && item.ChannelId == camera.ChannelId)
-        ?? camera;
+    private void Render(MonitorLayoutSnapshot snapshot)
+    {
+        for (var index = 0; index < MainTiles.Count; index++)
+        {
+            var camera = index < snapshot.MainSlots.Count
+                ? snapshot.MainSlots[index]
+                : null;
+            if (camera is null)
+            {
+                MainTiles[index].ResetUnconfigured();
+                continue;
+            }
+
+            var device = catalog.GetDevice(camera.DeviceId);
+            var channel = device?.Channels.SingleOrDefault(item => item.Id == camera.ChannelId);
+            MainTiles[index].Update(camera, device, channel, camera.Status);
+        }
+
+        CurrentChuteName = GetSelectedGroupName(
+            switchService.SelectedChuteGroupId,
+            MonitorGroupType.Chute);
+        CurrentTunnelName = GetSelectedGroupName(
+            switchService.SelectedTunnelGroupId,
+            MonitorGroupType.Tunnel);
+    }
+
+    private Guid? GetSelectedGroupId() => selectedTreeItem?.Group?.GroupId;
+
+    private MonitorGroupType? GetSelectedGroupType() => selectedTreeItem?.Group?.Type;
+
+    private (Guid? Id, MonitorGroupType? Type) GetInitialSelection()
+    {
+        if (switchService.SelectedChuteGroupId is { } chuteId)
+        {
+            return (chuteId, MonitorGroupType.Chute);
+        }
+
+        if (switchService.SelectedTunnelGroupId is { } tunnelId)
+        {
+            return (tunnelId, MonitorGroupType.Tunnel);
+        }
+
+        return (switchService.SelectedUnloadingGroupId, MonitorGroupType.UnloadingStation);
+    }
+
+    private string GetSelectedGroupName(Guid? groupId, MonitorGroupType type) =>
+        groupId is { } id
+        && Groups.FirstOrDefault(group => group.GroupId == id && group.Type == type) is { } group
+            ? group.Name
+            : "未配置";
 }

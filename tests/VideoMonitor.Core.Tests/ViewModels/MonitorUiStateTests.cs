@@ -1,6 +1,9 @@
 using VideoMonitor.Core.Mock;
+using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Core.Services;
+using VideoMonitor.Wpf.Catalog;
+using VideoMonitor.Wpf.Playback;
 using VideoMonitor.Wpf.ViewModels;
 
 namespace VideoMonitor.Core.Tests.ViewModels;
@@ -84,6 +87,140 @@ public sealed class MonitorUiStateTests
         Assert.True(monitor.IsDetailPanelCollapsed);
     }
 
+    [Fact]
+    public void NullTile_ResetShowsUnconfiguredAndUnknown()
+    {
+        var tile = new VideoTileViewModel();
+        var deviceId = Guid.NewGuid();
+        var channelId = Guid.NewGuid();
+        var channel = new CameraChannelDto(
+            channelId,
+            deviceId,
+            1,
+            "Main",
+            StreamType.Main,
+            true);
+        var info = new CameraInfo("Camera", "Group", 1)
+        {
+            DeviceId = deviceId,
+            ChannelId = channelId
+        };
+        var device = new CameraDeviceDto(
+            deviceId,
+            Guid.NewGuid(),
+            "Camera",
+            "192.0.2.10",
+            8000,
+            554,
+            "user",
+            true,
+            "Maker",
+            "Model",
+            TransportMode.Tcp,
+            true,
+            "remark",
+            1,
+            [channel]);
+
+        tile.Update(info, device, channel, CameraStatus.Warning);
+        tile.ShowError("播放失败", "旧错误");
+
+        tile.ResetUnconfigured();
+
+        Assert.Equal("未配置", tile.CameraName);
+        Assert.Equal("--", tile.GroupName);
+        Assert.Equal(0, tile.ChannelNumber);
+        Assert.Equal(CameraStatus.Unknown, tile.Status);
+        Assert.Equal("--", tile.IpAddress);
+        Assert.Equal("-- Mbps", tile.Bitrate);
+        Assert.Equal("--", tile.StreamType);
+        Assert.Equal(PlaybackState.Placeholder, tile.PlaybackState);
+        Assert.Null(tile.PlaybackSession);
+        Assert.Equal(string.Empty, tile.PlaybackErrorTitle);
+        Assert.Equal(string.Empty, tile.PlaybackErrorDetail);
+    }
+
+    [Fact]
+    public void VideoTileUpdate_UsesPasswordSafeDtoAndExplicitRuntimeStatus()
+    {
+        var tile = new VideoTileViewModel();
+        var deviceId = Guid.NewGuid();
+        var channelId = Guid.NewGuid();
+        var channel = new CameraChannelDto(
+            channelId,
+            deviceId,
+            1,
+            "Main",
+            StreamType.Main,
+            true);
+        var info = new CameraInfo("Camera", "Group", 1)
+        {
+            DeviceId = deviceId,
+            ChannelId = channelId
+        };
+        var device = new CameraDeviceDto(
+            deviceId,
+            Guid.NewGuid(),
+            "Camera DTO",
+            "192.0.2.20",
+            8000,
+            554,
+            "user",
+            true,
+            "Maker",
+            "Model",
+            TransportMode.Tcp,
+            true,
+            "remark",
+            1,
+            [channel]);
+
+        tile.Update(info, device, channel, CameraStatus.Warning);
+
+        Assert.Equal("Camera", tile.CameraName);
+        Assert.Equal("Group", tile.GroupName);
+        Assert.Equal("192.0.2.20", tile.IpAddress);
+        Assert.Equal(CameraStatus.Warning, tile.Status);
+        Assert.Equal("主码流", tile.StreamType);
+    }
+
+    [Fact]
+    public void EmptyCentralCatalog_RendersFourUnconfiguredMainTiles()
+    {
+        var readModel = new CentralReadModelStub();
+        var viewModel = new MonitorViewModel(
+            new MonitorSwitchService(Array.Empty<MonitorGroup>()),
+            readModel);
+
+        Assert.Equal(4, viewModel.MainTiles.Count);
+        Assert.All(viewModel.MainTiles, tile =>
+        {
+            Assert.Equal("未配置", tile.CameraName);
+            Assert.Equal(CameraStatus.Unknown, tile.Status);
+        });
+    }
+
+    [Fact]
+    public void SelectedZeroCameraChute_ShowsGroupNameButNullTiles()
+    {
+        var rootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var readModel = new CentralReadModelStub
+        {
+            Groups =
+            [
+                new DeviceGroupDto(rootId, "Chute Root", null, 0, true, MonitorGroupType.Chute, 1),
+                new DeviceGroupDto(childId, "Chute A", rootId, 0, true, null, 1)
+            ]
+        };
+        var groups = MonitorCatalogProjection.CreateGroups(readModel);
+        var viewModel = new MonitorViewModel(new MonitorSwitchService(groups), readModel);
+
+        Assert.Equal("Chute A", viewModel.CurrentChuteName);
+        Assert.All(viewModel.MainTiles.Take(3), tile =>
+            Assert.Equal("未配置", tile.CameraName));
+    }
+
     private static (MonitorViewModel ViewModel, MonitorSwitchService Service) CreateFixture()
     {
         var data = MockDeviceData.Create();
@@ -99,12 +236,31 @@ public sealed class MonitorUiStateTests
 
     private static string Snapshot(MonitorViewModel viewModel, MonitorSwitchService service)
     {
-        var main = string.Join('|', service.Current.MainSlots.Select(camera => camera.Name));
-        var secondary = string.Join('|', service.Current.SecondarySlots.Select(camera => camera.Name));
-        var unloadingGroup = service.Current.SecondarySlots[0].GroupName;
+        var main = string.Join('|', service.Current.MainSlots.Select(camera => camera?.Name ?? "--"));
+        var secondary = string.Join('|', service.Current.SecondarySlots.Select(camera => camera?.Name ?? "--"));
+        var unloadingGroup = service.Current.SecondarySlots[0]?.GroupName ?? "--";
         return $"{viewModel.CurrentChuteName};{viewModel.CurrentTunnelName};{unloadingGroup};{main};{secondary}";
     }
 
     private static MonitorGroup Group(IReadOnlyList<MonitorGroup> groups, string name) =>
         groups.Single(group => group.Name == name);
+
+    private sealed class CentralReadModelStub : IDeviceCatalogReadModel
+    {
+        public IReadOnlyList<DeviceGroupDto> Groups { get; init; } = [];
+
+        public IReadOnlyList<CameraDeviceDto> Devices { get; init; } = [];
+
+        public event EventHandler? Changed;
+
+        public IReadOnlyList<DeviceGroupDto> GetGroups() => Groups;
+
+        public IReadOnlyList<CameraDeviceDto> GetDevices(Guid groupId) =>
+            Devices.Where(device => device.GroupId == groupId).ToArray();
+
+        public CameraDeviceDto? GetDevice(Guid deviceId) =>
+            Devices.SingleOrDefault(device => device.Id == deviceId);
+
+        public void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
+    }
 }

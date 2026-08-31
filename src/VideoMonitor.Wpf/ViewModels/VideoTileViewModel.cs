@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Wpf.Playback;
 
@@ -6,10 +7,10 @@ namespace VideoMonitor.Wpf.ViewModels;
 
 public sealed class VideoTileViewModel : ObservableObject
 {
-    private string cameraName = "未选择摄像头";
+    private string cameraName = "未配置";
     private string groupName = "--";
     private int channelNumber;
-    private CameraStatus status = CameraStatus.Offline;
+    private CameraStatus status = CameraStatus.Unknown;
     private string ipAddress = "--";
     private string bitrate = "-- Mbps";
     private string streamType = "--";
@@ -94,21 +95,41 @@ public sealed class VideoTileViewModel : ObservableObject
     }
 
     public void Update(
-        CameraInfo camera,
-        CameraDevice? device,
-        CameraChannel? channel)
+        CameraInfo info,
+        CameraDeviceDto? device,
+        CameraChannelDto? channel,
+        CameraStatus status)
     {
-        ArgumentNullException.ThrowIfNull(camera);
-        CameraName = device?.Name ?? camera.Name;
-        GroupName = camera.GroupName;
-        ChannelNumber = camera.ChannelNumber;
-        Status = device?.Status ?? camera.Status;
+        ArgumentNullException.ThrowIfNull(info);
+        CameraName = info.Name;
+        GroupName = info.GroupName;
+        ChannelNumber = info.ChannelNumber;
+        Status = status;
         IpAddress = device?.IpAddress ?? "--";
-        Bitrate = camera.Bitrate;
-        StreamType = channel is null
-            ? camera.StreamType
-            : channel.StreamType == VideoMonitor.Core.Models.StreamType.Main ? "主码流" : "辅码流";
+        Bitrate = info.Bitrate;
+        StreamType = channel?.StreamType switch
+        {
+            VideoMonitor.Core.Models.StreamType.Main => "主码流",
+            VideoMonitor.Core.Models.StreamType.Sub => "辅码流",
+            _ => "--"
+        };
         Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+    }
+
+    public void ResetUnconfigured()
+    {
+        CameraName = "未配置";
+        GroupName = "--";
+        ChannelNumber = 0;
+        Status = CameraStatus.Unknown;
+        IpAddress = "--";
+        Bitrate = "-- Mbps";
+        StreamType = "--";
+        Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        PlaybackSession = null;
+        PlaybackErrorTitle = string.Empty;
+        PlaybackErrorDetail = string.Empty;
+        PlaybackState = PlaybackState.Placeholder;
     }
 
     public void ShowLoading()
