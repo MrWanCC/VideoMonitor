@@ -35,6 +35,12 @@ public sealed class ClientCatalogCache : IDeviceCatalogReadModel
             cancellationToken);
     }
 
+    internal CatalogSnapshotDto PrepareSnapshot(CatalogSnapshotDto next)
+    {
+        ValidateSnapshot(next);
+        return next;
+    }
+
     internal bool ApplyPreparedSnapshotOnUiThread(CatalogSnapshotDto next)
     {
         ArgumentNullException.ThrowIfNull(next);

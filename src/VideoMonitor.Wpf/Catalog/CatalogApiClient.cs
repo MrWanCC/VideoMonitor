@@ -5,7 +5,18 @@ using VideoMonitor.Core.Catalog;
 
 namespace VideoMonitor.Wpf.Catalog;
 
-public sealed class CatalogApiClient
+public interface ICatalogConnectionClient
+{
+    Task CheckReadyAsync(
+        Uri baseUri,
+        CancellationToken cancellationToken = default);
+
+    Task<CatalogSnapshotDto> GetCatalogAsync(
+        Uri baseUri,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class CatalogApiClient : ICatalogConnectionClient
 {
     private readonly HttpClient httpClient;
 
