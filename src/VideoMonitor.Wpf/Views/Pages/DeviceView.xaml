@@ -134,6 +134,11 @@
                         <TextBlock FontSize="{StaticResource FontSizePageTitle}" FontWeight="SemiBold" Text="设备分组" />
                         <TextBlock Margin="0,3,0,0" Style="{StaticResource MutedTextStyle}" Text="按业务分类管理监控设备" />
                     </StackPanel>
+                    <Button Grid.Column="1" Width="72" Height="30" VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="AddRootCategoryButton"
+                            Command="{Binding BeginAddRootCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Content="新增分类" />
                 </Grid>
 
                 <ScrollViewer Grid.Row="1" Margin="0,8,0,0" VerticalScrollBarVisibility="Auto">
@@ -150,7 +155,53 @@
                                         </Grid.ColumnDefinitions>
                                         <ToggleButton Grid.Column="0" Grid.ColumnSpan="3"
                                                       IsChecked="{Binding IsExpanded, Mode=TwoWay}"
-                                                      Style="{StaticResource DeviceGroupSectionToggleStyle}">
+                                                      Style="{StaticResource DeviceGroupSectionToggleStyle}"
+                                                      Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                            <ToggleButton.ContextMenu>
+                                                <ContextMenu Background="{StaticResource PanelBackgroundBrush}"
+                                                             BorderBrush="{StaticResource BorderBrush}"
+                                                             BorderThickness="1"
+                                                             Padding="0">
+                                                    <ContextMenu.Resources>
+                                                        <Style TargetType="MenuItem">
+                                                            <Setter Property="Background" Value="{StaticResource PanelBackgroundBrush}" />
+                                                            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+                                                            <Setter Property="Padding" Value="12,6" />
+                                                            <Setter Property="Template">
+                                                                <Setter.Value>
+                                                                    <ControlTemplate TargetType="MenuItem">
+                                                                        <Border x:Name="Chrome"
+                                                                                Background="{TemplateBinding Background}"
+                                                                                Padding="{TemplateBinding Padding}">
+                                                                            <ContentPresenter ContentSource="Header"
+                                                                                              HorizontalAlignment="Left"
+                                                                                              VerticalAlignment="Center"
+                                                                                              TextElement.Foreground="{TemplateBinding Foreground}" />
+                                                                        </Border>
+                                                                        <ControlTemplate.Triggers>
+                                                                            <Trigger Property="IsHighlighted" Value="True">
+                                                                                <Setter TargetName="Chrome" Property="Background"
+                                                                                        Value="{StaticResource SelectedBlueBrush}" />
+                                                                                <Setter Property="Foreground"
+                                                                                        Value="{StaticResource PrimaryTextBrush}" />
+                                                                            </Trigger>
+                                                                            <Trigger Property="IsEnabled" Value="False">
+                                                                                <Setter Property="Opacity" Value="0.55" />
+                                                                            </Trigger>
+                                                                        </ControlTemplate.Triggers>
+                                                                    </ControlTemplate>
+                                                                </Setter.Value>
+                                                            </Setter>
+                                                        </Style>
+                                                    </ContextMenu.Resources>
+                                                    <MenuItem Header="编辑"
+                                                              Command="{Binding PlacementTarget.Tag.BeginEditRootCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                              CommandParameter="{Binding PlacementTarget.DataContext.CatalogGroup.Id, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                                    <MenuItem Header="删除"
+                                                              Command="{Binding PlacementTarget.Tag.DeleteRootCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                              CommandParameter="{Binding PlacementTarget.DataContext.CatalogGroup.Id, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                                </ContextMenu>
+                                            </ToggleButton.ContextMenu>
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="18" />
@@ -279,6 +330,38 @@
                 </ScrollViewer>
                 <TextBlock Grid.Row="2" Margin="4,8,4,0" Foreground="{StaticResource WarningOrangeBrush}"
                            FontSize="{StaticResource FontSizeCaption}" TextWrapping="Wrap" Text="{Binding GroupEditError}" />
+                <Border Grid.RowSpan="3" Panel.ZIndex="30" Padding="12"
+                        Background="{StaticResource PanelBackgroundBrush}"
+                        BorderBrush="{StaticResource BorderHighlightBrush}" BorderThickness="1"
+                        Visibility="{Binding IsRootEditorOpen, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock FontSize="{StaticResource FontSizeVideoTitle}" FontWeight="SemiBold"
+                                   Foreground="{StaticResource PrimaryTextBrush}" Text="根分类" />
+                        <TextBlock Margin="0,4,0,16" Style="{StaticResource MutedTextStyle}"
+                                   Text="配置监控设备的业务分类" />
+                        <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="分类名称 *" />
+                        <TextBox AutomationProperties.AutomationId="RootCategoryNameTextBox"
+                                 Style="{StaticResource IndustrialTextBoxStyle}"
+                                 Text="{Binding RootEditName, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Margin="0,12,0,6" Style="{StaticResource DeviceFieldLabelStyle}" Text="分类类型 *" />
+                        <ComboBox AutomationProperties.AutomationId="RootCategoryKindComboBox"
+                                  Style="{StaticResource IndustrialComboBoxStyle}"
+                                  ItemsSource="{Binding RootKindOptions}"
+                                  SelectedItem="{Binding RootEditKind, Mode=TwoWay}"
+                                  IsEnabled="{Binding CanEditRootKind}" />
+                        <TextBlock Margin="0,8,0,0" Foreground="{StaticResource WarningOrangeBrush}"
+                                   TextWrapping="Wrap" Text="{Binding RootEditError}" />
+                        <StackPanel Margin="0,18,0,0" HorizontalAlignment="Right" Orientation="Horizontal">
+                            <Button Width="64" Margin="0,0,8,0"
+                                    AutomationProperties.AutomationId="CancelRootCategoryButton"
+                                    Command="{Binding CancelRootEditCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}" Content="取消" />
+                            <Button Width="64" AutomationProperties.AutomationId="SaveRootCategoryButton"
+                                    Command="{Binding SaveRootCommand}"
+                                    Style="{StaticResource PrimaryButtonStyle}" Content="保存" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
             </Grid>
         </Border>
 

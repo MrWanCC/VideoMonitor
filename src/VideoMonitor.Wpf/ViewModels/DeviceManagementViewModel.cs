@@ -34,11 +34,21 @@ public sealed class DeviceManagementViewModel : ObservableObject
     private bool editingCatalogGroupIsNew;
     private long editingCatalogGroupRevision;
     private CameraDeviceDto? editingCatalogDevice;
+    private bool isRootEditorOpen;
+    private Guid? editingRootId;
+    private string rootEditName = string.Empty;
+    private MonitorGroupType? rootEditKind;
+    private MonitorGroupType? editingRootOriginalKind;
+    private long editingRootRevision;
+    private int editingRootSort;
+    private bool editingRootEnabled;
+    private string rootEditError = string.Empty;
     private bool suppressDraftTracking;
     private bool isSaving;
     private bool isServerAvailable;
     private bool hasUnsavedDeviceDraft;
     private bool hasUnsavedGroupDraft;
+    private bool hasUnsavedRootDraft;
     private string? operationErrorCode;
     private string operationError = string.Empty;
     private bool lastOperationSucceeded;
@@ -62,6 +72,11 @@ public sealed class DeviceManagementViewModel : ObservableObject
             CommitGroupEditAsync,
             CanCommitGroupEdit);
         CancelGroupEditCommand = new RelayCommand(CancelGroupEdit);
+        BeginAddRootCommand = new RelayCommand(BeginAddRoot);
+        BeginEditRootCommand = new RelayCommand<Guid?>(BeginEditRoot);
+        SaveRootCommand = new AsyncRelayCommand(SaveRootAsync, CanSaveRoot);
+        CancelRootEditCommand = new RelayCommand(CancelRootEdit);
+        DeleteRootCommand = new AsyncRelayCommand<Guid?>(DeleteRootAsync, CanDeleteRoot);
         DeleteGroupCommand = new RelayCommand<object?>(
             DeleteGroup,
             _ => !centralMode || IsServerAvailable);
@@ -102,6 +117,11 @@ public sealed class DeviceManagementViewModel : ObservableObject
             CommitGroupEditAsync,
             CanCommitGroupEdit);
         CancelGroupEditCommand = new RelayCommand(CancelGroupEdit);
+        BeginAddRootCommand = new RelayCommand(BeginAddRoot);
+        BeginEditRootCommand = new RelayCommand<Guid?>(BeginEditRoot);
+        SaveRootCommand = new AsyncRelayCommand(SaveRootAsync, CanSaveRoot);
+        CancelRootEditCommand = new RelayCommand(CancelRootEdit);
+        DeleteRootCommand = new AsyncRelayCommand<Guid?>(DeleteRootAsync, CanDeleteRoot);
         DeleteGroupCommand = new RelayCommand<object?>(
             DeleteGroup,
             _ => !centralMode || IsServerAvailable);
@@ -180,6 +200,16 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
     public IRelayCommand CancelGroupEditCommand { get; }
 
+    public IRelayCommand BeginAddRootCommand { get; }
+
+    public IRelayCommand<Guid?> BeginEditRootCommand { get; }
+
+    public IAsyncRelayCommand SaveRootCommand { get; }
+
+    public IRelayCommand CancelRootEditCommand { get; }
+
+    public IAsyncRelayCommand<Guid?> DeleteRootCommand { get; }
+
     public IRelayCommand<object?> DeleteGroupCommand { get; }
 
     public IAsyncRelayCommand ConfirmDialogCommand { get; }
@@ -204,6 +234,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
             if (SetProperty(ref isSaving, value))
             {
                 ((AsyncRelayCommand)SaveDeviceCommand).NotifyCanExecuteChanged();
+                ((AsyncRelayCommand)SaveRootCommand).NotifyCanExecuteChanged();
+                ((AsyncRelayCommand<Guid?>)DeleteRootCommand).NotifyCanExecuteChanged();
             }
         }
     }
@@ -217,6 +249,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
             {
                 ((AsyncRelayCommand)SaveDeviceCommand).NotifyCanExecuteChanged();
                 ((AsyncRelayCommand)CommitGroupEditCommand).NotifyCanExecuteChanged();
+                ((AsyncRelayCommand)SaveRootCommand).NotifyCanExecuteChanged();
+                ((AsyncRelayCommand<Guid?>)DeleteRootCommand).NotifyCanExecuteChanged();
                 ((RelayCommand<object?>)DeleteGroupCommand).NotifyCanExecuteChanged();
                 ((RelayCommand<object?>)DeleteDeviceCommand).NotifyCanExecuteChanged();
             }
@@ -225,7 +259,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
     public bool HasUnsavedDraft
     {
-        get => hasUnsavedDeviceDraft || hasUnsavedGroupDraft;
+        get => hasUnsavedDeviceDraft || hasUnsavedGroupDraft || hasUnsavedRootDraft;
     }
 
     public string? OperationErrorCode
@@ -313,6 +347,54 @@ public sealed class DeviceManagementViewModel : ObservableObject
     {
         get => groupEditError;
         private set => SetProperty(ref groupEditError, value);
+    }
+
+    public IReadOnlyList<MonitorGroupType> RootKindOptions { get; } =
+        Enum.GetValues<MonitorGroupType>();
+
+    public bool IsRootEditorOpen
+    {
+        get => isRootEditorOpen;
+        private set
+        {
+            if (SetProperty(ref isRootEditorOpen, value))
+            {
+                ((AsyncRelayCommand)SaveRootCommand).NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public Guid? EditingRootId
+    {
+        get => editingRootId;
+        private set
+        {
+            if (SetProperty(ref editingRootId, value))
+            {
+                ((AsyncRelayCommand)SaveRootCommand).NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public string RootEditName
+    {
+        get => rootEditName;
+        set => SetProperty(ref rootEditName, value ?? string.Empty);
+    }
+
+    public MonitorGroupType? RootEditKind
+    {
+        get => rootEditKind;
+        set => SetProperty(ref rootEditKind, value);
+    }
+
+    public bool CanEditRootKind =>
+        IsRootEditorOpen && editingRootOriginalKind is null;
+
+    public string RootEditError
+    {
+        get => rootEditError;
+        private set => SetProperty(ref rootEditError, value);
     }
 
     public bool IsDialogOpen
@@ -426,6 +508,237 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
         BeginAddLegacyGroup(value as DeviceGroup);
     }
+
+    private void BeginAddRoot()
+    {
+        if (!centralMode)
+        {
+            return;
+        }
+
+        IsRootEditorOpen = true;
+        EditingRootId = Guid.NewGuid();
+        editingRootOriginalKind = null;
+        editingRootRevision = 0;
+        editingRootSort = 0;
+        editingRootEnabled = true;
+        RootEditName = string.Empty;
+        RootEditKind = null;
+        RootEditError = string.Empty;
+        OnPropertyChanged(nameof(CanEditRootKind));
+        SetRootDraftPending(true);
+    }
+
+    private void BeginEditRoot(Guid? rootId)
+    {
+        if (!centralMode
+            || rootId is not { } id
+            || CatalogGroups.FirstOrDefault(group =>
+                group.Id == id && group.ParentId is null) is not { } root)
+        {
+            return;
+        }
+
+        IsRootEditorOpen = true;
+        EditingRootId = root.Id;
+        editingRootOriginalKind = root.Kind;
+        editingRootRevision = root.Revision;
+        editingRootSort = root.Sort;
+        editingRootEnabled = root.Enabled;
+        RootEditName = root.Name;
+        RootEditKind = root.Kind;
+        RootEditError = string.Empty;
+        OnPropertyChanged(nameof(CanEditRootKind));
+        SetRootDraftPending(true);
+    }
+
+    private bool CanSaveRoot() =>
+        centralMode
+        && !IsSaving
+        && IsServerAvailable
+        && IsRootEditorOpen
+        && EditingRootId.HasValue;
+
+    private bool CanDeleteRoot(Guid? rootId) =>
+        centralMode
+        && !IsSaving
+        && IsServerAvailable
+        && rootId.HasValue
+        && CatalogGroups.Any(group =>
+            group.Id == rootId.Value && group.ParentId is null);
+
+    private async Task SaveRootAsync()
+    {
+        if (!centralMode
+            || EditingRootId is not { } rootId
+            || commandService is null)
+        {
+            return;
+        }
+
+        RootEditError = string.Empty;
+        LastOperationSucceeded = false;
+
+        var name = RootEditName.Trim();
+        if (name.Length == 0)
+        {
+            RootEditError = "根分类名称不能为空。";
+            return;
+        }
+
+        var kind = editingRootOriginalKind ?? RootEditKind;
+        if (kind is null)
+        {
+            RootEditError = "请选择根分类类型。";
+            return;
+        }
+
+        if (!IsServerAvailable)
+        {
+            RootEditError = "Catalog API is unavailable.";
+            return;
+        }
+
+        IsSaving = true;
+        try
+        {
+            if (editingRootRevision == 0)
+            {
+                await commandService.CreateGroupAsync(
+                        new CreateGroupRequest(
+                            rootId,
+                            name,
+                            null,
+                            NextRootSort(),
+                            true,
+                            kind.Value))
+                    .ConfigureAwait(true);
+            }
+            else if (CatalogGroups.Any(group =>
+                group.Id == rootId && group.ParentId is null))
+            {
+                await commandService.UpdateGroupAsync(
+                        rootId,
+                        new UpdateGroupRequest(
+                            name,
+                            null,
+                            editingRootSort,
+                            editingRootEnabled,
+                            kind,
+                            editingRootRevision))
+                    .ConfigureAwait(true);
+            }
+            else
+            {
+                RootEditError = "根分类不存在。";
+                return;
+            }
+
+            SetRootDraftPending(false);
+            LastOperationSucceeded = true;
+            ClearRootEditState();
+            RefreshCentralCatalogView();
+        }
+        catch (CatalogMutationUncertainException)
+        {
+            RootEditError = "CATALOG_MUTATION_UNCERTAIN";
+            LastOperationSucceeded = false;
+        }
+        catch (CatalogApiException exception)
+        {
+            RootEditError = exception.Code;
+            LastOperationSucceeded = false;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            RootEditError = "Catalog write failed.";
+            LastOperationSucceeded = false;
+        }
+        finally
+        {
+            IsSaving = false;
+        }
+    }
+
+    private void CancelRootEdit()
+    {
+        if (!centralMode)
+        {
+            return;
+        }
+
+        SetRootDraftPending(false);
+        ClearRootEditState();
+    }
+
+    private async Task DeleteRootAsync(Guid? rootId)
+    {
+        if (!centralMode
+            || rootId is not { } id
+            || commandService is null
+            || CatalogGroups.FirstOrDefault(group =>
+                group.Id == id && group.ParentId is null) is not { } root)
+        {
+            return;
+        }
+
+        RootEditError = string.Empty;
+        LastOperationSucceeded = false;
+        if (!IsServerAvailable)
+        {
+            RootEditError = "Catalog API is unavailable.";
+            return;
+        }
+
+        IsSaving = true;
+        try
+        {
+            await commandService.DeleteGroupAsync(root.Id, root.Revision)
+                .ConfigureAwait(true);
+
+            if (EditingRootId == root.Id)
+            {
+                SetRootDraftPending(false);
+                ClearRootEditState();
+            }
+
+            LastOperationSucceeded = true;
+            RefreshCentralCatalogView();
+        }
+        catch (CatalogMutationUncertainException)
+        {
+            RootEditError = "CATALOG_MUTATION_UNCERTAIN";
+            LastOperationSucceeded = false;
+        }
+        catch (CatalogApiException exception)
+        {
+            RootEditError = exception.Code;
+            LastOperationSucceeded = false;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            RootEditError = "Catalog write failed.";
+            LastOperationSucceeded = false;
+        }
+        finally
+        {
+            IsSaving = false;
+        }
+    }
+
+    private int NextRootSort() => CatalogGroups
+        .Where(group => group.ParentId is null)
+        .Select(group => group.Sort)
+        .DefaultIfEmpty(-1)
+        .Max() + 1;
 
     private void BeginAddLegacyGroup(DeviceGroup? root)
     {
@@ -816,6 +1129,20 @@ public sealed class DeviceManagementViewModel : ObservableObject
         GroupEditError = string.Empty;
     }
 
+    private void ClearRootEditState()
+    {
+        IsRootEditorOpen = false;
+        EditingRootId = null;
+        editingRootOriginalKind = null;
+        editingRootRevision = 0;
+        editingRootSort = 0;
+        editingRootEnabled = true;
+        RootEditName = string.Empty;
+        RootEditKind = null;
+        RootEditError = string.Empty;
+        OnPropertyChanged(nameof(CanEditRootKind));
+    }
+
     private void RebuildGroupSections()
     {
         GroupSections.Clear();
@@ -1185,6 +1512,17 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
 
         hasUnsavedGroupDraft = value;
+        OnPropertyChanged(nameof(HasUnsavedDraft));
+    }
+
+    private void SetRootDraftPending(bool value)
+    {
+        if (hasUnsavedRootDraft == value)
+        {
+            return;
+        }
+
+        hasUnsavedRootDraft = value;
         OnPropertyChanged(nameof(HasUnsavedDraft));
     }
 
