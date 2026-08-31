@@ -291,6 +291,7 @@ Execution steps:
   {
       using var context = TestContext.Create();
       await context.CreateV2DatabaseAsync();
+      Assert.Equal(2, await context.ReadMaxSchemaVersionAsync());
       await context.InsertRootAsync("溜井监控");
 
       await context.CreateInitializer().InitializeAsync();
@@ -303,6 +304,7 @@ Execution steps:
   {
       using var context = TestContext.Create();
       await context.CreateV2DatabaseAsync();
+      Assert.Equal(2, await context.ReadMaxSchemaVersionAsync());
       await context.InsertRootAsync("现场自定义分类");
 
       await context.CreateInitializer().InitializeAsync();
@@ -315,7 +317,24 @@ Execution steps:
   public async Task CreateV2DatabaseAsync()
   {
       await CreateV1DatabaseAsync();
-      await CreateInitializer().InitializeAsync();
+      await using var connection = CreateConnection();
+      await connection.OpenAsync();
+      await using var transaction = await connection.BeginTransactionAsync();
+      await using var command = connection.CreateCommand();
+      command.Transaction = transaction;
+      command.CommandText = """
+          ALTER TABLE device_groups
+          ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+
+          ALTER TABLE camera_devices
+          ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+
+          INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc)
+          VALUES (2, $appliedAtUtc);
+          """;
+      command.Parameters.AddWithValue("$appliedAtUtc", DateTimeOffset.UtcNow.ToString("O"));
+      await command.ExecuteNonQueryAsync();
+      await transaction.CommitAsync();
   }
 
   public async Task InsertRootAsync(string name)
@@ -1187,6 +1206,26 @@ Execution steps:
   }
 
   [Fact]
+  public async Task StatusChangedHandler_SeesServerBSnapshotDuringSuccessfulSwitch()
+  {
+      var fixture = await ConnectionFixture.ConnectedToAsync("https://server-a");
+      fixture.Api.Snapshot = new CatalogSnapshotDto(
+          [new DeviceGroupDto(Guid.NewGuid(), "Root B", null, 0, true, MonitorGroupType.Chute, 1)], []);
+      CatalogSnapshotDto? observedSnapshot = null;
+      fixture.Coordinator.StatusChanged += (_, _) =>
+          observedSnapshot = fixture.Cache.Snapshot;
+
+      await fixture.Coordinator.SwitchServerAsync(
+          new Uri("https://server-b"),
+          () => false);
+
+      Assert.Same(fixture.Api.Snapshot, observedSnapshot);
+      Assert.Equal(
+          new Uri("https://server-b"),
+          fixture.Coordinator.Status.BaseUri);
+  }
+
+  [Fact]
   public async Task RetryDelay_UsesBoundedDeterministicJitter()
   {
       var zero = new FakeConnectionClock(0.0);
@@ -1314,8 +1353,8 @@ Execution steps:
           {
               configuredBaseUri = candidate;
               Status = new ServerConnectionStatus(candidate, ServerConnectionState.Connected, clock.UtcNow, false);
-              StatusChanged?.Invoke(this, EventArgs.Empty);
               cache.ApplyPreparedSnapshotOnUiThread(preparedSnapshot);
+              StatusChanged?.Invoke(this, EventArgs.Empty);
           }, CancellationToken.None).ConfigureAwait(false);
       }
 
