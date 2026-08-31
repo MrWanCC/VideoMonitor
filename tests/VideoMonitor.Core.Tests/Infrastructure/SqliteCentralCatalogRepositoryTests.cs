@@ -128,6 +128,45 @@ public sealed class SqliteCentralCatalogRepositoryTests
     }
 
     [Fact]
+    public async Task UpdateGroupAsync_PersistsKind_AndGetCatalogReadsIt()
+    {
+        await using var context = await TestContext.CreateAsync();
+        var repository = CreateRepository(context, new CountingSecretProtector());
+        var root = await CreateGroupAsync(
+            repository,
+            id: Guid.Parse("91000000-0000-0000-0000-000000000021"),
+            name: "Legacy Root");
+        var child = await CreateGroupAsync(
+            repository,
+            id: Guid.Parse("91000000-0000-0000-0000-000000000022"),
+            parentId: root.Id,
+            name: "Legacy Child");
+
+        var rootDto = (await GetGroupAsync(repository, root.Id))!;
+        var model = ToWriteModel(rootDto);
+        model.Kind = MonitorGroupType.Chute;
+
+        var result = await UpdateGroupAsync(repository, model, rootDto.Revision);
+
+        Assert.Equal(CatalogRepositoryStatus.Success, GetStatus(result));
+        var updated = Assert.IsType<DeviceGroupDto>(GetProperty(result, "Value"));
+        Assert.Equal(MonitorGroupType.Chute, updated.Kind);
+        Assert.Equal(2L, updated.Revision);
+
+        var loadedRoot = (await GetGroupAsync(repository, root.Id))!;
+        Assert.Equal(MonitorGroupType.Chute, loadedRoot.Kind);
+        Assert.Equal(2L, loadedRoot.Revision);
+
+        var snapshot = await GetCatalogAsync(repository);
+        var catalogRoot = Assert.Single(snapshot.Groups, group => group.Id == root.Id);
+        var catalogChild = Assert.Single(snapshot.Groups, group => group.Id == child.Id);
+        Assert.Equal(MonitorGroupType.Chute, catalogRoot.Kind);
+        Assert.Equal(2L, catalogRoot.Revision);
+        Assert.Null(catalogChild.Kind);
+        Assert.Equal(root.Id, catalogChild.ParentId);
+    }
+
+    [Fact]
     public async Task GetGroupAsync_InvalidPersistedKind_ThrowsInvalidDataException()
     {
         await using var context = await TestContext.CreateAsync();
