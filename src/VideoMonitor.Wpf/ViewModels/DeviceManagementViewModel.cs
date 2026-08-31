@@ -37,7 +37,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
     private bool suppressDraftTracking;
     private bool isSaving;
     private bool isServerAvailable;
-    private bool hasUnsavedDraft;
+    private bool hasUnsavedDeviceDraft;
+    private bool hasUnsavedGroupDraft;
     private string? operationErrorCode;
     private string operationError = string.Empty;
     private bool lastOperationSucceeded;
@@ -224,8 +225,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
     public bool HasUnsavedDraft
     {
-        get => hasUnsavedDraft;
-        private set => SetProperty(ref hasUnsavedDraft, value);
+        get => hasUnsavedDeviceDraft || hasUnsavedGroupDraft;
     }
 
     public string? OperationErrorCode
@@ -464,6 +464,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
         editingCatalogGroupRevision = 0;
         EditingGroupName = string.Empty;
         GroupEditError = string.Empty;
+        SetGroupDraftPending(true);
         RefreshCentralGroupSections();
     }
 
@@ -506,6 +507,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
         editingCatalogGroupRevision = group.Revision;
         EditingGroupName = group.Name;
         GroupEditError = string.Empty;
+        SetGroupDraftPending(true);
         RefreshCentralGroupSections();
     }
 
@@ -516,6 +518,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
             : null;
         if (group is null)
         {
+            SetGroupDraftPending(false);
             ClearGroupEditState();
             return;
         }
@@ -548,6 +551,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
         group.Name = name;
         catalog.UpdateGroup(group);
         SelectedGroup = Groups.First(item => item.Id == group.Id);
+        SetGroupDraftPending(false);
         ClearGroupEditState();
         RebuildGroupSections();
     }
@@ -564,6 +568,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
             || editingCatalogParentId is not { } parentId
             || commandService is null)
         {
+            SetGroupDraftPending(false);
             ClearGroupEditState();
             return;
         }
@@ -628,12 +633,19 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 return;
             }
 
+            SetGroupDraftPending(false);
             ClearGroupEditState();
             RefreshCentralCatalogView();
+        }
+        catch (CatalogMutationUncertainException)
+        {
+            GroupEditError = "CATALOG_MUTATION_UNCERTAIN";
+            LastOperationSucceeded = false;
         }
         catch (CatalogApiException exception)
         {
             GroupEditError = exception.Code;
+            LastOperationSucceeded = false;
         }
         catch (OperationCanceledException)
         {
@@ -642,6 +654,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
         catch
         {
             GroupEditError = "Catalog write failed.";
+            LastOperationSucceeded = false;
         }
     }
 
@@ -649,6 +662,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
     {
         if (centralMode)
         {
+            SetGroupDraftPending(false);
             ClearGroupEditState();
             RefreshCentralGroupSections();
             return;
@@ -746,6 +760,12 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 catch (CatalogApiException exception)
                 {
                     GroupEditError = exception.Code;
+                    LastOperationSucceeded = false;
+                }
+                catch (CatalogMutationUncertainException)
+                {
+                    GroupEditError = "CATALOG_MUTATION_UNCERTAIN";
+                    LastOperationSucceeded = false;
                 }
                 catch (OperationCanceledException)
                 {
@@ -754,6 +774,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 catch
                 {
                     GroupEditError = "Catalog write failed.";
+                    LastOperationSucceeded = false;
                 }
             });
     }
@@ -830,7 +851,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
             try
             {
                 EditDraft.ResetForAdd(selectedCatalogGroup.Id);
-                HasUnsavedDraft = false;
+                SetDeviceDraftPending(false);
             }
             finally
             {
@@ -873,7 +894,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
             try
             {
                 EditDraft.Load(device);
-                HasUnsavedDraft = false;
+                SetDeviceDraftPending(false);
             }
             finally
             {
@@ -927,11 +948,13 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
         if (!IsServerAvailable || commandService is null)
         {
+            SetDeviceDraftPending(true);
             SetOperationError("CATALOG_UNAVAILABLE", "Catalog API is unavailable.");
             return;
         }
 
         IsSaving = true;
+        SetDeviceDraftPending(true);
         try
         {
             if (editingCatalogDevice is { } existing)
@@ -962,7 +985,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 RefreshCentralCatalogView();
             }
 
-            HasUnsavedDraft = false;
+            SetDeviceDraftPending(false);
             LastOperationSucceeded = true;
             CloseCentralEditor();
         }
@@ -1132,7 +1155,6 @@ public sealed class DeviceManagementViewModel : ObservableObject
     {
         OperationErrorCode = code;
         OperationError = message;
-        HasUnsavedDraft = true;
         LastOperationSucceeded = false;
     }
 
@@ -1140,8 +1162,30 @@ public sealed class DeviceManagementViewModel : ObservableObject
     {
         if (centralMode && !suppressDraftTracking)
         {
-            HasUnsavedDraft = true;
+            SetDeviceDraftPending(true);
         }
+    }
+
+    private void SetDeviceDraftPending(bool value)
+    {
+        if (hasUnsavedDeviceDraft == value)
+        {
+            return;
+        }
+
+        hasUnsavedDeviceDraft = value;
+        OnPropertyChanged(nameof(HasUnsavedDraft));
+    }
+
+    private void SetGroupDraftPending(bool value)
+    {
+        if (hasUnsavedGroupDraft == value)
+        {
+            return;
+        }
+
+        hasUnsavedGroupDraft = value;
+        OnPropertyChanged(nameof(HasUnsavedDraft));
     }
 
     private void OnReadModelChanged(object? sender, EventArgs e) => RefreshCentralCatalogView();
@@ -1237,7 +1281,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
         try
         {
             EditDraft.ResetForAdd(selectedCatalogGroup?.Id ?? Guid.Empty);
-            HasUnsavedDraft = false;
+            SetDeviceDraftPending(false);
         }
         finally
         {
@@ -1453,6 +1497,12 @@ public sealed class DeviceManagementViewModel : ObservableObject
                     }
 
                     RefreshCentralCatalogView();
+                }
+                catch (CatalogMutationUncertainException)
+                {
+                    SetOperationError(
+                        "CATALOG_MUTATION_UNCERTAIN",
+                        "Catalog mutation result could not be confirmed.");
                 }
                 catch (CatalogApiException exception)
                 {

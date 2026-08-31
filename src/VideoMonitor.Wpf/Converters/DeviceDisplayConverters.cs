@@ -72,7 +72,7 @@ public sealed class FirstChannelStreamConverter : IValueConverter
 public sealed class DeviceCatalogStatusToTextConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
-        (value is CameraStatus status ? status : CameraStatus.Unknown) switch
+        DeviceCatalogStatusResolver.Resolve(value) switch
         {
             CameraStatus.Online => "在线",
             CameraStatus.Warning => "异常",
@@ -88,7 +88,7 @@ public sealed class DeviceCatalogStatusToBrushConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
     {
-        var resourceKey = (value is CameraStatus status ? status : CameraStatus.Unknown) switch
+        var resourceKey = DeviceCatalogStatusResolver.Resolve(value) switch
         {
             CameraStatus.Online => "OnlineGreenBrush",
             CameraStatus.Warning => "WarningOrangeBrush",
@@ -102,4 +102,15 @@ public sealed class DeviceCatalogStatusToBrushConverter : IValueConverter
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
         System.Windows.Data.Binding.DoNothing;
+}
+
+internal static class DeviceCatalogStatusResolver
+{
+    public static CameraStatus Resolve(object value) => value switch
+    {
+        CameraDeviceDto => CameraStatus.Unknown,
+        CameraDevice device => device.Status,
+        CameraStatus status => status,
+        _ => CameraStatus.Unknown
+    };
 }

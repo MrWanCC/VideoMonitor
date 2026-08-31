@@ -215,12 +215,14 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
             }
             catch (Exception)
             {
-                if (!shutdown.IsCancellationRequested)
-                {
-                    _ = await PublishUnavailableAsync(
+                if (!shutdown.IsCancellationRequested
+                    && await PublishUnavailableAsync(
                             expectedBaseUri,
                             initialState.Generation)
-                        .ConfigureAwait(false);
+                        .ConfigureAwait(false)
+                    && !shutdown.IsCancellationRequested)
+                {
+                    SignalWake();
                 }
 
                 return false;

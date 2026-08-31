@@ -42,6 +42,25 @@ public sealed class DeviceManagementDraftTests
     }
 
     [Fact]
+    public void CentralAddChild_MarksUnsavedUntilCancel()
+    {
+        var root = Group("Root", null, MonitorGroupType.Chute);
+        var commands = new FakeCatalogCommandService();
+        var viewModel = new DeviceManagementViewModel(
+            new DeviceReadModelStub(null, [root]),
+            commands);
+
+        viewModel.BeginAddGroupCommand.Execute(root);
+
+        Assert.True(viewModel.HasUnsavedDraft);
+
+        viewModel.CancelGroupEditCommand.Execute(null);
+
+        Assert.False(viewModel.HasUnsavedDraft);
+        Assert.Equal(0, commands.WriteCount);
+    }
+
+    [Fact]
     public async Task CentralAddChild_SavePerformsOneWrite()
     {
         var root = Group("Root", null, MonitorGroupType.Chute);
@@ -59,6 +78,153 @@ public sealed class DeviceManagementDraftTests
         Assert.Null(request.Kind);
         Assert.NotEqual(Guid.Empty, request.Id);
         Assert.Equal(1, commands.WriteCount);
+    }
+
+    [Fact]
+    public async Task CentralRenameChild_MarksUnsavedUntilSaveOrCancel()
+    {
+        var root = Group("Root", null, MonitorGroupType.Chute);
+        var child = Group("Child", root.Id, null);
+        var commands = new FakeCatalogCommandService
+        {
+            UpdateGroupResult = child with { Name = "Renamed", Revision = 2 }
+        };
+        var viewModel = new DeviceManagementViewModel(
+            new DeviceReadModelStub(null, [root, child]),
+            commands);
+
+        viewModel.BeginRenameGroupCommand.Execute(child);
+        Assert.True(viewModel.HasUnsavedDraft);
+
+        viewModel.CancelGroupEditCommand.Execute(null);
+        Assert.False(viewModel.HasUnsavedDraft);
+
+        viewModel.BeginRenameGroupCommand.Execute(child);
+        viewModel.EditingGroupName = "Renamed";
+        await viewModel.CommitGroupEditCommand.ExecuteAsync(null);
+
+        Assert.False(viewModel.HasUnsavedDraft);
+        Assert.Equal(1, commands.WriteCount);
+    }
+
+    [Fact]
+    public void CancelGroupEdit_DoesNotClearUnsavedDeviceDraft()
+    {
+        var root = Group("Root", null, MonitorGroupType.Chute);
+        var device = ExistingDevice(groupId: Guid.NewGuid());
+        var commands = new FakeCatalogCommandService();
+        var viewModel = new DeviceManagementViewModel(
+            new DeviceReadModelStub(device, [root]),
+            commands);
+
+        viewModel.EditDeviceCommand.Execute(device);
+        viewModel.EditDraft.Name = "Unsubmitted device";
+        viewModel.BeginAddGroupCommand.Execute(root);
+
+        viewModel.CancelGroupEditCommand.Execute(null);
+
+        Assert.True(viewModel.HasUnsavedDraft);
+
+        viewModel.CancelEditCommand.Execute(null);
+
+        Assert.False(viewModel.HasUnsavedDraft);
+    }
+
+    [Fact]
+    public async Task CentralGroupConflict_RetainsDraft()
+    {
+        var root = Group("Root", null, MonitorGroupType.Chute);
+        var child = Group("Child", root.Id, null);
+        var commands = new FakeCatalogCommandService
+        {
+            NextGroupFailure = new CatalogApiException(
+                "GROUP_REVISION_CONFLICT",
+                7)
+        };
+        var viewModel = new DeviceManagementViewModel(
+            new DeviceReadModelStub(null, [root, child]),
+            commands);
+
+        viewModel.BeginRenameGroupCommand.Execute(child);
+        viewModel.EditingGroupName = "Changed";
+        await viewModel.CommitGroupEditCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.HasUnsavedDraft);
+        Assert.Equal("Changed", viewModel.EditingGroupName);
+        Assert.Equal("GROUP_REVISION_CONFLICT", viewModel.GroupEditError);
+        Assert.False(viewModel.LastOperationSucceeded);
+    }
+
+    [Fact]
+    public async Task CentralGroupUncertain_RetainsDraftAndSetsSafeError()
+    {
+        var root = Group("Root", null, MonitorGroupType.Chute);
+        var child = Group("Child", root.Id, null);
+        var commands = new FakeCatalogCommandService
+        {
+            NextGroupFailure = new CatalogMutationUncertainException(
+                "update-group",
+                child.Id)
+        };
+        var viewModel = new DeviceManagementViewModel(
+            new DeviceReadModelStub(null, [root, child]),
+            commands);
+
+        viewModel.BeginRenameGroupCommand.Execute(child);
+        viewModel.EditingGroupName = "Changed";
+        await viewModel.CommitGroupEditCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.HasUnsavedDraft);
+        Assert.Equal("Changed", viewModel.EditingGroupName);
+        Assert.Equal("CATALOG_MUTATION_UNCERTAIN", viewModel.GroupEditError);
+        Assert.False(viewModel.LastOperationSucceeded);
+    }
+
+    [Fact]
+    public async Task CentralDeleteGroupUncertain_SetsSafeErrorWithoutRemovingCachedDto()
+    {
+        var root = Group("Root", null, MonitorGroupType.Chute);
+        var child = Group("Child", root.Id, null);
+        var commands = new FakeCatalogCommandService
+        {
+            NextDeleteGroupFailure = new CatalogMutationUncertainException(
+                "delete-group",
+                child.Id)
+        };
+        var viewModel = new DeviceManagementViewModel(
+            new DeviceReadModelStub(null, [root, child]),
+            commands);
+
+        viewModel.DeleteGroupCommand.Execute(child);
+        await viewModel.ConfirmDialogCommand.ExecuteAsync(null);
+
+        Assert.Equal("CATALOG_MUTATION_UNCERTAIN", viewModel.GroupEditError);
+        Assert.Contains(viewModel.CatalogGroups, group => group.Id == child.Id);
+        Assert.False(viewModel.HasUnsavedDraft);
+        Assert.False(viewModel.LastOperationSucceeded);
+    }
+
+    [Fact]
+    public async Task CentralDeleteDeviceUncertain_SetsSafeErrorWithoutRemovingCachedDto()
+    {
+        var device = ExistingDevice();
+        var commands = new FakeCatalogCommandService
+        {
+            NextDeleteDeviceFailure = new CatalogMutationUncertainException(
+                "delete-device",
+                device.Id)
+        };
+        var viewModel = new DeviceManagementViewModel(
+            new DeviceReadModelStub(device),
+            commands);
+
+        viewModel.DeleteDeviceCommand.Execute(device);
+        await viewModel.ConfirmDialogCommand.ExecuteAsync(null);
+
+        Assert.Equal("CATALOG_MUTATION_UNCERTAIN", viewModel.OperationErrorCode);
+        Assert.Contains(viewModel.CatalogDevices, item => item.Id == device.Id);
+        Assert.False(viewModel.HasUnsavedDraft);
+        Assert.False(viewModel.LastOperationSucceeded);
     }
 
     [Fact]
@@ -170,6 +336,30 @@ public sealed class DeviceManagementDraftTests
             CultureInfo.InvariantCulture);
 
         Assert.Equal("未探测", value);
+    }
+
+    [Fact]
+    public void DeviceCatalogStatusConverter_PreservesLegacyCameraDeviceStatus()
+    {
+        var converter = new DeviceCatalogStatusToTextConverter();
+
+        var online = new CameraDevice { Status = CameraStatus.Online };
+        var warning = new CameraDevice { Status = CameraStatus.Warning };
+
+        Assert.Equal(
+            "在线",
+            converter.Convert(
+                online,
+                typeof(string),
+                null!,
+                CultureInfo.InvariantCulture));
+        Assert.Equal(
+            "异常",
+            converter.Convert(
+                warning,
+                typeof(string),
+                null!,
+                CultureInfo.InvariantCulture));
     }
 
     [Fact]
@@ -363,9 +553,17 @@ public sealed class DeviceManagementDraftTests
 
         public Exception? NextFailure { get; init; }
 
+        public Exception? NextGroupFailure { get; init; }
+
+        public Exception? NextDeleteGroupFailure { get; init; }
+
+        public Exception? NextDeleteDeviceFailure { get; init; }
+
         public bool CanWriteValue { get; init; } = true;
 
         public CameraDeviceDto? UpdateResult { get; init; }
+
+        public DeviceGroupDto? UpdateGroupResult { get; init; }
 
         public List<CreateGroupRequest> CreatedGroups { get; } = [];
 
@@ -398,14 +596,24 @@ public sealed class DeviceManagementDraftTests
         public Task<DeviceGroupDto> UpdateGroupAsync(
             Guid id,
             UpdateGroupRequest request,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult<DeviceGroupDto>(null!);
+            CancellationToken cancellationToken = default)
+        {
+            WriteCount++;
+            return NextGroupFailure is not null
+                ? Task.FromException<DeviceGroupDto>(NextGroupFailure)
+                : Task.FromResult(UpdateGroupResult!);
+        }
 
         public Task DeleteGroupAsync(
             Guid id,
             long expectedRevision,
-            CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+            CancellationToken cancellationToken = default)
+        {
+            WriteCount++;
+            return NextDeleteGroupFailure is not null
+                ? Task.FromException(NextDeleteGroupFailure)
+                : Task.CompletedTask;
+        }
 
         public Task<CameraDeviceDto> CreateDeviceAsync(
             CreateDeviceRequest request,
@@ -427,7 +635,12 @@ public sealed class DeviceManagementDraftTests
         public Task DeleteDeviceAsync(
             Guid id,
             long expectedRevision,
-            CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+            CancellationToken cancellationToken = default)
+        {
+            WriteCount++;
+            return NextDeleteDeviceFailure is not null
+                ? Task.FromException(NextDeleteDeviceFailure)
+                : Task.CompletedTask;
+        }
     }
 }
