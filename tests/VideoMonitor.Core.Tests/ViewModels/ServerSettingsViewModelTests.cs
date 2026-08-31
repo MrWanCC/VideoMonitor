@@ -88,6 +88,64 @@ public sealed class ServerSettingsViewModelTests
     }
 
     [Fact]
+    public async Task ChangingBaseUrlDuringProbe_DoesNotApplyStaleTestSuccess()
+    {
+        await using var fixture = await ConnectionFixture.CreateConnectedAsync();
+        var probeStarted = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseProbe = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Api.ReadyHandler = async (uri, cancellationToken) =>
+        {
+            Assert.Equal(new Uri("https://server-b"), uri);
+            probeStarted.TrySetResult(null);
+            await releaseProbe.Task.WaitAsync(cancellationToken);
+        };
+        var viewModel = fixture.CreateSettingsViewModel();
+        viewModel.BaseUrl = "https://server-b";
+
+        var testTask = viewModel.TestConnectionCommand.ExecuteAsync(null);
+        await probeStarted.Task;
+        viewModel.BaseUrl = "https://server-c";
+        releaseProbe.TrySetResult(null);
+
+        await testTask;
+
+        Assert.Equal("https://server-c", viewModel.BaseUrl);
+        Assert.False(viewModel.IsTestSuccessful);
+        Assert.Equal(string.Empty, viewModel.TestResultText);
+    }
+
+    [Fact]
+    public async Task ChangingBaseUrlDuringSave_DoesNotReportNewUrlAsSaved()
+    {
+        await using var fixture = await ConnectionFixture.CreateConnectedAsync();
+        var switchStarted = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSwitch = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Api.ReadyHandler = async (uri, cancellationToken) =>
+        {
+            Assert.Equal(new Uri("https://server-b"), uri);
+            switchStarted.TrySetResult(null);
+            await releaseSwitch.Task.WaitAsync(cancellationToken);
+        };
+        var viewModel = fixture.CreateSettingsViewModel();
+        viewModel.BaseUrl = "https://server-b";
+
+        var saveTask = viewModel.SaveCommand.ExecuteAsync(null);
+        await switchStarted.Task;
+        viewModel.BaseUrl = "https://server-c";
+        releaseSwitch.TrySetResult(null);
+
+        await saveTask;
+
+        Assert.Equal("https://server-b/", viewModel.BaseUrl);
+        Assert.Equal(new Uri("https://server-b"), fixture.Coordinator.Status.BaseUri);
+        Assert.Contains("成功", viewModel.TestResultText);
+    }
+
+    [Fact]
     public async Task TestFailure_ShowsSafeError()
     {
         await using var fixture = await ConnectionFixture.CreateConnectedAsync();

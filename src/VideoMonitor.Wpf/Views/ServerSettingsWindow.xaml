@@ -5,9 +5,36 @@
         MinWidth="520" MinHeight="280" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource WindowBackgroundBrush}"
-        Foreground="{StaticResource PrimaryTextBrush}">
+        Foreground="{StaticResource PrimaryTextBrush}"
+        Closing="WindowClosing">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        <Style x:Key="BusyDisabledTextBoxStyle" TargetType="TextBox">
+            <Setter Property="IsEnabled" Value="True" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                    <Setter Property="IsEnabled" Value="False" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="BusyDisabledSecondaryButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SecondaryButtonStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                    <Setter Property="IsEnabled" Value="False" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="BusyDisabledPrimaryButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource PrimaryButtonStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                    <Setter Property="IsEnabled" Value="False" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
     <Border Margin="12" Padding="20"
             Background="{StaticResource PanelBackgroundBrush}"
@@ -26,6 +53,7 @@
                 <TextBlock Style="{StaticResource MutedTextStyle}" Text="Server 地址" />
                 <TextBox Margin="0,6,0,0" Height="34"
                          AutomationProperties.AutomationId="ServerBaseUrlTextBox"
+                         Style="{StaticResource BusyDisabledTextBoxStyle}"
                          Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}" />
             </StackPanel>
             <StackPanel Grid.Row="2" Margin="0,12,0,0">
@@ -42,12 +70,12 @@
                 <Button Margin="0,0,8,0"
                         AutomationProperties.AutomationId="TestServerConnectionButton"
                         Command="{Binding TestConnectionCommand}"
-                        Style="{StaticResource SecondaryButtonStyle}"
+                        Style="{StaticResource BusyDisabledSecondaryButtonStyle}"
                         Content="测试连接" />
                 <Button Margin="0,0,8,0"
                         AutomationProperties.AutomationId="SaveServerSettingsButton"
                         Command="{Binding SaveCommand}"
-                        Style="{StaticResource PrimaryButtonStyle}"
+                        Style="{StaticResource BusyDisabledPrimaryButtonStyle}"
                         Content="保存" />
                 <Button AutomationProperties.AutomationId="CancelServerSettingsButton"
                         Click="CancelWindow"

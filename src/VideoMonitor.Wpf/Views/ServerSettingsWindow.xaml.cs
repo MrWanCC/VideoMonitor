@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using VideoMonitor.Wpf.ViewModels;
 
@@ -13,4 +14,13 @@ public partial class ServerSettingsWindow
     }
 
     private void CancelWindow(object sender, RoutedEventArgs e) => Close();
+
+    private void WindowClosing(object? sender, CancelEventArgs e)
+    {
+        if (DataContext is ServerSettingsViewModel viewModel
+            && viewModel.IsBusy)
+        {
+            e.Cancel = true;
+        }
+    }
 }

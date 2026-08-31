@@ -107,9 +107,16 @@ public sealed class ServerSettingsViewModel : ObservableObject
         }
 
         IsBusy = true;
+        var candidateUri = candidate!;
         try
         {
-            await coordinator.ProbeAsync(candidate!);
+            await coordinator.ProbeAsync(candidateUri);
+            if (!CurrentBaseUrlMatches(candidateUri))
+            {
+                ClearTestResult();
+                return;
+            }
+
             IsTestSuccessful = true;
             TestResultText = "连接测试成功。";
             HasSaveError = false;
@@ -117,15 +124,17 @@ public sealed class ServerSettingsViewModel : ObservableObject
         }
         catch (CatalogApiException exception)
         {
-            SetTestFailure($"连接测试失败：{exception.Code}");
+            ApplyTestFailure(
+                candidateUri,
+                $"连接测试失败：{exception.Code}");
         }
         catch (OperationCanceledException)
         {
-            SetTestFailure("连接测试已取消。");
+            ApplyTestFailure(candidateUri, "连接测试已取消。");
         }
         catch (Exception)
         {
-            SetTestFailure("连接测试失败。");
+            ApplyTestFailure(candidateUri, "连接测试失败。");
         }
         finally
         {
@@ -153,9 +162,18 @@ public sealed class ServerSettingsViewModel : ObservableObject
         }
 
         IsBusy = true;
+        var candidateUri = candidate!;
         try
         {
-            await coordinator.SwitchServerAsync(candidate!, hasUnsavedDraft);
+            await coordinator.SwitchServerAsync(candidateUri, hasUnsavedDraft);
+            var authoritativeBaseUri = coordinator.Status.BaseUri;
+            if (authoritativeBaseUri is null)
+            {
+                SetSaveFailure("服务器切换失败。");
+                return;
+            }
+
+            BaseUrl = authoritativeBaseUri.ToString();
             IsTestSuccessful = false;
             TestResultText = "服务器设置保存成功。";
             HasSaveError = false;
@@ -163,19 +181,23 @@ public sealed class ServerSettingsViewModel : ObservableObject
         }
         catch (CatalogApiException exception)
         {
-            SetSaveFailure($"服务器切换失败：{exception.Code}");
+            ApplySaveFailure(
+                candidateUri,
+                $"服务器切换失败：{exception.Code}");
         }
         catch (InvalidOperationException)
         {
-            SetSaveFailure("存在未保存的设备目录修改，请先保存或取消。");
+            ApplySaveFailure(
+                candidateUri,
+                "存在未保存的设备目录修改，请先保存或取消。");
         }
         catch (OperationCanceledException)
         {
-            SetSaveFailure("服务器切换已取消。");
+            ApplySaveFailure(candidateUri, "服务器切换已取消。");
         }
         catch (Exception)
         {
-            SetSaveFailure("服务器切换失败。");
+            ApplySaveFailure(candidateUri, "服务器切换失败。");
         }
         finally
         {
@@ -187,6 +209,38 @@ public sealed class ServerSettingsViewModel : ObservableObject
     {
         IsTestSuccessful = false;
         TestResultText = message;
+    }
+
+    private void ApplyTestFailure(Uri candidate, string message)
+    {
+        if (CurrentBaseUrlMatches(candidate))
+        {
+            SetTestFailure(message);
+        }
+        else
+        {
+            ClearTestResult();
+        }
+    }
+
+    private void ApplySaveFailure(Uri candidate, string message)
+    {
+        if (CurrentBaseUrlMatches(candidate))
+        {
+            SetSaveFailure(message);
+        }
+        else
+        {
+            ClearTestResult();
+            HasSaveError = false;
+            SaveError = string.Empty;
+        }
+    }
+
+    private void ClearTestResult()
+    {
+        IsTestSuccessful = false;
+        TestResultText = string.Empty;
     }
 
     private void SetSaveFailure(string message)
@@ -209,4 +263,8 @@ public sealed class ServerSettingsViewModel : ObservableObject
         endpoint = null;
         return false;
     }
+
+    private bool CurrentBaseUrlMatches(Uri candidate) =>
+        TryParseBaseUri(BaseUrl, out var current)
+        && Equals(current, candidate);
 }
