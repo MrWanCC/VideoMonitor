@@ -138,7 +138,8 @@
                             AutomationProperties.AutomationId="AddRootCategoryButton"
                             Command="{Binding BeginAddRootCommand}"
                             Style="{StaticResource SecondaryButtonStyle}"
-                            Content="新增分类" />
+                            Content="新增分类"
+                            Visibility="{Binding IsRootManagementAvailable, Converter={StaticResource BoolToVisibilityConverter}}" />
                 </Grid>
 
                 <ScrollViewer Grid.Row="1" Margin="0,8,0,0" VerticalScrollBarVisibility="Auto">
@@ -196,10 +197,12 @@
                                                     </ContextMenu.Resources>
                                                     <MenuItem Header="编辑"
                                                               Command="{Binding PlacementTarget.Tag.BeginEditRootCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                              CommandParameter="{Binding PlacementTarget.DataContext.CatalogGroup.Id, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                                              CommandParameter="{Binding PlacementTarget.DataContext.CatalogGroup.Id, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                              Visibility="{Binding PlacementTarget.Tag.IsRootManagementAvailable, RelativeSource={RelativeSource AncestorType=ContextMenu}, Converter={StaticResource BoolToVisibilityConverter}}" />
                                                     <MenuItem Header="删除"
                                                               Command="{Binding PlacementTarget.Tag.DeleteRootCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                              CommandParameter="{Binding PlacementTarget.DataContext.CatalogGroup.Id, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                                              CommandParameter="{Binding PlacementTarget.DataContext.CatalogGroup.Id, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                              Visibility="{Binding PlacementTarget.Tag.IsRootManagementAvailable, RelativeSource={RelativeSource AncestorType=ContextMenu}, Converter={StaticResource BoolToVisibilityConverter}}" />
                                                 </ContextMenu>
                                             </ToggleButton.ContextMenu>
                                             <Grid>
@@ -328,8 +331,12 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
-                <TextBlock Grid.Row="2" Margin="4,8,4,0" Foreground="{StaticResource WarningOrangeBrush}"
-                           FontSize="{StaticResource FontSizeCaption}" TextWrapping="Wrap" Text="{Binding GroupEditError}" />
+                <StackPanel Grid.Row="2" Margin="4,8,4,0">
+                    <TextBlock Foreground="{StaticResource WarningOrangeBrush}"
+                               FontSize="{StaticResource FontSizeCaption}" TextWrapping="Wrap" Text="{Binding GroupEditError}" />
+                    <TextBlock Margin="0,4,0,0" Foreground="{StaticResource WarningOrangeBrush}"
+                               FontSize="{StaticResource FontSizeCaption}" TextWrapping="Wrap" Text="{Binding RootEditError}" />
+                </StackPanel>
                 <Border Grid.RowSpan="3" Panel.ZIndex="30" Padding="12"
                         Background="{StaticResource PanelBackgroundBrush}"
                         BorderBrush="{StaticResource BorderHighlightBrush}" BorderThickness="1"

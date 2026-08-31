@@ -374,6 +374,51 @@ public sealed class DeviceManagementGroupTests
     }
 
     [Fact]
+    public async Task DeleteRootFailure_WhenEditorClosed_RetainsVisibleRootErrorState()
+    {
+        var root = Root("Root");
+        var fixture = RootFixture.WithGroups(root);
+        fixture.Commands.NextFailure = new CatalogApiException("GROUP_NOT_EMPTY");
+
+        Assert.False(fixture.ViewModel.IsRootEditorOpen);
+
+        await fixture.ViewModel.DeleteRootCommand.ExecuteAsync(root.Id);
+
+        Assert.False(fixture.ViewModel.IsRootEditorOpen);
+        Assert.Equal("GROUP_NOT_EMPTY", fixture.ViewModel.RootEditError);
+        Assert.False(fixture.ViewModel.LastOperationSucceeded);
+        Assert.Contains(fixture.ViewModel.CatalogGroups, group => group.Id == root.Id);
+    }
+
+    [Fact]
+    public void LegacyMode_DisablesFormalRootManagement()
+    {
+        var data = MockDeviceData.Create();
+        var viewModel = new DeviceManagementViewModel(
+            new InMemoryDeviceCatalog(data.Groups, data.Devices));
+        var root = viewModel.Groups.First(group => group.ParentId is null);
+
+        Assert.False(viewModel.IsRootManagementAvailable);
+        Assert.False(viewModel.BeginAddRootCommand.CanExecute(null));
+        Assert.True(viewModel.BeginAddGroupCommand.CanExecute(root));
+    }
+
+    [Fact]
+    public void CentralMode_EnablesRootManagement()
+    {
+        var root = Root("Root");
+        var child = Group("Child", root.Id, null);
+        var fixture = RootFixture.WithGroups(root, child);
+
+        Assert.True(fixture.ViewModel.IsRootManagementAvailable);
+        Assert.True(fixture.ViewModel.BeginAddRootCommand.CanExecute(null));
+        Assert.True(fixture.ViewModel.BeginEditRootCommand.CanExecute(root.Id));
+        Assert.False(fixture.ViewModel.BeginEditRootCommand.CanExecute(null));
+        Assert.False(fixture.ViewModel.BeginEditRootCommand.CanExecute(Guid.NewGuid()));
+        Assert.False(fixture.ViewModel.BeginEditRootCommand.CanExecute(child.Id));
+    }
+
+    [Fact]
     public void RootDraft_DoesNotClearUnsavedDeviceDraft()
     {
         var root = Root("Root");

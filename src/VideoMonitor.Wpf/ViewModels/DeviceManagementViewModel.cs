@@ -72,8 +72,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
             CommitGroupEditAsync,
             CanCommitGroupEdit);
         CancelGroupEditCommand = new RelayCommand(CancelGroupEdit);
-        BeginAddRootCommand = new RelayCommand(BeginAddRoot);
-        BeginEditRootCommand = new RelayCommand<Guid?>(BeginEditRoot);
+        BeginAddRootCommand = new RelayCommand(BeginAddRoot, CanManageRoots);
+        BeginEditRootCommand = new RelayCommand<Guid?>(BeginEditRoot, CanEditRoot);
         SaveRootCommand = new AsyncRelayCommand(SaveRootAsync, CanSaveRoot);
         CancelRootEditCommand = new RelayCommand(CancelRootEdit);
         DeleteRootCommand = new AsyncRelayCommand<Guid?>(DeleteRootAsync, CanDeleteRoot);
@@ -117,8 +117,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
             CommitGroupEditAsync,
             CanCommitGroupEdit);
         CancelGroupEditCommand = new RelayCommand(CancelGroupEdit);
-        BeginAddRootCommand = new RelayCommand(BeginAddRoot);
-        BeginEditRootCommand = new RelayCommand<Guid?>(BeginEditRoot);
+        BeginAddRootCommand = new RelayCommand(BeginAddRoot, CanManageRoots);
+        BeginEditRootCommand = new RelayCommand<Guid?>(BeginEditRoot, CanEditRoot);
         SaveRootCommand = new AsyncRelayCommand(SaveRootAsync, CanSaveRoot);
         CancelRootEditCommand = new RelayCommand(CancelRootEdit);
         DeleteRootCommand = new AsyncRelayCommand<Guid?>(DeleteRootAsync, CanDeleteRoot);
@@ -364,6 +364,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
     }
 
+    public bool IsRootManagementAvailable => centralMode;
+
     public Guid? EditingRootId
     {
         get => editingRootId;
@@ -551,6 +553,14 @@ public sealed class DeviceManagementViewModel : ObservableObject
         OnPropertyChanged(nameof(CanEditRootKind));
         SetRootDraftPending(true);
     }
+
+    private bool CanManageRoots() => centralMode;
+
+    private bool CanEditRoot(Guid? rootId) =>
+        centralMode
+        && rootId is { } id
+        && CatalogGroups.Any(group =>
+            group.Id == id && group.ParentId is null);
 
     private bool CanSaveRoot() =>
         centralMode
