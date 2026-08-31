@@ -45,13 +45,14 @@ public sealed class RemoteDeviceCatalogCommandService : IDeviceCatalogCommandSer
             await RefreshAndRequireConnectionAsync(
                     "create-group",
                     request.Id,
+                    endpoint,
                     cancellationToken)
                 .ConfigureAwait(false);
             return result;
         }
         catch (CatalogApiException exception) when (IsAmbiguous(exception))
         {
-            if (!await TryRefreshForUncertaintyAsync(cancellationToken).ConfigureAwait(false))
+            if (!await TryRefreshForUncertaintyAsync(endpoint, cancellationToken).ConfigureAwait(false))
             {
                 throw new CatalogMutationUncertainException("create-group", request.Id, exception);
             }
@@ -86,13 +87,14 @@ public sealed class RemoteDeviceCatalogCommandService : IDeviceCatalogCommandSer
             await RefreshAndRequireConnectionAsync(
                     "update-group",
                     id,
+                    endpoint,
                     cancellationToken)
                 .ConfigureAwait(false);
             return result;
         }
         catch (CatalogApiException exception) when (IsAmbiguous(exception))
         {
-            await TryRefreshForUncertaintyAsync(cancellationToken).ConfigureAwait(false);
+            await TryRefreshForUncertaintyAsync(endpoint, cancellationToken).ConfigureAwait(false);
             throw new CatalogMutationUncertainException("update-group", id, exception);
         }
     }
@@ -114,12 +116,13 @@ public sealed class RemoteDeviceCatalogCommandService : IDeviceCatalogCommandSer
             await RefreshAndRequireConnectionAsync(
                     "delete-group",
                     id,
+                    endpoint,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (CatalogApiException exception) when (IsAmbiguous(exception))
         {
-            if (await TryRefreshForUncertaintyAsync(cancellationToken).ConfigureAwait(false)
+            if (await TryRefreshForUncertaintyAsync(endpoint, cancellationToken).ConfigureAwait(false)
                 && !catalog.GetGroups().Any(group => group.Id == id))
             {
                 return;
@@ -144,13 +147,14 @@ public sealed class RemoteDeviceCatalogCommandService : IDeviceCatalogCommandSer
             await RefreshAndRequireConnectionAsync(
                     "create-device",
                     request.Id,
+                    endpoint,
                     cancellationToken)
                 .ConfigureAwait(false);
             return result;
         }
         catch (CatalogApiException exception) when (IsAmbiguous(exception))
         {
-            if (!await TryRefreshForUncertaintyAsync(cancellationToken).ConfigureAwait(false))
+            if (!await TryRefreshForUncertaintyAsync(endpoint, cancellationToken).ConfigureAwait(false))
             {
                 throw new CatalogMutationUncertainException("create-device", request.Id, exception);
             }
@@ -185,13 +189,14 @@ public sealed class RemoteDeviceCatalogCommandService : IDeviceCatalogCommandSer
             await RefreshAndRequireConnectionAsync(
                     "update-device",
                     id,
+                    endpoint,
                     cancellationToken)
                 .ConfigureAwait(false);
             return result;
         }
         catch (CatalogApiException exception) when (IsAmbiguous(exception))
         {
-            await TryRefreshForUncertaintyAsync(cancellationToken).ConfigureAwait(false);
+            await TryRefreshForUncertaintyAsync(endpoint, cancellationToken).ConfigureAwait(false);
             throw new CatalogMutationUncertainException("update-device", id, exception);
         }
     }
@@ -213,12 +218,13 @@ public sealed class RemoteDeviceCatalogCommandService : IDeviceCatalogCommandSer
             await RefreshAndRequireConnectionAsync(
                     "delete-device",
                     id,
+                    endpoint,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (CatalogApiException exception) when (IsAmbiguous(exception))
         {
-            if (await TryRefreshForUncertaintyAsync(cancellationToken).ConfigureAwait(false)
+            if (await TryRefreshForUncertaintyAsync(endpoint, cancellationToken).ConfigureAwait(false)
                 && catalog.GetDevice(id) is null)
             {
                 return;
@@ -252,21 +258,28 @@ public sealed class RemoteDeviceCatalogCommandService : IDeviceCatalogCommandSer
     private async Task RefreshAndRequireConnectionAsync(
         string operation,
         Guid entityId,
+        Uri endpoint,
         CancellationToken cancellationToken)
     {
-        await coordinator.RefreshNowAsync(cancellationToken).ConfigureAwait(false);
-        if (!CanWrite)
+        if (!await coordinator.RefreshAfterMutationAsync(
+                    endpoint,
+                    cancellationToken)
+                .ConfigureAwait(false))
         {
             throw new CatalogMutationUncertainException(operation, entityId);
         }
     }
 
-    private async Task<bool> TryRefreshForUncertaintyAsync(CancellationToken cancellationToken)
+    private async Task<bool> TryRefreshForUncertaintyAsync(
+        Uri endpoint,
+        CancellationToken cancellationToken)
     {
         try
         {
-            await coordinator.RefreshNowAsync(cancellationToken).ConfigureAwait(false);
-            return CanWrite;
+            return await coordinator.RefreshAfterMutationAsync(
+                    endpoint,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (CatalogApiException exception) when (IsAmbiguous(exception))
         {

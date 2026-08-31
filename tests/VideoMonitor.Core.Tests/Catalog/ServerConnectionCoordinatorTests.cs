@@ -472,6 +472,66 @@ public sealed class ServerConnectionCoordinatorTests
     }
 
     [Fact]
+    public async Task MutationRefresh_WaitsForActiveRefreshAndPerformsFreshSecondGet()
+    {
+        var snapshotA = Snapshot("A");
+        var snapshotB = Snapshot("B");
+        var fixture = await ConnectionFixture.ConnectedToAsync(ServerA, snapshotA);
+        fixture.Api.ResetCounters();
+        var firstGetEntered = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstGet = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var catalogCall = 0;
+        fixture.Api.CatalogHandler = async (_, _) =>
+        {
+            if (Interlocked.Increment(ref catalogCall) == 1)
+            {
+                firstGetEntered.TrySetResult(null);
+                await releaseFirstGet.Task;
+                return snapshotA;
+            }
+
+            return snapshotB;
+        };
+
+        var ordinaryRefresh = fixture.Coordinator.RefreshNowAsync();
+        await firstGetEntered.Task;
+        var mutationRefresh = fixture.Coordinator.RefreshAfterMutationAsync(ServerA);
+
+        await Task.Delay(50);
+        Assert.False(mutationRefresh.IsCompleted);
+        Assert.Single(fixture.Api.CatalogCalls);
+        Assert.Equal(1, fixture.Api.MaxConcurrentCatalogRequests);
+
+        releaseFirstGet.SetResult(null);
+        Assert.True(await mutationRefresh);
+        await ordinaryRefresh;
+
+        Assert.Equal(2, fixture.Api.CatalogCalls.Count);
+        Assert.Same(snapshotB, fixture.Cache.Snapshot);
+        Assert.Equal(1, fixture.Api.MaxConcurrentCatalogRequests);
+    }
+
+    [Fact]
+    public async Task MutationRefresh_DoesNotConfirmAgainstSwitchedEndpoint()
+    {
+        var snapshotA = Snapshot("A");
+        var snapshotB = Snapshot("B");
+        var fixture = await ConnectionFixture.ConnectedToAsync(ServerA, snapshotA);
+        fixture.Api.Snapshot = snapshotB;
+        await fixture.Coordinator.SwitchServerAsync(ServerB, () => false);
+        fixture.Api.ResetCounters();
+
+        var confirmed = await fixture.Coordinator.RefreshAfterMutationAsync(ServerA);
+
+        Assert.False(confirmed);
+        Assert.Empty(fixture.Api.CatalogCalls);
+        Assert.Equal(ServerB, fixture.Coordinator.Status.BaseUri);
+        Assert.Same(snapshotB, fixture.Cache.Snapshot);
+    }
+
+    [Fact]
     public async Task RefreshNow_WhenUnconfigured_DoesNotCallApi()
     {
         var fixture = new ConnectionFixture();

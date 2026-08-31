@@ -31,10 +31,17 @@ public sealed class DeviceGroupTreeItemViewModel : ObservableObject
 
     public DeviceGroupDto? CatalogGroup { get; }
 
+    public object? ActiveGroup => CatalogGroup is not null
+        ? CatalogGroup
+        : Group;
+
+    public string Name => CatalogGroup?.Name ?? Group?.Name ?? string.Empty;
+
     public ObservableCollection<DeviceGroupTreeItemViewModel> Children { get; }
 
-    public bool IsRoot => CatalogGroup?.ParentId is null && CatalogGroup is not null
-        || Group?.ParentId is null;
+    public bool IsRoot => CatalogGroup is not null
+        ? CatalogGroup.ParentId is null
+        : Group?.ParentId is null;
 
     public bool IsExpanded
     {

@@ -7,8 +7,8 @@
              PreviewKeyDown="OnDeviceViewPreviewKeyDown">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
-        <converters:CameraStatusToTextConverter x:Key="StatusTextConverter" />
-        <converters:CameraStatusToBrushConverter x:Key="StatusBrushConverter" />
+        <converters:DeviceCatalogStatusToTextConverter x:Key="StatusTextConverter" />
+        <converters:DeviceCatalogStatusToBrushConverter x:Key="StatusBrushConverter" />
         <converters:FirstChannelNoConverter x:Key="FirstChannelNoConverter" />
         <converters:FirstChannelStreamConverter x:Key="FirstChannelStreamConverter" />
         <converters:StreamTypeToTextConverter x:Key="StreamTypeTextConverter" />
@@ -172,7 +172,7 @@
                                                     </Path.Style>
                                                 </Path>
                                                 <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource TreeSectionTextStyle}"
-                                                           Text="{Binding Group.Name}" />
+                                                            Text="{Binding Name}" />
                                                 <TextBlock Grid.Column="2" Margin="8,0" VerticalAlignment="Center"
                                                            Foreground="{StaticResource MutedTextBrush}" FontSize="{StaticResource FontSizeCaption}"
                                                            Text="{Binding Children.Count, StringFormat=({0})}" />
@@ -180,7 +180,7 @@
                                         </ToggleButton>
                                         <Button Grid.Column="3" Width="30" Height="30" ToolTip="新建分组"
                                                 Command="{Binding DataContext.BeginAddGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                CommandParameter="{Binding Group}" Style="{StaticResource IconButtonStyle}">
+                                                CommandParameter="{Binding ActiveGroup}" Style="{StaticResource IconButtonStyle}">
                                             <Path Width="15" Height="15" Data="{StaticResource IconAdd}"
                                                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                                                   StrokeThickness="1.7" Stretch="Uniform" />
@@ -193,7 +193,7 @@
                                                 <Button x:Name="GroupRow" Style="{StaticResource DeviceGroupRowStyle}"
                                                         Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                         Command="{Binding Tag.SelectGroupCommand, RelativeSource={RelativeSource Self}}"
-                                                        CommandParameter="{Binding Group}">
+                                                        CommandParameter="{Binding ActiveGroup}">
                                                     <Button.ContextMenu>
                                                         <ContextMenu Background="{StaticResource PanelBackgroundBrush}"
                                                                      BorderBrush="{StaticResource BorderBrush}"
@@ -234,10 +234,10 @@
                                                             </ContextMenu.Resources>
                                                             <MenuItem Header="重命名"
                                                                       Command="{Binding PlacementTarget.Tag.BeginRenameGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                                      CommandParameter="{Binding PlacementTarget.DataContext.Group, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                                                      CommandParameter="{Binding PlacementTarget.DataContext.ActiveGroup, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                                             <MenuItem Header="删除"
                                                                       Command="{Binding PlacementTarget.Tag.DeleteGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                                      CommandParameter="{Binding PlacementTarget.DataContext.Group, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                                                       CommandParameter="{Binding PlacementTarget.DataContext.ActiveGroup, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                                         </ContextMenu>
                                                     </Button.ContextMenu>
                                                     <Grid Margin="10,0,5,0">
@@ -249,7 +249,7 @@
                                                             <Ellipse Width="6" Height="6" Fill="{StaticResource OnlineGreenBrush}" />
                                                             <TextBlock x:Name="GroupNameText" Grid.Column="1" Margin="7,0,0,0"
                                                                        VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}"
-                                                                       FontSize="{StaticResource FontSizeTreeItem}" Text="{Binding Group.Name}" />
+                                                                        FontSize="{StaticResource FontSizeTreeItem}" Text="{Binding Name}" />
                                                         </Grid>
                                                         <TextBox x:Name="GroupNameEditor" Height="32" Margin="18,1,0,1"
                                                                  Style="{StaticResource IndustrialTextBoxStyle}"
@@ -298,7 +298,7 @@
                         <StackPanel Orientation="Horizontal">
                             <TextBlock VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" Text="当前分组：" />
                             <TextBlock VerticalAlignment="Center" FontSize="{StaticResource FontSizePageTitle}" FontWeight="SemiBold"
-                                       Text="{Binding SelectedGroup.Name, TargetNullValue=未选择}" />
+                                        Text="{Binding ActiveSelectedGroupName}" />
                         </StackPanel>
                         <TextBlock Margin="0,4,0,0" Style="{StaticResource MutedTextStyle}" Text="设备列表按物理摄像机展示" />
                     </StackPanel>
@@ -358,7 +358,7 @@
                                 <TextBlock Grid.Column="8" HorizontalAlignment="Center" Style="{StaticResource DeviceListHeaderTextStyle}" Text="操作" />
                             </Grid>
                         </Border>
-                        <ItemsControl Grid.Row="1" ItemsSource="{Binding Devices}">
+                        <ItemsControl Grid.Row="1" ItemsSource="{Binding ActiveDevices}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border Height="52" Margin="0,0,0,4" Background="{StaticResource CardBackgroundBrush}"
@@ -379,10 +379,10 @@
                                             <TextBlock Grid.Column="5" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding Converter={StaticResource FirstChannelStreamConverter}}" />
                                             <TextBlock Grid.Column="6" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding TransportMode, Converter={StaticResource TransportModeTextConverter}}" />
                                             <StackPanel Grid.Column="7" Orientation="Horizontal" VerticalAlignment="Center">
-                                                <Ellipse Width="8" Height="8" Fill="{Binding Status, Converter={StaticResource StatusBrushConverter}}" />
+                                                <Ellipse Width="8" Height="8" Fill="{Binding Converter={StaticResource StatusBrushConverter}}" />
                                                 <TextBlock Margin="7,0,0,0" VerticalAlignment="Center"
-                                                           Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}"
-                                                           Text="{Binding Status, Converter={StaticResource StatusTextConverter}}" />
+                                                           Foreground="{Binding Converter={StaticResource StatusBrushConverter}}"
+                                                           Text="{Binding Converter={StaticResource StatusTextConverter}}" />
                                             </StackPanel>
                                             <StackPanel Grid.Column="8" HorizontalAlignment="Center" Orientation="Horizontal">
                                                 <Button Command="{Binding DataContext.EditDeviceCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
@@ -438,7 +438,7 @@
                             <StackPanel Grid.Column="2">
                                 <TextBlock Style="{StaticResource DeviceFieldLabelStyle}" Text="所属分组 *" />
                                 <ComboBox x:Name="GroupSelector" Style="{StaticResource IndustrialComboBoxStyle}"
-                                          ItemsSource="{Binding EditableGroups}" SelectedValuePath="Id"
+                                          ItemsSource="{Binding ActiveEditableGroups}" SelectedValuePath="Id"
                                           SelectedValue="{Binding EditDraft.GroupId, Mode=TwoWay}">
                                     <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate>
                                 </ComboBox>
@@ -506,6 +506,8 @@
                                 Style="{StaticResource SecondaryButtonStyle}" Content="测试拉流" />
                         <TextBlock Margin="0,10,0,0" Foreground="{StaticResource WarningOrangeBrush}"
                                    FontSize="{StaticResource FontSizeAuxiliary}" Text="{Binding ValidationMessage}" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,6,0,0" Foreground="{StaticResource WarningOrangeBrush}"
+                                   FontSize="{StaticResource FontSizeAuxiliary}" Text="{Binding OperationError}" TextWrapping="Wrap" />
                     </StackPanel>
                 </ScrollViewer>
                 <Border Grid.Row="2" Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">

@@ -150,6 +150,93 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         }
     }
 
+    public async Task<bool> RefreshAfterMutationAsync(
+        Uri expectedBaseUri,
+        CancellationToken cancellationToken = default)
+    {
+        EnterOperation();
+        var gateEntered = false;
+        try
+        {
+            ValidateBaseUri(expectedBaseUri);
+            using var operationCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    shutdown.Token);
+            var operationToken = operationCancellation.Token;
+            var initialState = await GetEndpointStateAsync()
+                .ConfigureAwait(false);
+            if (!initialState.Connected
+                || initialState.Endpoint is null
+                || !Equals(initialState.Endpoint, expectedBaseUri))
+            {
+                return false;
+            }
+
+            try
+            {
+                await refreshGate.WaitAsync(operationToken)
+                    .ConfigureAwait(false);
+                gateEntered = true;
+
+                operationToken.ThrowIfCancellationRequested();
+                var currentState = await GetEndpointStateAsync()
+                    .ConfigureAwait(false);
+                if (!currentState.Connected
+                    || currentState.Endpoint is null
+                    || currentState.Generation != initialState.Generation
+                    || !Equals(currentState.Endpoint, expectedBaseUri))
+                {
+                    return false;
+                }
+
+                var snapshot = await GetCatalogSnapshotAsync(
+                        expectedBaseUri,
+                        operationToken)
+                    .ConfigureAwait(false);
+                operationToken.ThrowIfCancellationRequested();
+                return await CommitConnectedAsync(
+                        expectedBaseUri,
+                        snapshot,
+                        initialState.Generation,
+                        operationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested
+                    && !shutdown.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+                when (shutdown.IsCancellationRequested)
+            {
+                return false;
+            }
+            catch (Exception)
+            {
+                if (!shutdown.IsCancellationRequested)
+                {
+                    _ = await PublishUnavailableAsync(
+                            expectedBaseUri,
+                            initialState.Generation)
+                        .ConfigureAwait(false);
+                }
+
+                return false;
+            }
+        }
+        finally
+        {
+            if (gateEntered)
+            {
+                refreshGate.Release();
+            }
+
+            ExitOperation();
+        }
+    }
+
     public async Task ProbeAsync(
         Uri candidate,
         CancellationToken cancellationToken = default)

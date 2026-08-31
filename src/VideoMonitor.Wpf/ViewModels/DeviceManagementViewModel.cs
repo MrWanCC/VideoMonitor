@@ -13,7 +13,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
 {
     private readonly IDeviceCatalog catalog;
     private Guid? pendingNewGroupId;
-    private Action? pendingDialogAction;
+    private Func<Task>? pendingDialogAction;
     private DeviceGroup? selectedGroup;
     private string searchKeyword = string.Empty;
     private Guid? editingGroupId;
@@ -29,6 +29,10 @@ public sealed class DeviceManagementViewModel : ObservableObject
     private readonly IDeviceCatalogReadModel? readModel;
     private readonly IDeviceCatalogCommandService? commandService;
     private readonly bool centralMode;
+    private DeviceGroupDto? selectedCatalogGroup;
+    private Guid? editingCatalogParentId;
+    private bool editingCatalogGroupIsNew;
+    private long editingCatalogGroupRevision;
     private CameraDeviceDto? editingCatalogDevice;
     private bool suppressDraftTracking;
     private bool isSaving;
@@ -46,22 +50,27 @@ public sealed class DeviceManagementViewModel : ObservableObject
         Groups = [];
         Devices = [];
         GroupSections = [];
-        CatalogGroupSections = [];
         CatalogGroups = [];
         CatalogDevices = [];
         EditDraft = new DeviceEditDraftViewModel();
 
-        SelectGroupCommand = new RelayCommand<DeviceGroup>(SelectGroup);
-        BeginAddGroupCommand = new RelayCommand<DeviceGroup>(BeginAddGroup);
-        BeginRenameGroupCommand = new RelayCommand<DeviceGroup>(BeginRenameGroup);
-        CommitGroupEditCommand = new RelayCommand(CommitGroupEdit);
+        SelectGroupCommand = new RelayCommand<object?>(SelectGroup);
+        BeginAddGroupCommand = new RelayCommand<object?>(BeginAddGroup);
+        BeginRenameGroupCommand = new RelayCommand<object?>(BeginRenameGroup);
+        CommitGroupEditCommand = new AsyncRelayCommand(
+            CommitGroupEditAsync,
+            CanCommitGroupEdit);
         CancelGroupEditCommand = new RelayCommand(CancelGroupEdit);
-        DeleteGroupCommand = new RelayCommand<DeviceGroup>(DeleteGroup);
-        ConfirmDialogCommand = new RelayCommand(ConfirmDialog);
+        DeleteGroupCommand = new RelayCommand<object?>(
+            DeleteGroup,
+            _ => !centralMode || IsServerAvailable);
+        ConfirmDialogCommand = new AsyncRelayCommand(ConfirmDialogAsync);
         CancelDialogCommand = new RelayCommand(ClearDialog);
         AddDeviceCommand = new RelayCommand(AddDevice);
-        EditDeviceCommand = new RelayCommand<CameraDevice>(EditDevice);
-        DeleteDeviceCommand = new RelayCommand<CameraDevice>(DeleteDevice);
+        EditDeviceCommand = new RelayCommand<object?>(EditDevice);
+        DeleteDeviceCommand = new RelayCommand<object?>(
+            DeleteDevice,
+            _ => !centralMode || IsServerAvailable);
         SaveDeviceCommand = new AsyncRelayCommand(SaveDeviceAsync, CanSaveDevice);
         CancelEditCommand = new RelayCommand(CancelEdit);
 
@@ -81,22 +90,27 @@ public sealed class DeviceManagementViewModel : ObservableObject
         Groups = [];
         Devices = [];
         GroupSections = [];
-        CatalogGroupSections = [];
         CatalogGroups = [];
         CatalogDevices = [];
         EditDraft = new DeviceEditDraftViewModel();
 
-        SelectGroupCommand = new RelayCommand<DeviceGroup>(SelectGroup);
-        BeginAddGroupCommand = new RelayCommand<DeviceGroup>(BeginAddGroup);
-        BeginRenameGroupCommand = new RelayCommand<DeviceGroup>(BeginRenameGroup);
-        CommitGroupEditCommand = new RelayCommand(CommitGroupEdit);
+        SelectGroupCommand = new RelayCommand<object?>(SelectGroup);
+        BeginAddGroupCommand = new RelayCommand<object?>(BeginAddGroup);
+        BeginRenameGroupCommand = new RelayCommand<object?>(BeginRenameGroup);
+        CommitGroupEditCommand = new AsyncRelayCommand(
+            CommitGroupEditAsync,
+            CanCommitGroupEdit);
         CancelGroupEditCommand = new RelayCommand(CancelGroupEdit);
-        DeleteGroupCommand = new RelayCommand<DeviceGroup>(DeleteGroup);
-        ConfirmDialogCommand = new RelayCommand(ConfirmDialog);
+        DeleteGroupCommand = new RelayCommand<object?>(
+            DeleteGroup,
+            _ => !centralMode || IsServerAvailable);
+        ConfirmDialogCommand = new AsyncRelayCommand(ConfirmDialogAsync);
         CancelDialogCommand = new RelayCommand(ClearDialog);
         AddDeviceCommand = new RelayCommand(AddDevice);
-        EditDeviceCommand = new RelayCommand<CameraDevice>(EditDevice);
-        DeleteDeviceCommand = new RelayCommand<CameraDevice>(DeleteDevice);
+        EditDeviceCommand = new RelayCommand<object?>(EditDevice);
+        DeleteDeviceCommand = new RelayCommand<object?>(
+            DeleteDevice,
+            _ => !centralMode || IsServerAvailable);
         SaveDeviceCommand = new AsyncRelayCommand(SaveDeviceAsync, CanSaveDevice);
         CancelEditCommand = new RelayCommand(CancelEdit);
 
@@ -110,7 +124,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
     public ObservableCollection<DeviceGroupTreeItemViewModel> GroupSections { get; }
 
-    public ObservableCollection<DeviceGroupTreeItemViewModel> CatalogGroupSections { get; }
+    public ObservableCollection<DeviceGroupTreeItemViewModel> CatalogGroupSections => GroupSections;
 
     public ObservableCollection<CameraDevice> Devices { get; }
 
@@ -130,35 +144,52 @@ public sealed class DeviceManagementViewModel : ObservableObject
         .OrderBy(group => group.Sort)
         .ThenBy(group => group.Id);
 
+    public ObservableCollection<DeviceGroupTreeItemViewModel> ActiveGroupSections => GroupSections;
+
+    public IEnumerable<object> ActiveDevices => centralMode
+        ? CatalogDevices
+            .Where(device => selectedCatalogGroup?.Id == device.GroupId)
+            .Where(MatchesSearch)
+            .Cast<object>()
+        : Devices.Cast<object>();
+
+    public IEnumerable<object> ActiveEditableGroups => centralMode
+        ? EditableCatalogGroups.Cast<object>()
+        : EditableGroups.Cast<object>();
+
+    public string ActiveSelectedGroupName => centralMode
+        ? selectedCatalogGroup?.Name ?? "未选择"
+        : selectedGroup?.Name ?? "未选择";
+
     public IReadOnlyList<StreamType> StreamTypes { get; } = Enum.GetValues<StreamType>();
 
     public IReadOnlyList<TransportMode> TransportModes { get; } = Enum.GetValues<TransportMode>();
 
-    public IRelayCommand<DeviceGroup> SelectGroupCommand { get; }
+    public IRelayCommand<object?> SelectGroupCommand { get; }
 
-    public IRelayCommand<DeviceGroup> BeginAddGroupCommand { get; }
+    public IRelayCommand<object?> BeginAddGroupCommand { get; }
 
-    public IRelayCommand<DeviceGroup> BeginRenameGroupCommand { get; }
+    public IRelayCommand<object?> BeginRenameGroupCommand { get; }
 
-    public IRelayCommand<DeviceGroup> AddGroupCommand => BeginAddGroupCommand;
+    public IRelayCommand<object?> AddGroupCommand => BeginAddGroupCommand;
 
-    public IRelayCommand<DeviceGroup> RenameGroupCommand => BeginRenameGroupCommand;
+    public IRelayCommand<object?> RenameGroupCommand => BeginRenameGroupCommand;
 
-    public IRelayCommand CommitGroupEditCommand { get; }
+    public IAsyncRelayCommand CommitGroupEditCommand { get; }
 
     public IRelayCommand CancelGroupEditCommand { get; }
 
-    public IRelayCommand<DeviceGroup> DeleteGroupCommand { get; }
+    public IRelayCommand<object?> DeleteGroupCommand { get; }
 
-    public IRelayCommand ConfirmDialogCommand { get; }
+    public IAsyncRelayCommand ConfirmDialogCommand { get; }
 
     public IRelayCommand CancelDialogCommand { get; }
 
     public IRelayCommand AddDeviceCommand { get; }
 
-    public IRelayCommand<CameraDevice> EditDeviceCommand { get; }
+    public IRelayCommand<object?> EditDeviceCommand { get; }
 
-    public IRelayCommand<CameraDevice> DeleteDeviceCommand { get; }
+    public IRelayCommand<object?> DeleteDeviceCommand { get; }
 
     public IAsyncRelayCommand SaveDeviceCommand { get; }
 
@@ -184,6 +215,9 @@ public sealed class DeviceManagementViewModel : ObservableObject
             if (SetProperty(ref isServerAvailable, value))
             {
                 ((AsyncRelayCommand)SaveDeviceCommand).NotifyCanExecuteChanged();
+                ((AsyncRelayCommand)CommitGroupEditCommand).NotifyCanExecuteChanged();
+                ((RelayCommand<object?>)DeleteGroupCommand).NotifyCanExecuteChanged();
+                ((RelayCommand<object?>)DeleteDeviceCommand).NotifyCanExecuteChanged();
             }
         }
     }
@@ -246,6 +280,12 @@ public sealed class DeviceManagementViewModel : ObservableObject
         {
             if (SetProperty(ref searchKeyword, value ?? string.Empty))
             {
+                if (centralMode)
+                {
+                    OnPropertyChanged(nameof(ActiveDevices));
+                    return;
+                }
+
                 RefreshDevices();
             }
         }
@@ -254,7 +294,13 @@ public sealed class DeviceManagementViewModel : ObservableObject
     public Guid? EditingGroupId
     {
         get => editingGroupId;
-        private set => SetProperty(ref editingGroupId, value);
+        private set
+        {
+            if (SetProperty(ref editingGroupId, value))
+            {
+                ((AsyncRelayCommand)CommitGroupEditCommand).NotifyCanExecuteChanged();
+            }
+        }
     }
 
     public string EditingGroupName
@@ -311,8 +357,9 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
     }
 
-    public string EditorTitle => IsEditing && SelectedDevice is not null
-        ? $"编辑设备：{SelectedDevice.Name}"
+    public string EditorTitle => IsEditing
+        && (centralMode ? editingCatalogDevice?.Name : SelectedDevice?.Name) is { } name
+        ? $"编辑设备：{name}"
         : "新增设备";
 
     public string ValidationMessage
@@ -321,12 +368,33 @@ public sealed class DeviceManagementViewModel : ObservableObject
         private set => SetProperty(ref validationMessage, value);
     }
 
-    private void SelectGroup(DeviceGroup? group)
+    private void SelectGroup(object? value)
     {
-        if (group?.ParentId is not null)
+        if (centralMode)
         {
-            SelectedGroup = group;
+            if (value is DeviceGroupDto group && group.ParentId is not null)
+            {
+                selectedCatalogGroup = group;
+                OnPropertyChanged(nameof(ActiveSelectedGroupName));
+                OnPropertyChanged(nameof(ActiveDevices));
+                RefreshCentralGroupSections();
+            }
+
+            return;
         }
+
+            if (value is DeviceGroup legacyGroup && legacyGroup.ParentId is not null)
+            {
+                SelectedGroup = legacyGroup;
+        }
+    }
+
+    private bool MatchesSearch(CameraDeviceDto device)
+    {
+        var keyword = SearchKeyword.Trim();
+        return keyword.Length == 0
+            || device.Name.Contains(keyword, StringComparison.OrdinalIgnoreCase)
+            || device.IpAddress.Contains(keyword, StringComparison.OrdinalIgnoreCase);
     }
 
     private void RefreshDevices()
@@ -348,7 +416,18 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
     }
 
-    private void BeginAddGroup(DeviceGroup? root)
+    private void BeginAddGroup(object? value)
+    {
+        if (centralMode)
+        {
+            BeginAddCatalogChild(value as DeviceGroupDto);
+            return;
+        }
+
+        BeginAddLegacyGroup(value as DeviceGroup);
+    }
+
+    private void BeginAddLegacyGroup(DeviceGroup? root)
     {
         if (root is null || root.ParentId is not null)
         {
@@ -371,7 +450,35 @@ public sealed class DeviceManagementViewModel : ObservableObject
         RebuildGroupSections();
     }
 
-    private void BeginRenameGroup(DeviceGroup? group)
+    private void BeginAddCatalogChild(DeviceGroupDto? root)
+    {
+        if (root is null || root.ParentId is not null || !root.Kind.HasValue)
+        {
+            return;
+        }
+
+        CancelGroupEdit();
+        EditingGroupId = Guid.NewGuid();
+        editingCatalogParentId = root.Id;
+        editingCatalogGroupIsNew = true;
+        editingCatalogGroupRevision = 0;
+        EditingGroupName = string.Empty;
+        GroupEditError = string.Empty;
+        RefreshCentralGroupSections();
+    }
+
+    private void BeginRenameGroup(object? value)
+    {
+        if (centralMode)
+        {
+            BeginRenameCatalogChild(value as DeviceGroupDto);
+            return;
+        }
+
+        BeginRenameLegacyGroup(value as DeviceGroup);
+    }
+
+    private void BeginRenameLegacyGroup(DeviceGroup? group)
     {
         if (group?.ParentId is null)
         {
@@ -385,7 +492,24 @@ public sealed class DeviceManagementViewModel : ObservableObject
         RebuildGroupSections();
     }
 
-    private void CommitGroupEdit()
+    private void BeginRenameCatalogChild(DeviceGroupDto? group)
+    {
+        if (group is null || group.ParentId is null)
+        {
+            return;
+        }
+
+        CancelGroupEdit();
+        EditingGroupId = group.Id;
+        editingCatalogParentId = group.ParentId;
+        editingCatalogGroupIsNew = false;
+        editingCatalogGroupRevision = group.Revision;
+        EditingGroupName = group.Name;
+        GroupEditError = string.Empty;
+        RefreshCentralGroupSections();
+    }
+
+    private void CommitGroupEditLegacy()
     {
         var group = EditingGroupId is { } id
             ? Groups.FirstOrDefault(item => item.Id == id)
@@ -428,7 +552,112 @@ public sealed class DeviceManagementViewModel : ObservableObject
         RebuildGroupSections();
     }
 
+    private async Task CommitGroupEditAsync()
+    {
+        if (!centralMode)
+        {
+            CommitGroupEditLegacy();
+            return;
+        }
+
+        if (EditingGroupId is not { } groupId
+            || editingCatalogParentId is not { } parentId
+            || commandService is null)
+        {
+            ClearGroupEditState();
+            return;
+        }
+
+        var name = EditingGroupName.Trim();
+        if (name.Length == 0)
+        {
+            GroupEditError = "分组名称不能为空。";
+            return;
+        }
+
+        if (!IsServerAvailable)
+        {
+            GroupEditError = "Catalog API is unavailable.";
+            return;
+        }
+
+        if (CatalogGroups.Any(group =>
+                group.Id != groupId
+                && group.ParentId == parentId
+                && string.Equals(group.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            GroupEditError = "同一分类下已存在同名分组。";
+            return;
+        }
+
+        try
+        {
+            if (editingCatalogGroupIsNew)
+            {
+                var sort = CatalogGroups
+                    .Where(group => group.ParentId == parentId)
+                    .Select(group => group.Sort)
+                    .DefaultIfEmpty(-1)
+                    .Max() + 1;
+                await commandService.CreateGroupAsync(
+                        new CreateGroupRequest(
+                            groupId,
+                            name,
+                            parentId,
+                            sort,
+                            true,
+                            null))
+                    .ConfigureAwait(true);
+            }
+            else if (CatalogGroups.FirstOrDefault(group => group.Id == groupId) is { } group)
+            {
+                await commandService.UpdateGroupAsync(
+                        groupId,
+                        new UpdateGroupRequest(
+                            name,
+                            parentId,
+                            group.Sort,
+                            group.Enabled,
+                            group.Kind,
+                            editingCatalogGroupRevision))
+                    .ConfigureAwait(true);
+            }
+            else
+            {
+                GroupEditError = "分组不存在。";
+                return;
+            }
+
+            ClearGroupEditState();
+            RefreshCentralCatalogView();
+        }
+        catch (CatalogApiException exception)
+        {
+            GroupEditError = exception.Code;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            GroupEditError = "Catalog write failed.";
+        }
+    }
+
     private void CancelGroupEdit()
+    {
+        if (centralMode)
+        {
+            ClearGroupEditState();
+            RefreshCentralGroupSections();
+            return;
+        }
+
+        CancelGroupEditLegacy();
+    }
+
+    private void CancelGroupEditLegacy()
     {
         if (pendingNewGroupId is { } pendingId)
         {
@@ -439,7 +668,18 @@ public sealed class DeviceManagementViewModel : ObservableObject
         RebuildGroupSections();
     }
 
-    private void DeleteGroup(DeviceGroup? group)
+    private void DeleteGroup(object? value)
+    {
+        if (centralMode)
+        {
+            DeleteCatalogChild(value as DeviceGroupDto);
+            return;
+        }
+
+        DeleteLegacyGroup(value as DeviceGroup);
+    }
+
+    private void DeleteLegacyGroup(DeviceGroup? group)
     {
         if (group?.ParentId is null)
         {
@@ -470,10 +710,55 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
                 RebuildGroupSections();
                 RefreshDevices();
+                return Task.CompletedTask;
             });
     }
 
-    private void ShowDialog(DeviceDialogMode mode, string message, Action? action)
+    private void DeleteCatalogChild(DeviceGroupDto? group)
+    {
+        if (group is null || group.ParentId is null)
+        {
+            return;
+        }
+
+        ShowDialog(
+            DeviceDialogMode.Confirmation,
+            $"确定删除分组“{group.Name}”吗？",
+            async () =>
+            {
+                if (commandService is null || !IsServerAvailable)
+                {
+                    GroupEditError = "Catalog API is unavailable.";
+                    return;
+                }
+
+                try
+                {
+                    await commandService.DeleteGroupAsync(group.Id, group.Revision)
+                        .ConfigureAwait(true);
+                    if (selectedCatalogGroup?.Id == group.Id)
+                    {
+                        selectedCatalogGroup = null;
+                    }
+
+                    RefreshCentralCatalogView();
+                }
+                catch (CatalogApiException exception)
+                {
+                    GroupEditError = exception.Code;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    GroupEditError = "Catalog write failed.";
+                }
+            });
+    }
+
+    private void ShowDialog(DeviceDialogMode mode, string message, Func<Task>? action)
     {
         pendingDialogAction = action;
         DialogMode = mode;
@@ -481,11 +766,14 @@ public sealed class DeviceManagementViewModel : ObservableObject
         IsDialogOpen = true;
     }
 
-    private void ConfirmDialog()
+    private async Task ConfirmDialogAsync()
     {
         var action = DialogMode == DeviceDialogMode.Confirmation ? pendingDialogAction : null;
         ClearDialog();
-        action?.Invoke();
+        if (action is not null)
+        {
+            await action().ConfigureAwait(true);
+        }
     }
 
     private void ClearDialog()
@@ -500,6 +788,9 @@ public sealed class DeviceManagementViewModel : ObservableObject
     {
         pendingNewGroupId = null;
         EditingGroupId = null;
+        editingCatalogParentId = null;
+        editingCatalogGroupIsNew = false;
+        editingCatalogGroupRevision = 0;
         EditingGroupName = string.Empty;
         GroupEditError = string.Empty;
     }
@@ -525,6 +816,35 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
     private void AddDevice()
     {
+        if (centralMode)
+        {
+            if (selectedCatalogGroup?.ParentId is null)
+            {
+                return;
+            }
+
+            editingCatalogDevice = null;
+            SelectedDevice = null;
+            IsEditing = false;
+            suppressDraftTracking = true;
+            try
+            {
+                EditDraft.ResetForAdd(selectedCatalogGroup.Id);
+                HasUnsavedDraft = false;
+            }
+            finally
+            {
+                suppressDraftTracking = false;
+            }
+
+            ValidationMessage = string.Empty;
+            OperationErrorCode = null;
+            OperationError = string.Empty;
+            IsEditPanelOpen = true;
+            OnPropertyChanged(nameof(EditorTitle));
+            return;
+        }
+
         if (SelectedGroup?.ParentId is null)
         {
             return;
@@ -537,16 +857,45 @@ public sealed class DeviceManagementViewModel : ObservableObject
         IsEditPanelOpen = true;
     }
 
-    private void EditDevice(CameraDevice? device)
+    private void EditDevice(object? value)
     {
-        if (device is null)
+        if (centralMode)
+        {
+            if (value is not CameraDeviceDto device)
+            {
+                return;
+            }
+
+            editingCatalogDevice = device;
+            SelectedDevice = null;
+            IsEditing = true;
+            suppressDraftTracking = true;
+            try
+            {
+                EditDraft.Load(device);
+                HasUnsavedDraft = false;
+            }
+            finally
+            {
+                suppressDraftTracking = false;
+            }
+
+            ValidationMessage = string.Empty;
+            OperationErrorCode = null;
+            OperationError = string.Empty;
+            IsEditPanelOpen = true;
+            OnPropertyChanged(nameof(EditorTitle));
+            return;
+        }
+
+        if (value is not CameraDevice legacyDevice)
         {
             return;
         }
 
-        SelectedDevice = device;
+        SelectedDevice = legacyDevice;
         IsEditing = true;
-        EditDraft.Load(device);
+        EditDraft.Load(legacyDevice);
         ValidationMessage = string.Empty;
         IsEditPanelOpen = true;
         OnPropertyChanged(nameof(EditorTitle));
@@ -554,6 +903,9 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
     private bool CanSaveDevice() =>
         !IsSaving && (!centralMode || IsServerAvailable);
+
+    private bool CanCommitGroupEdit() =>
+        !centralMode || IsServerAvailable && EditingGroupId is not null;
 
     private async Task SaveDeviceAsync()
     {
@@ -730,7 +1082,9 @@ public sealed class DeviceManagementViewModel : ObservableObject
             sdkPort,
             rtspPort,
             EditDraft.Username.Trim(),
-            EditDraft.Password.Length == 0 ? null : EditDraft.Password,
+            string.IsNullOrWhiteSpace(EditDraft.Password)
+                ? null
+                : EditDraft.Password,
             EditDraft.Manufacturer.Trim(),
             EditDraft.Model.Trim(),
             EditDraft.TransportMode,
@@ -828,7 +1182,31 @@ public sealed class DeviceManagementViewModel : ObservableObject
             }
         }
 
-        CatalogGroupSections.Clear();
+        selectedCatalogGroup = CatalogGroups.FirstOrDefault(group =>
+            group.Id == selectedCatalogGroup?.Id
+            && group.ParentId is not null);
+        selectedCatalogGroup ??= CatalogGroups
+            .Where(group => group.ParentId is not null)
+            .OrderBy(group => CatalogGroups
+                .FirstOrDefault(root => root.Id == group.ParentId)?.Sort ?? int.MaxValue)
+            .ThenBy(group => group.Sort)
+            .ThenBy(group => group.Id)
+            .FirstOrDefault();
+        IsServerAvailable = commandService?.CanWrite == true;
+        OnPropertyChanged(nameof(EditableCatalogGroups));
+        OnPropertyChanged(nameof(ActiveSelectedGroupName));
+        OnPropertyChanged(nameof(ActiveDevices));
+        RefreshCentralGroupSections();
+    }
+
+    private void RefreshCentralGroupSections()
+    {
+        if (!centralMode)
+        {
+            return;
+        }
+
+        GroupSections.Clear();
         foreach (var root in CatalogGroups
                      .Where(group => group.ParentId is null)
                      .OrderBy(group => group.Sort)
@@ -838,34 +1216,16 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 .Where(group => group.ParentId == root.Id)
                 .OrderBy(group => group.Sort)
                 .ThenBy(group => group.Id)
-                .Select(group => new DeviceGroupTreeItemViewModel(group));
-            CatalogGroupSections.Add(new DeviceGroupTreeItemViewModel(root, children));
+                .Select(group => new DeviceGroupTreeItemViewModel(group)
+                {
+                    IsSelected = group.Id == selectedCatalogGroup?.Id,
+                    IsEditing = group.Id == EditingGroupId
+                });
+            GroupSections.Add(new DeviceGroupTreeItemViewModel(root, children));
         }
 
-        if (editingCatalogDevice is null && CatalogDevices.Count > 0)
-        {
-            LoadCatalogDraft(CatalogDevices[0]);
-        }
-
-        IsServerAvailable = commandService?.CanWrite == true;
-        OnPropertyChanged(nameof(EditableCatalogGroups));
-    }
-
-    private void LoadCatalogDraft(CameraDeviceDto device)
-    {
-        editingCatalogDevice = device;
-        suppressDraftTracking = true;
-        try
-        {
-            EditDraft.Load(device);
-            HasUnsavedDraft = false;
-        }
-        finally
-        {
-            suppressDraftTracking = false;
-        }
-
-        IsEditing = true;
+        OnPropertyChanged(nameof(ActiveGroupSections));
+        OnPropertyChanged(nameof(ActiveEditableGroups));
     }
 
     private void CloseCentralEditor()
@@ -873,7 +1233,17 @@ public sealed class DeviceManagementViewModel : ObservableObject
         IsEditPanelOpen = false;
         IsEditing = false;
         editingCatalogDevice = null;
-        HasUnsavedDraft = false;
+        suppressDraftTracking = true;
+        try
+        {
+            EditDraft.ResetForAdd(selectedCatalogGroup?.Id ?? Guid.Empty);
+            HasUnsavedDraft = false;
+        }
+        finally
+        {
+            suppressDraftTracking = false;
+        }
+
         OnPropertyChanged(nameof(EditorTitle));
     }
 
@@ -1001,7 +1371,16 @@ public sealed class DeviceManagementViewModel : ObservableObject
             : channel.StreamId;
     }
 
-    private void CancelEdit() => CloseEditor();
+    private void CancelEdit()
+    {
+        if (centralMode)
+        {
+            CloseCentralEditor();
+            return;
+        }
+
+        CloseEditor();
+    }
 
     private void CloseEditor()
     {
@@ -1012,7 +1391,18 @@ public sealed class DeviceManagementViewModel : ObservableObject
         OnPropertyChanged(nameof(EditorTitle));
     }
 
-    private void DeleteDevice(CameraDevice? device)
+    private void DeleteDevice(object? value)
+    {
+        if (centralMode)
+        {
+            DeleteCatalogDevice(value as CameraDeviceDto);
+            return;
+        }
+
+        DeleteLegacyDevice(value as CameraDevice);
+    }
+
+    private void DeleteLegacyDevice(CameraDevice? device)
     {
         if (device is null)
         {
@@ -1031,6 +1421,51 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 }
 
                 RefreshDevices();
+                return Task.CompletedTask;
+            });
+    }
+
+    private void DeleteCatalogDevice(CameraDeviceDto? device)
+    {
+        if (device is null)
+        {
+            return;
+        }
+
+        ShowDialog(
+            DeviceDialogMode.Confirmation,
+            $"确定删除设备“{device.Name}”吗？",
+            async () =>
+            {
+                if (commandService is null || !IsServerAvailable)
+                {
+                    SetOperationError("CATALOG_UNAVAILABLE", "Catalog API is unavailable.");
+                    return;
+                }
+
+                try
+                {
+                    await commandService.DeleteDeviceAsync(device.Id, device.Revision)
+                        .ConfigureAwait(true);
+                    if (editingCatalogDevice?.Id == device.Id)
+                    {
+                        CloseCentralEditor();
+                    }
+
+                    RefreshCentralCatalogView();
+                }
+                catch (CatalogApiException exception)
+                {
+                    SetOperationError(exception.Code, exception.Code);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    SetOperationError("CATALOG_WRITE_FAILED", "Catalog write failed.");
+                }
             });
     }
 
