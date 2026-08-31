@@ -1,0 +1,59 @@
+<Window x:Class="VideoMonitor.Wpf.Views.ServerSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="服务器设置" Width="520" Height="280"
+        MinWidth="520" MinHeight="280" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}"
+        Foreground="{StaticResource PrimaryTextBrush}">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+    </Window.Resources>
+    <Border Margin="12" Padding="20"
+            Background="{StaticResource PanelBackgroundBrush}"
+            BorderBrush="{StaticResource BorderBrush}"
+            BorderThickness="1" CornerRadius="6">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock FontSize="{StaticResource FontSizePageTitle}"
+                       FontWeight="SemiBold" Text="服务器设置" />
+            <StackPanel Grid.Row="1" Margin="0,20,0,0">
+                <TextBlock Style="{StaticResource MutedTextStyle}" Text="Server 地址" />
+                <TextBox Margin="0,6,0,0" Height="34"
+                         AutomationProperties.AutomationId="ServerBaseUrlTextBox"
+                         Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}" />
+            </StackPanel>
+            <StackPanel Grid.Row="2" Margin="0,12,0,0">
+                <TextBlock Foreground="{StaticResource SecondaryTextBrush}"
+                           Text="{Binding TestResultText}" TextWrapping="Wrap" />
+                <TextBlock Margin="0,6,0,0"
+                           Foreground="{StaticResource WarningOrangeBrush}"
+                           Text="{Binding SaveError}"
+                           TextWrapping="Wrap"
+                           Visibility="{Binding HasSaveError, Converter={StaticResource BoolToVisibilityConverter}}" />
+            </StackPanel>
+            <StackPanel Grid.Row="3" HorizontalAlignment="Right"
+                        Orientation="Horizontal">
+                <Button Margin="0,0,8,0"
+                        AutomationProperties.AutomationId="TestServerConnectionButton"
+                        Command="{Binding TestConnectionCommand}"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Content="测试连接" />
+                <Button Margin="0,0,8,0"
+                        AutomationProperties.AutomationId="SaveServerSettingsButton"
+                        Command="{Binding SaveCommand}"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        Content="保存" />
+                <Button AutomationProperties.AutomationId="CancelServerSettingsButton"
+                        Click="CancelWindow"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Content="取消" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

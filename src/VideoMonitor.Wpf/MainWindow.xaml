@@ -17,6 +17,7 @@
     <Window.Resources>
         <converters:StringEqualsConverter x:Key="StringEqualsConverter" />
         <converters:NavigationVisibilityConverter x:Key="NavigationVisibilityConverter" />
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <Style x:Key="SidebarTextStyle" TargetType="TextBlock" BasedOn="{StaticResource NavigationTextStyle}">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsSidebarCollapsed}" Value="True">
@@ -90,7 +91,7 @@
                     <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Stretch">
                         <StackPanel Margin="0,0,12,0" Orientation="Horizontal" VerticalAlignment="Center">
                             <Ellipse Width="8" Height="8" Fill="{StaticResource OnlineGreenBrush}" />
-                            <TextBlock Margin="8,0,0,0" Foreground="{StaticResource SecondaryTextBrush}" FontSize="{StaticResource FontSizeAuxiliary}" Text="系统运行正常" />
+                            <TextBlock Margin="8,0,0,0" Foreground="{StaticResource SecondaryTextBrush}" FontSize="{StaticResource FontSizeAuxiliary}" Text="客户端运行中" />
                         </StackPanel>
                         <Border Width="1" Height="26" Margin="0,0,10,0" Background="{StaticResource SeparatorBrush}" VerticalAlignment="Center" />
                         <StackPanel Margin="0,0,10,0" Orientation="Horizontal" VerticalAlignment="Center">
@@ -135,7 +136,10 @@
                         <Button ToolTip="告警" Style="{StaticResource HeaderToolButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                             <Grid Width="48"><StackPanel HorizontalAlignment="Center"><Path Width="19" Height="19" HorizontalAlignment="Center" Data="{StaticResource IconAlarm}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Margin="0,2,0,0" HorizontalAlignment="Center" FontSize="{StaticResource FontSizeCaption}" Text="告警"/></StackPanel><Border Margin="0,1,4,0" Width="17" Height="17" VerticalAlignment="Top" HorizontalAlignment="Right" Background="{StaticResource DangerRedBrush}" CornerRadius="9"><TextBlock FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center" Text="3"/></Border></Grid>
                         </Button>
-                        <Button ToolTip="设置" Style="{StaticResource HeaderToolButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Button AutomationProperties.AutomationId="ServerSettingsButton"
+                                ToolTip="服务器设置" Click="OpenServerSettings"
+                                Visibility="{Binding IsCentralServerUiAvailable, Converter={StaticResource BoolToVisibilityConverter}}"
+                                Style="{StaticResource HeaderToolButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                             <StackPanel HorizontalAlignment="Center"><Path Width="19" Height="19" HorizontalAlignment="Center" Data="{StaticResource IconSettings}" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform"/><TextBlock Margin="0,2,0,0" HorizontalAlignment="Center" FontSize="{StaticResource FontSizeCaption}" Text="设置"/></StackPanel>
                         </Button>
                         <Border Width="1" Height="26" Margin="4,0" Background="{StaticResource SeparatorBrush}" VerticalAlignment="Center" />

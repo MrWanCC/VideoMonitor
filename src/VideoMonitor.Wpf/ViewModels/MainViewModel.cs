@@ -10,6 +10,8 @@ public sealed class MainViewModel : ObservableObject
     private bool isSidebarCollapsed = true;
     private bool isSignalLinkageEnabled;
     private bool isSecondaryScreenVisible;
+    private readonly ServerStatusViewModel? serverStatus;
+    private readonly Func<ServerSettingsViewModel>? serverSettingsFactory;
 
     public MainViewModel(
         MonitorViewModel monitor,
@@ -26,9 +28,28 @@ public sealed class MainViewModel : ObservableObject
         ToggleSecondaryScreenCommand = new RelayCommand(() => IsSecondaryScreenVisible = !IsSecondaryScreenVisible);
     }
 
+    public MainViewModel(
+        MonitorViewModel monitor,
+        DeviceManagementViewModel deviceManagement,
+        ServerStatusViewModel serverStatus,
+        Func<ServerSettingsViewModel> serverSettingsFactory,
+        bool isSecondaryScreenVisible = false)
+        : this(monitor, deviceManagement, isSecondaryScreenVisible)
+    {
+        this.serverStatus = serverStatus
+            ?? throw new ArgumentNullException(nameof(serverStatus));
+        this.serverSettingsFactory = serverSettingsFactory
+            ?? throw new ArgumentNullException(nameof(serverSettingsFactory));
+    }
+
     public MonitorViewModel Monitor { get; }
 
     public DeviceManagementViewModel DeviceManagement { get; }
+
+    public ServerStatusViewModel? ServerStatus => serverStatus;
+
+    public bool IsCentralServerUiAvailable =>
+        serverStatus is not null && serverSettingsFactory is not null;
 
     public IRelayCommand<string> NavigateCommand { get; }
 
@@ -39,6 +60,17 @@ public sealed class MainViewModel : ObservableObject
     public IRelayCommand ToggleSignalLinkageCommand { get; }
 
     public IRelayCommand ToggleSecondaryScreenCommand { get; }
+
+    public ServerSettingsViewModel CreateServerSettingsViewModel()
+    {
+        if (serverSettingsFactory is null)
+        {
+            throw new InvalidOperationException(
+                "Central Server settings are not available in legacy mode.");
+        }
+
+        return serverSettingsFactory();
+    }
 
     public string SelectedNavigation
     {

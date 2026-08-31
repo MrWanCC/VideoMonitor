@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using VideoMonitor.Wpf.ViewModels;
+using VideoMonitor.Wpf.Views;
 
 namespace VideoMonitor.Wpf;
 
@@ -130,4 +131,19 @@ public partial class MainWindow
         WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
     private void CloseWindow(object sender, RoutedEventArgs e) => Close();
+
+    private void OpenServerSettings(object sender, RoutedEventArgs e)
+    {
+        if (!viewModel.IsCentralServerUiAvailable)
+        {
+            return;
+        }
+
+        var settingsWindow = new ServerSettingsWindow(
+            viewModel.CreateServerSettingsViewModel())
+        {
+            Owner = this
+        };
+        settingsWindow.ShowDialog();
+    }
 }
