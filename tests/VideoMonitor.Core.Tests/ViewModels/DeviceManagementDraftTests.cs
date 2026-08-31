@@ -197,6 +197,19 @@ public sealed class DeviceManagementDraftTests
     }
 
     [Fact]
+    public void ExistingDeviceEditor_StartsWithBlankPassword()
+    {
+        var device = ExistingDevice();
+        var viewModel = new DeviceManagementViewModel(
+            new DeviceReadModelStub(device),
+            new FakeCatalogCommandService());
+
+        viewModel.EditDeviceCommand.Execute(device);
+
+        Assert.Empty(viewModel.EditDraft.Password);
+    }
+
+    [Fact]
     public async Task BlankPassword_MapsToNoPasswordChange()
     {
         var device = ExistingDevice();
