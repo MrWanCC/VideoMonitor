@@ -142,15 +142,16 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
                     connection,
                     transaction,
                     """
-                    INSERT INTO device_groups (id, name, parent_id, sort, enabled, revision)
-                    VALUES ($id, $name, $parentId, $sort, $enabled, 1);
+                    INSERT INTO device_groups (id, name, parent_id, sort, enabled, group_kind, revision)
+                    VALUES ($id, $name, $parentId, $sort, $enabled, $groupKind, 1);
                     """,
                     cancellationToken,
                     ("$id", group.Id.ToString("N")),
                     ("$name", group.Name),
                     ("$parentId", group.ParentId?.ToString("N")),
                     ("$sort", group.Sort),
-                    ("$enabled", ToDatabaseBoolean(group.Enabled)))
+                    ("$enabled", ToDatabaseBoolean(group.Enabled)),
+                    ("$groupKind", group.Kind?.ToString()))
                 .ConfigureAwait(false);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -290,6 +291,7 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
                         parent_id = $parentId,
                         sort = $sort,
                         enabled = $enabled,
+                        group_kind = $groupKind,
                         revision = revision + 1
                     WHERE id = $id AND revision = $expectedRevision;
                     """,
@@ -299,6 +301,7 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
                     ("$parentId", group.ParentId?.ToString("N")),
                     ("$sort", group.Sort),
                     ("$enabled", ToDatabaseBoolean(group.Enabled)),
+                    ("$groupKind", group.Kind?.ToString()),
                     ("$expectedRevision", expectedRevision))
                 .ConfigureAwait(false);
 
@@ -702,7 +705,7 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT id, name, parent_id, sort, enabled, revision
+            SELECT id, name, parent_id, sort, enabled, group_kind, revision
             FROM device_groups
             ORDER BY sort, id;
             """;
@@ -719,7 +722,11 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
                     : ReadGuid(reader, 2, "device_groups.parent_id"),
                 reader.GetInt32(3),
                 ReadBoolean(reader, 4, "device_groups.enabled"),
-                reader.GetInt64(5)));
+                ReadNullableEnum<MonitorGroupType>(
+                    reader,
+                    5,
+                    "device_groups.group_kind"),
+                reader.GetInt64(6)));
         }
 
         return groups;
@@ -734,7 +741,7 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT id, name, parent_id, sort, enabled, revision
+            SELECT id, name, parent_id, sort, enabled, group_kind, revision
             FROM device_groups
             WHERE id = $id;
             """;
@@ -754,7 +761,11 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
                 : ReadGuid(reader, 2, "device_groups.parent_id"),
             reader.GetInt32(3),
             ReadBoolean(reader, 4, "device_groups.enabled"),
-            reader.GetInt64(5));
+            ReadNullableEnum<MonitorGroupType>(
+                reader,
+                5,
+                "device_groups.group_kind"),
+            reader.GetInt64(6));
     }
 
     private async Task<List<DeviceReadModel>> ReadDevicesAsync(
@@ -910,6 +921,7 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
             group.ParentId,
             group.Sort,
             group.Enabled,
+            group.Kind,
             revision);
 
     private static CameraDeviceDto ToDeviceDto(
@@ -1041,6 +1053,17 @@ public sealed class SqliteCentralCatalogRepository : ICentralCatalogRepository
         }
 
         return result;
+    }
+
+    private static TEnum? ReadNullableEnum<TEnum>(
+        DbDataReader reader,
+        int ordinal,
+        string fieldName)
+        where TEnum : struct, Enum
+    {
+        return reader.IsDBNull(ordinal)
+            ? null
+            : ReadEnum<TEnum>(reader.GetString(ordinal), fieldName);
     }
 
     private static int ToDatabaseBoolean(bool value) => value ? 1 : 0;

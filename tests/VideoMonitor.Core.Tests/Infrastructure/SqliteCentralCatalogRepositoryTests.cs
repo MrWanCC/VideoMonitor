@@ -105,6 +105,40 @@ public sealed class SqliteCentralCatalogRepositoryTests
     }
 
     [Fact]
+    public async Task GroupKind_RoundTripsForRootAndChild()
+    {
+        await using var context = await TestContext.CreateAsync();
+        var repository = CreateRepository(context, new CountingSecretProtector());
+        var root = await CreateGroupAsync(
+            repository,
+            id: Guid.Parse("91000000-0000-0000-0000-000000000011"),
+            name: "Chute Root",
+            kind: MonitorGroupType.Chute);
+        var child = await CreateGroupAsync(
+            repository,
+            id: Guid.Parse("91000000-0000-0000-0000-000000000012"),
+            parentId: root.Id,
+            name: "Chute Child");
+
+        var loadedRoot = await GetGroupAsync(repository, root.Id);
+        var loadedChild = await GetGroupAsync(repository, child.Id);
+
+        Assert.Equal(MonitorGroupType.Chute, loadedRoot!.Kind);
+        Assert.Null(loadedChild!.Kind);
+    }
+
+    [Fact]
+    public async Task GetGroupAsync_InvalidPersistedKind_ThrowsInvalidDataException()
+    {
+        await using var context = await TestContext.CreateAsync();
+        var repository = CreateRepository(context, new CountingSecretProtector());
+        var group = await CreateGroupAsync(repository);
+        await context.SetGroupKindAsync(group.Id, "NotAGroupKind");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => GetGroupAsync(repository, group.Id));
+    }
+
+    [Fact]
     public async Task CreateDeviceAsync_ReturnsSafeDtoAndReadsMainAndSubChannels()
     {
         await using var context = await TestContext.CreateAsync();
@@ -889,7 +923,8 @@ public sealed class SqliteCentralCatalogRepositoryTests
         object repository,
         Guid? id = null,
         Guid? parentId = null,
-        string name = "Device Group")
+        string name = "Device Group",
+        MonitorGroupType? kind = null)
     {
         var group = new DeviceGroup
         {
@@ -898,6 +933,7 @@ public sealed class SqliteCentralCatalogRepositoryTests
             ParentId = parentId,
             Sort = 1,
             Enabled = true,
+            Kind = kind,
             Revision = 15
         };
         var result = await InvokeAsync(
@@ -972,6 +1008,7 @@ public sealed class SqliteCentralCatalogRepositoryTests
             ParentId = dto.ParentId,
             Sort = dto.Sort,
             Enabled = dto.Enabled,
+            Kind = dto.Kind,
             Revision = dto.Revision
         };
 
@@ -1089,6 +1126,30 @@ public sealed class SqliteCentralCatalogRepositoryTests
         return Convert.ToString(result) ?? string.Empty;
     }
 
+    private static async Task<List<string>> ReadColumnAsync(
+        DbConnection connection,
+        string sql,
+        int columnIndex)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await using var reader = await command.ExecuteReaderAsync();
+        var values = new List<string>();
+        while (await reader.ReadAsync())
+        {
+            values.Add(reader.GetString(columnIndex));
+        }
+
+        return values;
+    }
+
+    private static async Task ExecuteAsync(DbConnection connection, string sql)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync();
+    }
+
     private sealed class TestContext : IAsyncDisposable
     {
         private TestContext(string root)
@@ -1112,6 +1173,29 @@ public sealed class SqliteCentralCatalogRepositoryTests
             var context = new TestContext(root);
             await context.Initializer.InitializeAsync();
             return context;
+        }
+
+        public async Task SetGroupKindAsync(Guid id, string value)
+        {
+            await using var connection = Factory.CreateConnection();
+            await connection.OpenAsync();
+            var columns = await ReadColumnAsync(connection, "PRAGMA table_info(device_groups);", columnIndex: 1);
+            if (!columns.Contains("group_kind", StringComparer.Ordinal))
+            {
+                await ExecuteAsync(connection, "ALTER TABLE device_groups ADD COLUMN group_kind TEXT NULL;");
+            }
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE device_groups SET group_kind = $kind WHERE id = $id;";
+            var kindParameter = command.CreateParameter();
+            kindParameter.ParameterName = "$kind";
+            kindParameter.Value = value;
+            command.Parameters.Add(kindParameter);
+            var idParameter = command.CreateParameter();
+            idParameter.ParameterName = "$id";
+            idParameter.Value = id.ToString("N");
+            command.Parameters.Add(idParameter);
+            await command.ExecuteNonQueryAsync();
         }
 
         public async ValueTask DisposeAsync()

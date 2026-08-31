@@ -32,7 +32,7 @@ public sealed class SqliteDatabaseInitializerTests
             },
             tables);
 
-        Assert.Equal(2L, await ReadScalarAsync<long>(
+        Assert.Equal(3L, await ReadScalarAsync<long>(
             connection,
             "SELECT MAX(version) FROM schema_migrations;"));
 
@@ -58,6 +58,9 @@ public sealed class SqliteDatabaseInitializerTests
         Assert.Equal(1L, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM schema_migrations WHERE version = 2;"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 3;"));
         Assert.Equal(5, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';"));
@@ -74,7 +77,7 @@ public sealed class SqliteDatabaseInitializerTests
         await using var connection = context.CreateConnection();
         await connection.OpenAsync();
 
-        Assert.Equal(2L, await ReadScalarAsync<long>(
+        Assert.Equal(3L, await ReadScalarAsync<long>(
             connection,
             "SELECT MAX(version) FROM schema_migrations;"));
         Assert.Equal("Legacy Group", await ReadScalarAsync<string>(
@@ -92,6 +95,37 @@ public sealed class SqliteDatabaseInitializerTests
     }
 
     [Fact]
+    public async Task InitializeAsync_UpgradesV2KnownRootKinds()
+    {
+        using var context = TestContext.Create();
+        await context.CreateV2DatabaseAsync();
+        Assert.Equal(2, await context.ReadMaxSchemaVersionAsync());
+        await context.InsertRootAsync("卸矿站监控");
+        await context.InsertRootAsync("溜井监控");
+        await context.InsertRootAsync("巷道监控");
+
+        await context.CreateInitializer().InitializeAsync();
+
+        Assert.Equal("UnloadingStation", await context.ReadGroupKindAsync("卸矿站监控"));
+        Assert.Equal("Chute", await context.ReadGroupKindAsync("溜井监控"));
+        Assert.Equal("Tunnel", await context.ReadGroupKindAsync("巷道监控"));
+    }
+
+    [Fact]
+    public async Task InitializeAsync_LeavesUnknownRootKindNull()
+    {
+        using var context = TestContext.Create();
+        await context.CreateV2DatabaseAsync();
+        Assert.Equal(2, await context.ReadMaxSchemaVersionAsync());
+        await context.InsertRootAsync("现场自定义分类");
+
+        await context.CreateInitializer().InitializeAsync();
+
+        Assert.Null(await context.ReadGroupKindAsync("现场自定义分类"));
+        Assert.Equal(3, await context.ReadMaxSchemaVersionAsync());
+    }
+
+    [Fact]
     public async Task Schema_DoesNotPersistRuntimeFields()
     {
         using var context = TestContext.Create();
@@ -104,11 +138,16 @@ public sealed class SqliteDatabaseInitializerTests
             connection,
             "PRAGMA table_info(camera_channels);",
             columnIndex: 1);
+        var groupColumns = await ReadColumnAsync(
+            connection,
+            "PRAGMA table_info(device_groups);",
+            columnIndex: 1);
         var deviceColumns = await ReadColumnAsync(
             connection,
             "PRAGMA table_info(camera_devices);",
             columnIndex: 1);
 
+        Assert.Contains("group_kind", groupColumns, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("stream_id", channelColumns, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("status", deviceColumns, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("camera_status", deviceColumns, StringComparer.OrdinalIgnoreCase);
@@ -157,7 +196,7 @@ public sealed class SqliteDatabaseInitializerTests
                     version INTEGER NOT NULL PRIMARY KEY,
                     applied_at_utc TEXT NOT NULL);
                 INSERT INTO schema_migrations (version, applied_at_utc)
-                VALUES (3, '2099-01-01T00:00:00.0000000+00:00');
+                VALUES (4, '2099-01-01T00:00:00.0000000+00:00');
                 """);
         }
 
@@ -168,7 +207,7 @@ public sealed class SqliteDatabaseInitializerTests
 
         await using var verifyConnection = context.CreateConnection();
         await verifyConnection.OpenAsync();
-        Assert.Equal(3L, await ReadScalarAsync<long>(
+        Assert.Equal(4L, await ReadScalarAsync<long>(
             verifyConnection,
             "SELECT MAX(version) FROM schema_migrations;"));
     }
@@ -192,6 +231,9 @@ public sealed class SqliteDatabaseInitializerTests
         Assert.Equal(1L, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM schema_migrations WHERE version = 2;"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 3;"));
         Assert.Equal(5L, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';"));
@@ -360,6 +402,75 @@ public sealed class SqliteDatabaseInitializerTests
                     8000, 554, 'legacy-user', 'legacy-ciphertext', 'Vendor',
                     'Model', 'Tcp', 1, 'legacy remark');
                 """);
+        }
+
+        public async Task CreateV2DatabaseAsync()
+        {
+            await CreateV1DatabaseAsync();
+            await using var connection = CreateConnection();
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                ALTER TABLE device_groups
+                ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+
+                ALTER TABLE camera_devices
+                ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+
+                INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc)
+                VALUES (2, $appliedAtUtc);
+                """;
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "$appliedAtUtc";
+            parameter.Value = DateTimeOffset.UtcNow.ToString("O");
+            command.Parameters.Add(parameter);
+            await command.ExecuteNonQueryAsync();
+            await transaction.CommitAsync();
+        }
+
+        public async Task InsertRootAsync(string name)
+        {
+            await using var connection = CreateConnection();
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO device_groups(id, name, parent_id, sort, enabled)
+                VALUES ($id, $name, NULL, 0, 1);
+                """;
+            var id = command.CreateParameter();
+            id.ParameterName = "$id";
+            id.Value = Guid.NewGuid().ToString("N");
+            command.Parameters.Add(id);
+            var nameParameter = command.CreateParameter();
+            nameParameter.ParameterName = "$name";
+            nameParameter.Value = name;
+            command.Parameters.Add(nameParameter);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        public async Task<string?> ReadGroupKindAsync(string name)
+        {
+            await using var connection = CreateConnection();
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT group_kind FROM device_groups WHERE name = $name ORDER BY rowid DESC LIMIT 1;";
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "$name";
+            parameter.Value = name;
+            command.Parameters.Add(parameter);
+            var value = await command.ExecuteScalarAsync();
+            return value is null || Convert.IsDBNull(value) ? null : Convert.ToString(value);
+        }
+
+        public async Task<int> ReadMaxSchemaVersionAsync()
+        {
+            await using var connection = CreateConnection();
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT MAX(version) FROM schema_migrations;";
+            return Convert.ToInt32(await command.ExecuteScalarAsync());
         }
 
         public SqliteDatabaseInitializer CreateInitializer()

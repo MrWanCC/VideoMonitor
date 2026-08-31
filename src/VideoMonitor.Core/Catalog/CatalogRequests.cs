@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using VideoMonitor.Core.Models;
 
 namespace VideoMonitor.Core.Catalog;
@@ -14,14 +15,40 @@ public sealed record CreateGroupRequest(
     string Name,
     Guid? ParentId,
     int Sort,
-    bool Enabled);
+    bool Enabled,
+    MonitorGroupType? Kind)
+{
+    [JsonConstructor]
+    public CreateGroupRequest(
+        Guid id,
+        string name,
+        Guid? parentId,
+        int sort,
+        bool enabled)
+        : this(id, name, parentId, sort, enabled, null)
+    {
+    }
+}
 
 public sealed record UpdateGroupRequest(
     string Name,
     Guid? ParentId,
     int Sort,
     bool Enabled,
-    long ExpectedRevision);
+    MonitorGroupType? Kind,
+    long ExpectedRevision)
+{
+    [JsonConstructor]
+    public UpdateGroupRequest(
+        string name,
+        Guid? parentId,
+        int sort,
+        bool enabled,
+        long expectedRevision)
+        : this(name, parentId, sort, enabled, null, expectedRevision)
+    {
+    }
+}
 
 public sealed record CreateDeviceRequest(
     Guid Id,

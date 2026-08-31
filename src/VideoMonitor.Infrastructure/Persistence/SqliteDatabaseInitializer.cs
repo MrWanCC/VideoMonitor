@@ -4,7 +4,7 @@ namespace VideoMonitor.Infrastructure.Persistence;
 
 public sealed class SqliteDatabaseInitializer
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     private static readonly SemaphoreSlim InitializationGate = new(1, 1);
 
@@ -75,6 +75,15 @@ public sealed class SqliteDatabaseInitializer
                     .ConfigureAwait(false);
 
                 await InsertV2MigrationAsync(connection, transaction, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (version < 3)
+            {
+                await ApplyV3SchemaAsync(connection, transaction, cancellationToken)
+                    .ConfigureAwait(false);
+
+                await InsertV3MigrationAsync(connection, transaction, cancellationToken)
                     .ConfigureAwait(false);
             }
 
@@ -198,6 +207,46 @@ public sealed class SqliteDatabaseInitializer
         command.CommandText = """
             INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc)
             VALUES (2, $appliedAtUtc);
+            """;
+        command.Parameters.AddWithValue(
+            "$appliedAtUtc",
+            DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task ApplyV3SchemaAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await ExecuteNonQueryAsync(connection, transaction, """
+            ALTER TABLE device_groups
+            ADD COLUMN group_kind TEXT NULL;
+
+            UPDATE device_groups
+            SET group_kind = 'UnloadingStation'
+            WHERE parent_id IS NULL AND name = '卸矿站监控';
+
+            UPDATE device_groups
+            SET group_kind = 'Chute'
+            WHERE parent_id IS NULL AND name = '溜井监控';
+
+            UPDATE device_groups
+            SET group_kind = 'Tunnel'
+            WHERE parent_id IS NULL AND name = '巷道监控';
+            """, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task InsertV3MigrationAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc)
+            VALUES (3, $appliedAtUtc);
             """;
         command.Parameters.AddWithValue(
             "$appliedAtUtc",

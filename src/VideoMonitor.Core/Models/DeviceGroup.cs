@@ -13,4 +13,6 @@ public sealed class DeviceGroup
     public int Sort { get; set; }
 
     public bool Enabled { get; set; } = true;
+
+    public MonitorGroupType? Kind { get; set; }
 }
