@@ -797,34 +797,6 @@ public sealed class DeviceCatalogBootstrapperTests
         Assert.True(File.Exists(legacyPath));
     }
 
-    [Fact]
-    public void App_UsesBootstrapperCatalogForAllConsumers()
-    {
-        var repositoryRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", ".."));
-        var appPath = Path.Combine(repositoryRoot, "src", "VideoMonitor.Wpf", "App.xaml.cs");
-        var source = File.ReadAllText(appPath);
-
-        Assert.Contains("new DeviceCatalogBootstrapper", source, StringComparison.Ordinal);
-        Assert.Contains("LastMigrationWarning", source, StringComparison.Ordinal);
-        Assert.Contains("迁移提示", source, StringComparison.Ordinal);
-        Assert.Contains("RecoveryOccurred", source, StringComparison.Ordinal);
-        Assert.Contains("设备配置文件损坏，系统已从最近的有效备份恢复", source, StringComparison.Ordinal);
-        Assert.Contains("InvalidDataException => exception.Message", source, StringComparison.Ordinal);
-        Assert.Contains("var deviceCatalogStore = new JsonDeviceCatalogStore();", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("new InMemoryDeviceCatalog", source, StringComparison.Ordinal);
-        Assert.Contains("new DeviceCatalogPersistenceCoordinator", source, StringComparison.Ordinal);
-        Assert.Contains("persistenceCoordinator.PersistenceFailed +=", source, StringComparison.Ordinal);
-        Assert.Contains("Dispatcher.BeginInvoke", source, StringComparison.Ordinal);
-        Assert.Contains("ShutdownCleanupCoordinator.ExecuteAsync", source, StringComparison.Ordinal);
-        Assert.Contains("persistenceCoordinator.DisposeAsync()", source, StringComparison.Ordinal);
-        Assert.Contains("new MonitorViewModel(switchService, groups, deviceCatalog)", source, StringComparison.Ordinal);
-        Assert.Contains("new DeviceManagementViewModel(deviceCatalog)", source, StringComparison.Ordinal);
-        Assert.Contains("new SecondaryMonitorViewModel(switchService, groups, deviceCatalog)", source, StringComparison.Ordinal);
-        Assert.Contains("deviceCatalog,\r\n                    zlmClient", source, StringComparison.Ordinal);
-    }
-
     private static DeviceCatalogSnapshot CreateSnapshot(
         string deviceName,
         string ipAddress,

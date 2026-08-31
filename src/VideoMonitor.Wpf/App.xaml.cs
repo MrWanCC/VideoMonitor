@@ -1,62 +1,34 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
-using System.Net.Http;
 using System.Windows;
 using LibVLCSharp.Shared;
 using VideoMonitor.Core.Services;
-using VideoMonitor.Infrastructure.Persistence;
-using VideoMonitor.Infrastructure.ZLMediaKit;
 using VideoMonitor.Wpf.Configuration;
 using VideoMonitor.Wpf.Playback;
 using VideoMonitor.Wpf.Services;
 using VideoMonitor.Wpf.ViewModels;
 using VideoMonitor.Wpf.Views;
+using WpfMessageBox = System.Windows.MessageBox;
 
 namespace VideoMonitor.Wpf;
 
 public partial class App
 {
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        LocalPlaybackConfiguration? playbackConfiguration = null;
-        string? playbackConfigurationError = null;
+
+        LocalPlaybackConfiguration playbackConfiguration;
         try
         {
-            playbackConfiguration = LocalConfigurationLoader.Load(AppContext.BaseDirectory);
+            playbackConfiguration = LocalConfigurationLoader.Load(
+                AppContext.BaseDirectory);
         }
         catch (InvalidOperationException exception)
         {
-            playbackConfigurationError = exception.Message;
-        }
-
-        var singleCameraEnabled = playbackConfiguration?.SingleCameraTest.Enabled == true;
-        var deviceCatalogStore = new JsonDeviceCatalogStore();
-        InMemoryDeviceCatalog deviceCatalog;
-        string? catalogMigrationWarning = null;
-        var catalogRecoveryOccurred = false;
-        try
-        {
-            var bootstrapper = new DeviceCatalogBootstrapper(deviceCatalogStore);
-            deviceCatalog = bootstrapper.InitializeAsync().GetAwaiter().GetResult();
-            catalogMigrationWarning = bootstrapper.LastMigrationWarning;
-            catalogRecoveryOccurred = bootstrapper.RecoveryOccurred;
-        }
-        catch (Exception exception)
-        {
-            Debug.WriteLine(exception.GetType().Name);
-            var startupError = exception switch
-            {
-                UnauthorizedAccessException =>
-                    "设备目录目录权限不足，请确认安装器已授予应用目录所需的修改权限。",
-                IOException => "设备目录文件无法访问，应用将退出。",
-                InvalidDataException => exception.Message,
-                NotSupportedException => exception.Message,
-                _ => "设备目录加载失败，应用将退出。"
-            };
-            System.Windows.MessageBox.Show(
-                startupError,
+            WpfMessageBox.Show(
+                exception.Message,
                 "启动失败",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
@@ -64,54 +36,83 @@ public partial class App
             return;
         }
 
-        var groups = MonitorCatalogProjection.CreateGroups(deviceCatalog);
-        var switchService = new MonitorSwitchService(
-            groups.Single(group => group.Name ==
-                (singleCameraEnabled ? "西401溜井" : "备用1")),
-            groups.Single(group => group.Name == "Z-1#巷"),
-            groups.Single(group => group.Name == "2#主溜井"));
-        var monitorViewModel = new MonitorViewModel(switchService, groups, deviceCatalog);
-        var deviceManagementViewModel = new DeviceManagementViewModel(deviceCatalog);
+        ApplicationCatalogComposition composition;
+        try
+        {
+            composition = await ApplicationCatalogComposition
+                .CreateAsync(
+                    playbackConfiguration,
+                    new ApplicationCatalogComposition.Dependencies())
+                .ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception.GetType().Name);
+            WpfMessageBox.Show(
+                GetCatalogStartupError(exception),
+                "启动失败",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
+
+        var singleCameraEnabled = !composition.IsFormalCentralMode;
+        var groups = composition.LocalCatalog is { } localCatalog
+            ? MonitorCatalogProjection.CreateGroups(localCatalog)
+            : MonitorCatalogProjection.CreateGroups(composition.ReadModel);
+        var switchService = new MonitorSwitchService(groups);
+        var monitorViewModel = composition.LocalCatalog is { } localCatalogForView
+            ? new MonitorViewModel(switchService, groups, localCatalogForView)
+            : new MonitorViewModel(switchService, composition.ReadModel);
+        var deviceManagementViewModel = composition.LocalCatalog is { } localCatalogForManagement
+            ? new DeviceManagementViewModel(localCatalogForManagement)
+            : new DeviceManagementViewModel(
+                composition.ReadModel,
+                composition.CommandService);
+        var secondaryViewModel = composition.LocalCatalog is { } localCatalogForSecondary
+            ? new SecondaryMonitorViewModel(
+                switchService,
+                groups,
+                localCatalogForSecondary)
+            : new SecondaryMonitorViewModel(
+                switchService,
+                composition.ReadModel);
         var screenService = new ScreenService();
-        var mainViewModel = new MainViewModel(
-            monitorViewModel,
-            deviceManagementViewModel,
-            screenService.HasSecondaryScreen);
-        var secondaryViewModel = new SecondaryMonitorViewModel(switchService, groups, deviceCatalog);
+        var mainViewModel = composition.IsFormalCentralMode
+            ? new MainViewModel(
+                monitorViewModel,
+                deviceManagementViewModel,
+                composition.ServerStatus!,
+                () => new ServerSettingsViewModel(
+                    composition.Coordinator!,
+                    composition.ClientSettingsStore!,
+                    () => deviceManagementViewModel.HasUnsavedDraft),
+                screenService.HasSecondaryScreen)
+            : new MainViewModel(
+                monitorViewModel,
+                deviceManagementViewModel,
+                screenService.HasSecondaryScreen);
         var mainWindow = new MainWindow(mainViewModel);
         var secondaryWindow = new SecondaryMonitorWindow(secondaryViewModel);
         var playbackCancellation = new CancellationTokenSource();
         SingleCameraPlaybackCoordinator? playbackCoordinator = null;
         VlcPlaybackService? vlcPlaybackService = null;
-        HttpClient? zlmHttpClient = null;
         SingleCameraPlaybackSelection? playbackSelection = null;
+        string? playbackConfigurationError = null;
         Task? playbackStartTask = null;
-        var playbackStopped = false;
 
-        if (singleCameraEnabled
-            && playbackConfigurationError is null
-            && playbackConfiguration is { } configuredPlayback)
+        if (singleCameraEnabled)
         {
             try
             {
                 playbackSelection = SingleCameraPlaybackComposition.SelectDevice(
-                    deviceCatalog,
-                    configuredPlayback.SingleCameraTest.DeviceId,
-                    configuredPlayback.SingleCameraTest.ChannelId);
-                zlmHttpClient = new HttpClient
-                {
-                    Timeout = TimeSpan.FromSeconds(7)
-                };
-                var zlmClient = new ZlmClient(zlmHttpClient, playbackConfiguration.Zlm);
-                var provider = new LocalZlmPlaybackSourceProvider(
-                    deviceCatalog,
-                    zlmClient,
-                    playbackConfiguration.Zlm,
-                    TimeSpan.FromSeconds(6),
-                    TimeSpan.FromMilliseconds(250));
+                    composition.LocalCatalog!,
+                    playbackConfiguration.SingleCameraTest.DeviceId,
+                    playbackConfiguration.SingleCameraTest.ChannelId);
                 vlcPlaybackService = new VlcPlaybackService();
                 playbackCoordinator = new SingleCameraPlaybackCoordinator(
-                    provider,
+                    composition.LocalPlaybackSource!,
                     vlcPlaybackService);
             }
             catch (Exception exception) when (
@@ -120,21 +121,15 @@ public partial class App
                     or VLCException
                     or DllNotFoundException)
             {
-                playbackConfigurationError = "LibVLC初始化失败。";
                 Debug.WriteLine(exception.GetType().Name);
+                playbackConfigurationError = "LibVLC初始化失败。";
                 vlcPlaybackService?.Dispose();
-                zlmHttpClient?.Dispose();
                 vlcPlaybackService = null;
-                zlmHttpClient = null;
-                playbackCoordinator = null;
             }
         }
 
-        var persistenceCoordinator = new DeviceCatalogPersistenceCoordinator(
-            deviceCatalog,
-            deviceCatalogStore);
-
-        mainWindow.SourceInitialized += (_, _) => screenService.PlaceMainWindow(mainWindow);
+        mainWindow.SourceInitialized += (_, _) =>
+            screenService.PlaceMainWindow(mainWindow);
 
         void ApplySecondaryScreenVisibility()
         {
@@ -158,7 +153,8 @@ public partial class App
         }
 
         mainViewModel.PropertyChanged += OnMainViewModelPropertyChanged;
-        secondaryWindow.HiddenByUser += (_, _) => mainViewModel.IsSecondaryScreenVisible = false;
+        secondaryWindow.HiddenByUser += (_, _) =>
+            mainViewModel.IsSecondaryScreenVisible = false;
         var allowMainWindowClose = false;
         var shutdownInProgress = false;
         var finalCloseApplied = false;
@@ -174,7 +170,7 @@ public partial class App
             {
                 if (!shutdownInProgress)
                 {
-                    System.Windows.MessageBox.Show(
+                    WpfMessageBox.Show(
                         mainWindow,
                         "设备配置保存失败。当前修改可能无法在重启后保留，请检查磁盘空间或数据目录权限。",
                         "保存提示",
@@ -184,7 +180,10 @@ public partial class App
             }));
         }
 
-        persistenceCoordinator.PersistenceFailed += OnPersistenceFailed;
+        if (composition.PersistenceCoordinator is { } persistenceCoordinator)
+        {
+            persistenceCoordinator.PersistenceFailed += OnPersistenceFailed;
+        }
 
         void ApplyFinalWindowClose()
         {
@@ -195,7 +194,11 @@ public partial class App
 
             finalCloseApplied = true;
             mainViewModel.PropertyChanged -= OnMainViewModelPropertyChanged;
-            persistenceCoordinator.PersistenceFailed -= OnPersistenceFailed;
+            if (composition.PersistenceCoordinator is { } persistenceCoordinator)
+            {
+                persistenceCoordinator.PersistenceFailed -= OnPersistenceFailed;
+            }
+
             secondaryWindow.AllowSecondaryWindowClose = true;
             secondaryWindow.Close();
             playbackCancellation.Dispose();
@@ -221,46 +224,24 @@ public partial class App
             }
 
             vlcPlaybackService?.Dispose();
-            zlmHttpClient?.Dispose();
         }
 
-        async Task StopPlaybackAsync()
+        async Task StopApplicationResourcesAsync()
         {
-            if (playbackStopped)
-            {
-                return;
-            }
-
-            playbackStopped = true;
             try
             {
                 await ShutdownCleanupCoordinator.ExecuteAsync(
                     StopPlaybackResourcesAsync,
-                    () => persistenceCoordinator.DisposeAsync());
-            }
-            catch (InvalidOperationException exception)
-            {
-                Debug.WriteLine(exception.GetType().Name);
-                System.Windows.MessageBox.Show(
-                    "设备目录保存失败，最后一次修改可能未保存。",
-                    "关闭提示",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-            }
-            catch (AggregateException exception)
-            {
-                Debug.WriteLine(exception.GetType().Name);
-                System.Windows.MessageBox.Show(
-                    "关闭时资源清理失败，设备目录最后一次修改可能未保存。",
-                    "关闭提示",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                    composition.DisposeAsync);
             }
             catch (Exception exception)
             {
                 Debug.WriteLine(exception.GetType().Name);
-                System.Windows.MessageBox.Show(
-                    "关闭时播放资源清理失败，设备目录已尝试保存。",
+                var message = composition.IsFormalCentralMode
+                    ? "关闭时中央连接清理失败。"
+                    : "关闭时资源清理失败，设备目录最后一次修改可能未保存。";
+                WpfMessageBox.Show(
+                    message,
                     "关闭提示",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
@@ -283,7 +264,7 @@ public partial class App
 
             shutdownInProgress = true;
             playbackCancellation.Cancel();
-            await StopPlaybackAsync();
+            await StopApplicationResourcesAsync();
             allowMainWindowClose = true;
             mainWindow.Close();
         }
@@ -313,7 +294,8 @@ public partial class App
                     monitorViewModel.MainTiles[0],
                     playbackCancellation.Token);
             }
-            catch (OperationCanceledException) when (playbackCancellation.IsCancellationRequested)
+            catch (OperationCanceledException)
+                when (playbackCancellation.IsCancellationRequested)
             {
             }
         }
@@ -324,7 +306,7 @@ public partial class App
             playbackStartTask = StartPlaybackAsync();
         }
 
-        if (singleCameraEnabled || playbackConfigurationError is not null)
+        if (singleCameraEnabled)
         {
             mainWindow.ContentRendered += OnMainWindowContentRendered;
         }
@@ -333,19 +315,43 @@ public partial class App
         mainWindow.Show();
         ApplySecondaryScreenVisibility();
 
-        if (catalogMigrationWarning is not null)
+        if (composition.IsFormalCentralMode)
         {
-            System.Windows.MessageBox.Show(
+            composition.StartCentralCoordinator();
+        }
+        else
+        {
+            ShowLocalCatalogNotices(mainWindow, composition);
+        }
+    }
+
+    private static string GetCatalogStartupError(Exception exception) => exception switch
+    {
+        UnauthorizedAccessException =>
+            "设备目录目录权限不足，请确认安装器已授予应用目录所需的修改权限。",
+        IOException => "设备目录文件无法访问，应用将退出。",
+        InvalidDataException => exception.Message,
+        NotSupportedException => exception.Message,
+        _ => "设备目录加载失败，应用将退出。"
+    };
+
+    private static void ShowLocalCatalogNotices(
+        MainWindow mainWindow,
+        ApplicationCatalogComposition composition)
+    {
+        if (composition.CatalogMigrationWarning is not null)
+        {
+            WpfMessageBox.Show(
                 mainWindow,
-                catalogMigrationWarning,
+                composition.CatalogMigrationWarning,
                 "迁移提示",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
 
-        if (catalogRecoveryOccurred)
+        if (composition.CatalogRecoveryOccurred)
         {
-            System.Windows.MessageBox.Show(
+            WpfMessageBox.Show(
                 mainWindow,
                 "设备配置文件损坏，系统已从最近的有效备份恢复。\n原损坏文件已保留用于排查。",
                 "设备目录恢复提示",
