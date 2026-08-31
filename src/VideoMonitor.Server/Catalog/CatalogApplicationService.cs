@@ -508,7 +508,7 @@ public sealed class CatalogApplicationService
                 "Group was not found.");
         }
 
-        return parent.ParentId is null && request.Kind is null
+        return IsFormalRoot(parent) && request.Kind is null
             ? null
             : ValidationFailure<DeviceGroupDto>();
     }
@@ -546,7 +546,7 @@ public sealed class CatalogApplicationService
                 return false;
             }
 
-            if (parent.ParentId is not null
+            if (!IsFormalRoot(parent)
                 || request.Kind is not null
                 || CreatesParentCycle(groupsById, current.Id, parentId))
             {
@@ -580,10 +580,13 @@ public sealed class CatalogApplicationService
 
         var parent = await repository.GetGroupAsync(parentId, cancellationToken)
             .ConfigureAwait(false);
-        return parent is not null && parent.ParentId is null
+        return parent is not null && IsFormalRoot(parent)
             ? null
             : ValidationFailure<T>();
     }
+
+    private static bool IsFormalRoot(DeviceGroupDto group) =>
+        group.ParentId is null && IsValidGroupKind(group.Kind);
 
     private static bool IsValidGroupKind(MonitorGroupType? kind) =>
         kind is MonitorGroupType value

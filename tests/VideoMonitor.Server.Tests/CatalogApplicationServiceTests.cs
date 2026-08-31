@@ -285,6 +285,42 @@ public sealed class CatalogApplicationServiceTests
     }
 
     [Fact]
+    public async Task CreateGroupAsync_UnclassifiedLegacyRootCannotAcceptNewChild()
+    {
+        var legacyRootId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Groups =
+            {
+                [legacyRootId] = new DeviceGroupDto(
+                    legacyRootId,
+                    "Legacy Root",
+                    null,
+                    0,
+                    true,
+                    null,
+                    1)
+            }
+        };
+        var service = CreateService(fake);
+
+        var result = await InvokeAsync(
+            service,
+            "CreateGroupAsync",
+            new CreateGroupRequest(
+                Guid.NewGuid(),
+                "Child",
+                legacyRootId,
+                0,
+                true,
+                null),
+            CancellationToken.None);
+
+        AssertError(result, "CATALOG_VALIDATION_FAILED", 400);
+        Assert.Equal(0, fake.CreateGroupCalls);
+    }
+
+    [Fact]
     public async Task UpdateGroupAsync_RejectsRootChildConversionAndInvalidRootKindChanges()
     {
         var rootId = Guid.NewGuid();
@@ -369,6 +405,62 @@ public sealed class CatalogApplicationServiceTests
         Assert.True(Get<bool>(result, "IsSuccess"));
         Assert.Equal(rootBId, fake.CapturedGroup!.ParentId);
         Assert.Null(fake.CapturedGroup.Kind);
+    }
+
+    [Fact]
+    public async Task UpdateGroupAsync_ChildCannotMoveToUnclassifiedLegacyRoot()
+    {
+        var formalRootId = Guid.NewGuid();
+        var legacyRootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Snapshot = new CatalogSnapshotDto(
+                [
+                    new DeviceGroupDto(
+                        formalRootId,
+                        "Formal Root",
+                        null,
+                        0,
+                        true,
+                        MonitorGroupType.Chute,
+                        1),
+                    new DeviceGroupDto(
+                        legacyRootId,
+                        "Legacy Root",
+                        null,
+                        0,
+                        true,
+                        null,
+                        1),
+                    new DeviceGroupDto(
+                        childId,
+                        "Child",
+                        formalRootId,
+                        0,
+                        true,
+                        null,
+                        1)
+                ],
+                [])
+        };
+        var service = CreateService(fake);
+
+        var result = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            childId,
+            new UpdateGroupRequest(
+                "Child",
+                legacyRootId,
+                0,
+                true,
+                null,
+                1),
+            CancellationToken.None);
+
+        AssertError(result, "CATALOG_VALIDATION_FAILED", 400);
+        Assert.Equal(0, fake.UpdateGroupCalls);
     }
 
     [Fact]
@@ -496,6 +588,53 @@ public sealed class CatalogApplicationServiceTests
         Assert.True(Get<bool>(validUpdate, "IsSuccess"));
         Assert.Equal(1, fake.CreateDeviceCalls);
         Assert.Equal(1, fake.UpdateDeviceCalls);
+    }
+
+    [Fact]
+    public async Task CreateAndUpdateDeviceAsync_UnclassifiedRootHierarchyIsNotWritable()
+    {
+        var legacyRootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Groups =
+            {
+                [legacyRootId] = new DeviceGroupDto(
+                    legacyRootId,
+                    "Legacy Root",
+                    null,
+                    0,
+                    true,
+                    null,
+                    1),
+                [childId] = new DeviceGroupDto(
+                    childId,
+                    "Child",
+                    legacyRootId,
+                    0,
+                    true,
+                    null,
+                    1)
+            }
+        };
+        var service = CreateService(fake);
+
+        var create = await InvokeAsync(
+            service,
+            "CreateDeviceAsync",
+            ValidCreateDeviceRequest(childId),
+            CancellationToken.None);
+        var update = await InvokeAsync(
+            service,
+            "UpdateDeviceAsync",
+            Guid.NewGuid(),
+            ValidUpdateDeviceRequest(childId, 1),
+            CancellationToken.None);
+
+        AssertError(create, "CATALOG_VALIDATION_FAILED", 400);
+        AssertError(update, "CATALOG_VALIDATION_FAILED", 400);
+        Assert.Equal(0, fake.CreateDeviceCalls);
+        Assert.Equal(0, fake.UpdateDeviceCalls);
     }
 
     [Fact]
