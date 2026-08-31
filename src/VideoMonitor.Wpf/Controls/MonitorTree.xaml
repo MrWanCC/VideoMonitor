@@ -5,6 +5,7 @@
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <converters:CameraStatusToBrushConverter x:Key="StatusBrushConverter"/>
+        <converters:CameraStatusToTextConverter x:Key="StatusTextConverter"/>
         <Style x:Key="TreeRowButtonStyle" TargetType="Button">
             <Setter Property="Height" Value="{StaticResource TreeItemHeight}"/>
             <Setter Property="Margin" Value="0,2"/>
@@ -122,7 +123,7 @@
                                                         <TextBlock Grid.Column="1" Style="{StaticResource TreeItemTextStyle}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Text="{Binding Name}"/>
                                                         <StackPanel Grid.Column="2" Margin="10,0,4,0" Orientation="Horizontal" VerticalAlignment="Center">
                                                             <Ellipse Width="8" Height="8" Margin="0,0,7,0" Fill="{Binding Status, Converter={StaticResource StatusBrushConverter}}"/>
-                                                            <TextBlock Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}" FontSize="{StaticResource FontSizeAuxiliary}" Text="在线"/>
+                                                            <TextBlock Foreground="{Binding Status, Converter={StaticResource StatusBrushConverter}}" FontSize="{StaticResource FontSizeAuxiliary}" Text="{Binding Status, Converter={StaticResource StatusTextConverter}}"/>
                                                         </StackPanel>
                                                     </Grid>
                                                 </Button>

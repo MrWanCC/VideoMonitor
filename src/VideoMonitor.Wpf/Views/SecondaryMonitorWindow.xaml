@@ -43,7 +43,7 @@
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal">
                         <StackPanel Margin="0,0,16,0" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse Width="8" Height="8" Fill="{StaticResource OnlineGreenBrush}" />
+                            <Ellipse Width="8" Height="8" Fill="{StaticResource MutedTextBrush}" />
                             <TextBlock Margin="8,0,0,0" Foreground="{StaticResource SecondaryTextBrush}"
                                        FontSize="{StaticResource FontSizeAuxiliary}" Text="设备状态待检测" />
                         </StackPanel>

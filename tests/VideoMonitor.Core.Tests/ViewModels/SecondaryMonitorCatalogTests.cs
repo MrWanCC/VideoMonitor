@@ -48,6 +48,36 @@ public sealed class SecondaryMonitorCatalogTests
     }
 
     [Fact]
+    public void ExternalUnloadingSwitch_SynchronizesSecondarySelectionAndCurrentName()
+    {
+        var rootId = Guid.NewGuid();
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        var readModel = new MutableReadModelStub(
+        [
+            new DeviceGroupDto(rootId, "Unloading Root", null, 0, true, MonitorGroupType.UnloadingStation, 1),
+            new DeviceGroupDto(firstId, "卸矿 A", rootId, 0, true, null, 1),
+            new DeviceGroupDto(secondId, "卸矿 B", rootId, 1, true, null, 1)
+        ]);
+        var groups = MonitorCatalogProjection.CreateGroups(readModel);
+        var switchService = new MonitorSwitchService(groups);
+        var monitor = new MonitorViewModel(switchService, readModel);
+        var secondary = new SecondaryMonitorViewModel(switchService, readModel);
+
+        var secondItem = monitor.TreeSections
+            .SelectMany(section => section.Children)
+            .Single(item => item.ItemId == secondId);
+
+        monitor.SelectGroupCommand.Execute(secondItem);
+
+        Assert.Equal(secondId, switchService.SelectedUnloadingGroupId);
+        Assert.Equal(secondId, secondary.SelectedGroupId);
+        Assert.Equal("卸矿 B", secondary.CurrentGroupName);
+        Assert.False(secondary.UnloadingGroups.Single(item => item.ItemId == firstId).IsSelected);
+        Assert.True(secondary.UnloadingGroups.Single(item => item.ItemId == secondId).IsSelected);
+    }
+
+    [Fact]
     public void SecondaryCatalogChange_DeletedSelectionFallsBack()
     {
         var rootId = Guid.NewGuid();

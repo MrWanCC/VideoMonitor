@@ -146,7 +146,7 @@ public sealed class MonitorViewModel : ObservableObject
             sections.Add(new MonitorTreeItemViewModel(
                 first.RootName,
                 children: children,
-                countText: $"({total}/{total})",
+                countText: $"({total})",
                 status: CameraStatus.Unknown,
                 isExpanded: true,
                 itemId: first.RootGroupId));

@@ -274,6 +274,67 @@ public sealed class MonitorCatalogRefreshTests
         Assert.True(viewModel.TreeSections.Single(item => item.ItemId == rootB).IsExpanded);
     }
 
+    [Fact]
+    public void FormalRootCount_DoesNotClaimUnknownDevicesAreOnline()
+    {
+        var rootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var devices = Enumerable.Range(1, 3)
+            .Select(index =>
+            {
+                var deviceId = Guid.NewGuid();
+                var channelId = Guid.NewGuid();
+                return new CameraDeviceDto(
+                    deviceId,
+                    childId,
+                    $"Camera {index}",
+                    $"192.0.2.{index}",
+                    8000,
+                    554,
+                    "user",
+                    false,
+                    "Maker",
+                    "Model",
+                    TransportMode.Tcp,
+                    true,
+                    string.Empty,
+                    1,
+                    [new CameraChannelDto(channelId, deviceId, 1, "Main", StreamType.Main, true)]);
+            })
+            .ToArray();
+        var readModel = new MutableReadModelStub(
+        [
+            new DeviceGroupDto(rootId, "Chute Root", null, 0, true, MonitorGroupType.Chute, 1),
+            new DeviceGroupDto(childId, "Chute A", rootId, 0, true, null, 1)
+        ],
+        devices);
+
+        var viewModel = new MonitorViewModel(
+            new MonitorSwitchService(Array.Empty<MonitorGroup>()),
+            readModel);
+
+        Assert.Equal("(3)", viewModel.TreeSections.Single().CountText);
+        Assert.All(viewModel.MainTiles.Take(3), tile =>
+            Assert.Equal(CameraStatus.Unknown, tile.Status));
+    }
+
+    [Fact]
+    public void MonitorTree_UsesCameraStatusTextConverterForStatusText()
+    {
+        var path = Path.Combine(
+            FindRepositoryRoot().FullName,
+            "src",
+            "VideoMonitor.Wpf",
+            "Controls",
+            "MonitorTree.xaml");
+        var xaml = File.ReadAllText(path);
+
+        Assert.DoesNotContain("Text=\"在线\"", xaml);
+        Assert.Contains("CameraStatusToTextConverter", xaml);
+        Assert.Contains("StatusTextConverter", xaml);
+        Assert.Contains("Binding Status", xaml);
+    }
+
     private static CameraDevice Clone(CameraDevice source)
     {
         var clone = new CameraDevice
@@ -310,19 +371,48 @@ public sealed class MonitorCatalogRefreshTests
         return clone;
     }
 
+    private static DirectoryInfo FindRepositoryRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(
+                    directory.FullName,
+                    "src",
+                    "VideoMonitor.Wpf",
+                    "Controls",
+                    "MonitorTree.xaml")))
+            {
+                return directory;
+            }
+        }
+
+        throw new DirectoryNotFoundException("Repository root was not found.");
+    }
+
     private sealed class MutableReadModelStub : IDeviceCatalogReadModel
     {
         private IReadOnlyList<DeviceGroupDto> groups;
+        private readonly IReadOnlyList<CameraDeviceDto> devices;
 
-        public MutableReadModelStub(IReadOnlyList<DeviceGroupDto> groups) => this.groups = groups;
+        public MutableReadModelStub(
+            IReadOnlyList<DeviceGroupDto> groups,
+            IReadOnlyList<CameraDeviceDto>? devices = null)
+        {
+            this.groups = groups;
+            this.devices = devices ?? [];
+        }
 
         public event EventHandler? Changed;
 
         public IReadOnlyList<DeviceGroupDto> GetGroups() => groups;
 
-        public IReadOnlyList<CameraDeviceDto> GetDevices(Guid groupId) => [];
+        public IReadOnlyList<CameraDeviceDto> GetDevices(Guid groupId) =>
+            devices.Where(device => device.GroupId == groupId).ToArray();
 
-        public CameraDeviceDto? GetDevice(Guid deviceId) => null;
+        public CameraDeviceDto? GetDevice(Guid deviceId) =>
+            devices.SingleOrDefault(device => device.Id == deviceId);
 
         public void Replace(IReadOnlyList<DeviceGroupDto> next) => groups = next;
 

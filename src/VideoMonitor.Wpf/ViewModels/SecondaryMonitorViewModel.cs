@@ -97,7 +97,11 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
         SelectedGroupId = switchService.SelectedUnloadingGroupId;
     }
 
-    private void OnLayoutChanged(object? sender, MonitorLayoutSnapshot snapshot) => Render(snapshot);
+    private void OnLayoutChanged(object? sender, MonitorLayoutSnapshot snapshot)
+    {
+        SelectedGroupId = switchService.SelectedUnloadingGroupId;
+        Render(snapshot);
+    }
 
     private void OnCatalogChanged(object? sender, EventArgs e)
     {
