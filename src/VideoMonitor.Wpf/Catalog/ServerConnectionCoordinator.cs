@@ -107,10 +107,13 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
             }
             catch (Exception)
             {
-                await PublishUnavailableAsync(
-                        endpointState.Endpoint,
-                        endpointState.Generation)
-                    .ConfigureAwait(false);
+                if (await PublishUnavailableAsync(
+                            endpointState.Endpoint,
+                            endpointState.Generation)
+                        .ConfigureAwait(false))
+                {
+                    SignalWake();
+                }
             }
         }
         finally
@@ -251,6 +254,7 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
 
             var retryIndex = 0;
             var initialConnectionPending = true;
+            var reconnectPending = false;
 
             while (!token.IsCancellationRequested)
             {
@@ -263,6 +267,36 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
                     continue;
                 }
 
+                if (reconnectPending)
+                {
+                    if (endpointState.Connected && !initialConnectionPending)
+                    {
+                        reconnectPending = false;
+                    }
+                    else
+                    {
+                        await DelayWithJitterAsync(
+                                ReconnectBaseDelays[retryIndex],
+                                token)
+                            .ConfigureAwait(false);
+                        retryIndex = Math.Min(
+                            retryIndex + 1,
+                            ReconnectBaseDelays.Length - 1);
+                        reconnectPending = false;
+                        if (token.IsCancellationRequested)
+                        {
+                            return;
+                        }
+
+                        endpointState = await GetEndpointStateAsync()
+                            .ConfigureAwait(false);
+                        if (endpointState.Endpoint is null)
+                        {
+                            continue;
+                        }
+                    }
+                }
+
                 if ((initialConnectionPending || !endpointState.Connected)
                     && !await TryConnectAsync(
                             endpointState.Endpoint,
@@ -270,28 +304,36 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
                             token)
                         .ConfigureAwait(false))
                 {
-                    await DelayWithJitterAsync(
-                            ReconnectBaseDelays[retryIndex],
-                            token)
-                        .ConfigureAwait(false);
-                    retryIndex = Math.Min(
-                        retryIndex + 1,
-                        ReconnectBaseDelays.Length - 1);
+                    reconnectPending = true;
                     continue;
                 }
 
                 initialConnectionPending = false;
+                reconnectPending = false;
 
                 retryIndex = 0;
                 while (!token.IsCancellationRequested)
                 {
-                    await DelayWithJitterAsync(
+                    var woken = await WaitForDelayOrWakeAsync(
                             PeriodicRefreshBaseDelay,
                             token)
                         .ConfigureAwait(false);
                     if (token.IsCancellationRequested)
                     {
                         return;
+                    }
+
+                    if (woken)
+                    {
+                        endpointState = await GetEndpointStateAsync()
+                            .ConfigureAwait(false);
+                        if (!endpointState.Connected)
+                        {
+                            reconnectPending = true;
+                            break;
+                        }
+
+                        continue;
                     }
 
                     endpointState = await GetEndpointStateAsync()
@@ -326,17 +368,11 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
                     }
                     catch (Exception)
                     {
-                        await PublishUnavailableAsync(
+                        _ = await PublishUnavailableAsync(
                                 endpointState.Endpoint,
                                 endpointState.Generation)
                             .ConfigureAwait(false);
-                        await DelayWithJitterAsync(
-                                ReconnectBaseDelays[retryIndex],
-                                token)
-                            .ConfigureAwait(false);
-                        retryIndex = Math.Min(
-                            retryIndex + 1,
-                            ReconnectBaseDelays.Length - 1);
+                        reconnectPending = true;
                         break;
                     }
                 }
@@ -512,7 +548,7 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         }
     }
 
-    private async Task PublishUnavailableAsync(
+    private async Task<bool> PublishUnavailableAsync(
         Uri? endpoint,
         long? expectedGeneration = null)
     {
@@ -525,9 +561,10 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
                 || (endpoint is not null
                     && !Equals(configuredBaseUri, endpoint)))
             {
-                return;
+                return false;
             }
 
+            var published = false;
             await uiDispatcher.InvokeAsync(
                     () =>
                     {
@@ -538,9 +575,11 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
                             lastSuccessfulSyncUtc,
                             hasSuccessfulSync);
                         StatusChanged?.Invoke(this, EventArgs.Empty);
+                        published = true;
                     },
                     CancellationToken.None)
                 .ConfigureAwait(false);
+            return published;
         }
         finally
         {
@@ -625,9 +664,50 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         }
     }
 
+    private async Task<bool> WaitForDelayOrWakeAsync(
+        TimeSpan baseDelay,
+        CancellationToken cancellationToken)
+    {
+        var jitteredDelay = GetJitteredDelay(baseDelay);
+        using var waitCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var delayTask = clock.DelayAsync(
+            jitteredDelay,
+            waitCancellation.Token);
+        var wakeTask = wakeSignal.WaitAsync(waitCancellation.Token);
+
+        try
+        {
+            var completed = await Task.WhenAny(delayTask, wakeTask)
+                .ConfigureAwait(false);
+            if (ReferenceEquals(completed, wakeTask))
+            {
+                await wakeTask.ConfigureAwait(false);
+                return true;
+            }
+
+            await delayTask.ConfigureAwait(false);
+            return false;
+        }
+        finally
+        {
+            waitCancellation.Cancel();
+            await ObserveTaskAsync(delayTask).ConfigureAwait(false);
+            await ObserveTaskAsync(wakeTask).ConfigureAwait(false);
+        }
+    }
+
     private async Task DelayWithJitterAsync(
         TimeSpan baseDelay,
         CancellationToken cancellationToken)
+    {
+        await clock.DelayAsync(
+                GetJitteredDelay(baseDelay),
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private TimeSpan GetJitteredDelay(TimeSpan baseDelay)
     {
         var jitterUnit = clock.NextJitterUnit();
         if (jitterUnit is < 0.0 or >= 1.0)
@@ -639,8 +719,18 @@ public sealed class ServerConnectionCoordinator : IAsyncDisposable
         var factor = 0.8 + (0.4 * jitterUnit);
         var jitteredDelay = TimeSpan.FromTicks(
             (long)(baseDelay.Ticks * factor));
-        await clock.DelayAsync(jitteredDelay, cancellationToken)
-            .ConfigureAwait(false);
+        return jitteredDelay;
+    }
+
+    private static async Task ObserveTaskAsync(Task task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+        }
     }
 
     private static void ValidateBaseUri(Uri candidate)

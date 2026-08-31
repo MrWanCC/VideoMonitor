@@ -243,6 +243,95 @@ public sealed class ServerConnectionCoordinatorTests
     }
 
     [Fact]
+    public async Task RefreshNowFailure_InterruptsPeriodicWaitAndUsesTwoSecondReconnectDelay()
+    {
+        var fixture = new ConnectionFixture();
+        fixture.Settings.Settings = SettingsFor(ServerA);
+        var recovered = Snapshot("A recovered");
+        var catalogCall = 0;
+        fixture.Api.CatalogHandler = (_, _) =>
+        {
+            catalogCall++;
+            return catalogCall == 2
+                ? Task.FromException<CatalogSnapshotDto>(
+                    new CatalogApiException("CATALOG_UNAVAILABLE"))
+                : Task.FromResult(recovered);
+        };
+
+        var periodicWaitEntered = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var periodicWait = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var reconnectDelayEntered = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        var periodicWaitCount = 0;
+        TimeSpan? reconnectDelay = null;
+        fixture.Clock.DelayHandler = (delay, token) =>
+        {
+            if (delay == TimeSpan.FromSeconds(30))
+            {
+                periodicWaitCount++;
+                if (periodicWaitCount == 1)
+                {
+                    periodicWaitEntered.TrySetResult(null);
+                    return periodicWait.Task.WaitAsync(token);
+                }
+
+                cancellation.Cancel();
+                return Task.CompletedTask;
+            }
+
+            if (delay == TimeSpan.FromSeconds(2))
+            {
+                reconnectDelay = delay;
+                reconnectDelayEntered.TrySetResult(null);
+            }
+
+            return Task.CompletedTask;
+        };
+
+        var run = fixture.Coordinator.RunAsync(cancellation.Token);
+        try
+        {
+            await periodicWaitEntered.Task;
+
+            Assert.Equal(ServerConnectionState.Connected, fixture.Coordinator.Status.State);
+            Assert.Equal(ServerA, fixture.Coordinator.Status.BaseUri);
+
+            await fixture.Coordinator.RefreshNowAsync();
+
+            Assert.Equal(ServerConnectionState.Unavailable, fixture.Coordinator.Status.State);
+            Assert.Equal(ServerA, fixture.Coordinator.Status.BaseUri);
+            Assert.True(fixture.Coordinator.Status.IsStale);
+            Assert.False(periodicWait.Task.IsCompleted);
+
+            await reconnectDelayEntered.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.Equal(TimeSpan.FromSeconds(2), reconnectDelay);
+
+            await run;
+
+            Assert.Equal(ServerConnectionState.Connected, fixture.Coordinator.Status.State);
+            Assert.Equal(ServerA, fixture.Coordinator.Status.BaseUri);
+            Assert.False(fixture.Coordinator.Status.IsStale);
+            Assert.Same(recovered, fixture.Cache.Snapshot);
+            Assert.Equal([ServerA, ServerA, ServerA], fixture.Api.CatalogCalls);
+            Assert.Equal(
+                [
+                    TimeSpan.FromSeconds(30),
+                    TimeSpan.FromSeconds(2),
+                    TimeSpan.FromSeconds(30)
+                ],
+                fixture.Clock.Delays);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            await run;
+        }
+    }
+
+    [Fact]
     public async Task Reconnect_Uses2_5_10_15_15BaseSchedule()
     {
         var fixture = new ConnectionFixture();
