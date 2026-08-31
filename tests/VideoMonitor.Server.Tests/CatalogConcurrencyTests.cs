@@ -107,11 +107,22 @@ public sealed class CatalogConcurrencyTests
 
     private static async Task<DeviceGroupDto> CreateGroupAsync(HttpClient client)
     {
+        var rootId = Guid.NewGuid();
         var response = await client.PostAsJsonAsync(
             "/api/v1/device-groups",
-            new CreateGroupRequest(Guid.NewGuid(), "Group", null, 0, true));
+            new CreateGroupRequest(
+                rootId,
+                "Root",
+                null,
+                0,
+                true,
+                MonitorGroupType.Chute));
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<DeviceGroupDto>())!;
+        var childResponse = await client.PostAsJsonAsync(
+            "/api/v1/device-groups",
+            new CreateGroupRequest(Guid.NewGuid(), "Group", rootId, 0, true, null));
+        childResponse.EnsureSuccessStatusCode();
+        return (await childResponse.Content.ReadFromJsonAsync<DeviceGroupDto>())!;
     }
 
     private static async Task<CameraDeviceDto> CreateDeviceAsync(

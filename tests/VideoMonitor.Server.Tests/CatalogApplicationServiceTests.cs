@@ -120,10 +120,10 @@ public sealed class CatalogApplicationServiceTests
         var groupId = Guid.NewGuid();
         var fake = new FakeCentralCatalogRepository
         {
-            Groups = { [parentId] = new DeviceGroupDto(parentId, "Parent", null, 0, true, 1) }
+            Groups = { [parentId] = new DeviceGroupDto(parentId, "Parent", null, 0, true, MonitorGroupType.Chute, 1) }
         };
         var service = CreateService(fake);
-        var request = new CreateGroupRequest(groupId, "Child", parentId, 2, true);
+        var request = new CreateGroupRequest(groupId, "Child", parentId, 2, true, null);
 
         var result = await InvokeAsync(
             service,
@@ -162,16 +162,355 @@ public sealed class CatalogApplicationServiceTests
     }
 
     [Fact]
-    public async Task UpdateGroupAsync_RejectsParentCycleAndMapsConflict()
+    public async Task CreateGroupAsync_RequiresKindForRootAndRejectsInvalidKind()
     {
-        var id = Guid.NewGuid();
-        var parentId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository();
+        var service = CreateService(fake);
+
+        var validRoot = await InvokeAsync(
+            service,
+            "CreateGroupAsync",
+            new CreateGroupRequest(
+                Guid.NewGuid(),
+                "Chute Root",
+                null,
+                0,
+                true,
+                MonitorGroupType.Chute),
+            CancellationToken.None);
+        var missingKind = await InvokeAsync(
+            service,
+            "CreateGroupAsync",
+            new CreateGroupRequest(Guid.NewGuid(), "Unclassified Root", null, 0, true, null),
+            CancellationToken.None);
+        var invalidKind = await InvokeAsync(
+            service,
+            "CreateGroupAsync",
+            new CreateGroupRequest(
+                Guid.NewGuid(),
+                "Invalid Root",
+                null,
+                0,
+                true,
+                (MonitorGroupType)999),
+            CancellationToken.None);
+
+        Assert.True(Get<bool>(validRoot, "IsSuccess"));
+        Assert.Equal(MonitorGroupType.Chute, fake.CapturedGroup!.Kind);
+        AssertError(missingKind, "CATALOG_VALIDATION_FAILED", 400);
+        AssertError(invalidKind, "CATALOG_VALIDATION_FAILED", 400);
+        Assert.Equal(1, fake.CreateGroupCalls);
+    }
+
+    [Theory]
+    [InlineData(MonitorGroupType.UnloadingStation)]
+    [InlineData(MonitorGroupType.Chute)]
+    [InlineData(MonitorGroupType.Tunnel)]
+    public async Task CreateGroupAsync_AcceptsEachDefinedRootKind(MonitorGroupType kind)
+    {
+        var fake = new FakeCentralCatalogRepository();
+        var service = CreateService(fake);
+
+        var result = await InvokeAsync(
+            service,
+            "CreateGroupAsync",
+            new CreateGroupRequest(Guid.NewGuid(), "Root", null, 0, true, kind),
+            CancellationToken.None);
+
+        Assert.True(Get<bool>(result, "IsSuccess"));
+        Assert.Equal(kind, fake.CapturedGroup!.Kind);
+    }
+
+    [Fact]
+    public async Task CreateGroupAsync_RequiresDirectRootParentAndNullChildKind()
+    {
+        var rootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Groups =
+            {
+                [rootId] = new DeviceGroupDto(rootId, "Root", null, 0, true, MonitorGroupType.Chute, 1),
+                [childId] = new DeviceGroupDto(childId, "Child", rootId, 0, true, null, 1)
+            }
+        };
+        var service = CreateService(fake);
+
+        var validChild = await InvokeAsync(
+            service,
+            "CreateGroupAsync",
+            new CreateGroupRequest(Guid.NewGuid(), "Child B", rootId, 0, true, null),
+            CancellationToken.None);
+        var childWithKind = await InvokeAsync(
+            service,
+            "CreateGroupAsync",
+            new CreateGroupRequest(
+                Guid.NewGuid(),
+                "Child With Kind",
+                rootId,
+                0,
+                true,
+                MonitorGroupType.Chute),
+            CancellationToken.None);
+        var nestedChild = await InvokeAsync(
+            service,
+            "CreateGroupAsync",
+            new CreateGroupRequest(Guid.NewGuid(), "Nested Child", childId, 0, true, null),
+            CancellationToken.None);
+        var missingParent = await InvokeAsync(
+            service,
+            "CreateGroupAsync",
+            new CreateGroupRequest(Guid.NewGuid(), "Missing Parent", Guid.NewGuid(), 0, true, null),
+            CancellationToken.None);
+        var missingParentWithKind = await InvokeAsync(
+            service,
+            "CreateGroupAsync",
+            new CreateGroupRequest(
+                Guid.NewGuid(),
+                "Missing Parent With Kind",
+                Guid.NewGuid(),
+                0,
+                true,
+                MonitorGroupType.Chute),
+            CancellationToken.None);
+
+        Assert.True(Get<bool>(validChild, "IsSuccess"));
+        Assert.Null(fake.CapturedGroup!.Kind);
+        Assert.Equal(rootId, fake.CapturedGroup.ParentId);
+        AssertError(childWithKind, "CATALOG_VALIDATION_FAILED", 400);
+        AssertError(nestedChild, "CATALOG_VALIDATION_FAILED", 400);
+        AssertError(missingParent, "GROUP_NOT_FOUND", 404);
+        AssertError(missingParentWithKind, "GROUP_NOT_FOUND", 404);
+        Assert.Equal(1, fake.CreateGroupCalls);
+    }
+
+    [Fact]
+    public async Task UpdateGroupAsync_RejectsRootChildConversionAndInvalidRootKindChanges()
+    {
+        var rootId = Guid.NewGuid();
+        var anotherRootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
         var fake = new FakeCentralCatalogRepository
         {
             Snapshot = new CatalogSnapshotDto(
                 [
-                    new DeviceGroupDto(id, "A", null, 0, true, 1),
-                    new DeviceGroupDto(parentId, "B", id, 0, true, 1)
+                    new DeviceGroupDto(rootId, "Root", null, 0, true, MonitorGroupType.Chute, 1),
+                    new DeviceGroupDto(anotherRootId, "Another Root", null, 0, true, MonitorGroupType.Tunnel, 1),
+                    new DeviceGroupDto(childId, "Child", rootId, 0, true, null, 1)
+                ],
+                [])
+        };
+        var service = CreateService(fake);
+
+        var rootToChild = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            rootId,
+            new UpdateGroupRequest("Root", anotherRootId, 0, true, MonitorGroupType.Chute, 1),
+            CancellationToken.None);
+        var childToRoot = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            childId,
+            new UpdateGroupRequest("Child", null, 0, true, MonitorGroupType.Chute, 1),
+            CancellationToken.None);
+        var kindMutation = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            rootId,
+            new UpdateGroupRequest("Root", null, 0, true, MonitorGroupType.Tunnel, 1),
+            CancellationToken.None);
+        var childWithKind = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            childId,
+            new UpdateGroupRequest("Child", rootId, 0, true, MonitorGroupType.Chute, 1),
+            CancellationToken.None);
+        var invalidKind = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            rootId,
+            new UpdateGroupRequest("Root", null, 0, true, (MonitorGroupType)999, 1),
+            CancellationToken.None);
+
+        AssertError(rootToChild, "CATALOG_VALIDATION_FAILED", 400);
+        AssertError(childToRoot, "CATALOG_VALIDATION_FAILED", 400);
+        AssertError(kindMutation, "CATALOG_VALIDATION_FAILED", 400);
+        AssertError(childWithKind, "CATALOG_VALIDATION_FAILED", 400);
+        AssertError(invalidKind, "CATALOG_VALIDATION_FAILED", 400);
+        Assert.Equal(0, fake.UpdateGroupCalls);
+    }
+
+    [Fact]
+    public async Task UpdateGroupAsync_AllowsChildMoveBetweenRoots()
+    {
+        var rootAId = Guid.NewGuid();
+        var rootBId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Snapshot = new CatalogSnapshotDto(
+                [
+                    new DeviceGroupDto(rootAId, "Root A", null, 0, true, MonitorGroupType.Chute, 1),
+                    new DeviceGroupDto(rootBId, "Root B", null, 0, true, MonitorGroupType.Chute, 1),
+                    new DeviceGroupDto(childId, "Child", rootAId, 0, true, null, 1)
+                ],
+                [])
+        };
+        var service = CreateService(fake);
+
+        var result = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            childId,
+            new UpdateGroupRequest("Moved Child", rootBId, 3, true, null, 1),
+            CancellationToken.None);
+
+        Assert.True(Get<bool>(result, "IsSuccess"));
+        Assert.Equal(rootBId, fake.CapturedGroup!.ParentId);
+        Assert.Null(fake.CapturedGroup.Kind);
+    }
+
+    [Fact]
+    public async Task UpdateGroupAsync_MissingChildParentReturnsNotFound()
+    {
+        var rootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Snapshot = new CatalogSnapshotDto(
+                [new DeviceGroupDto(rootId, "Root", null, 0, true, MonitorGroupType.Chute, 1),
+                    new DeviceGroupDto(childId, "Child", rootId, 0, true, null, 1)],
+                [])
+        };
+        var service = CreateService(fake);
+
+        var result = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            childId,
+            new UpdateGroupRequest(
+                "Child",
+                Guid.NewGuid(),
+                0,
+                true,
+                MonitorGroupType.Chute,
+                1),
+            CancellationToken.None);
+
+        AssertError(result, "GROUP_NOT_FOUND", 404);
+        Assert.Equal(0, fake.UpdateGroupCalls);
+    }
+
+    [Fact]
+    public async Task UpdateGroupAsync_AllowsSameKindAndOneTimeLegacyRootRepair()
+    {
+        var assignedRootId = Guid.NewGuid();
+        var legacyRootId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Snapshot = new CatalogSnapshotDto(
+                [
+                    new DeviceGroupDto(assignedRootId, "Assigned Root", null, 0, true, MonitorGroupType.Chute, 1),
+                    new DeviceGroupDto(legacyRootId, "Legacy Root", null, 0, true, null, 1)
+                ],
+                [])
+        };
+        var service = CreateService(fake);
+
+        var sameKind = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            assignedRootId,
+            new UpdateGroupRequest("Assigned Root", null, 0, true, MonitorGroupType.Chute, 1),
+            CancellationToken.None);
+        var repair = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            legacyRootId,
+            new UpdateGroupRequest("Legacy Root", null, 0, true, MonitorGroupType.Tunnel, 1),
+            CancellationToken.None);
+        var stillUnclassified = await InvokeAsync(
+            service,
+            "UpdateGroupAsync",
+            legacyRootId,
+            new UpdateGroupRequest("Legacy Root", null, 0, true, null, 1),
+            CancellationToken.None);
+
+        Assert.True(Get<bool>(sameKind, "IsSuccess"));
+        Assert.True(Get<bool>(repair, "IsSuccess"));
+        Assert.Equal(MonitorGroupType.Tunnel, fake.CapturedGroup!.Kind);
+        AssertError(stillUnclassified, "CATALOG_VALIDATION_FAILED", 400);
+        Assert.Equal(2, fake.UpdateGroupCalls);
+    }
+
+    [Fact]
+    public async Task CreateAndUpdateDeviceAsync_RequireAValidBusinessChildTarget()
+    {
+        var rootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var nestedChildId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Groups =
+            {
+                [rootId] = new DeviceGroupDto(rootId, "Root", null, 0, true, MonitorGroupType.Chute, 1),
+                [childId] = new DeviceGroupDto(childId, "Child", rootId, 0, true, null, 1),
+                [nestedChildId] = new DeviceGroupDto(nestedChildId, "Nested Child", childId, 0, true, null, 1)
+            }
+        };
+        var service = CreateService(fake);
+
+        var againstRoot = await InvokeAsync(
+            service,
+            "CreateDeviceAsync",
+            ValidCreateDeviceRequest(rootId),
+            CancellationToken.None);
+        var againstNestedChild = await InvokeAsync(
+            service,
+            "CreateDeviceAsync",
+            ValidCreateDeviceRequest(nestedChildId),
+            CancellationToken.None);
+        var validCreate = await InvokeAsync(
+            service,
+            "CreateDeviceAsync",
+            ValidCreateDeviceRequest(childId),
+            CancellationToken.None);
+        var againstRootUpdate = await InvokeAsync(
+            service,
+            "UpdateDeviceAsync",
+            Guid.NewGuid(),
+            ValidUpdateDeviceRequest(rootId, 1),
+            CancellationToken.None);
+        var validUpdate = await InvokeAsync(
+            service,
+            "UpdateDeviceAsync",
+            Guid.NewGuid(),
+            ValidUpdateDeviceRequest(childId, 1),
+            CancellationToken.None);
+
+        AssertError(againstRoot, "CATALOG_VALIDATION_FAILED", 400);
+        AssertError(againstNestedChild, "CATALOG_VALIDATION_FAILED", 400);
+        Assert.True(Get<bool>(validCreate, "IsSuccess"));
+        AssertError(againstRootUpdate, "CATALOG_VALIDATION_FAILED", 400);
+        Assert.True(Get<bool>(validUpdate, "IsSuccess"));
+        Assert.Equal(1, fake.CreateDeviceCalls);
+        Assert.Equal(1, fake.UpdateDeviceCalls);
+    }
+
+    [Fact]
+    public async Task UpdateGroupAsync_RejectsParentCycleAndMapsConflict()
+    {
+        var id = Guid.NewGuid();
+        var parentId = Guid.NewGuid();
+        var conflictRootId = Guid.NewGuid();
+        var fake = new FakeCentralCatalogRepository
+        {
+            Snapshot = new CatalogSnapshotDto(
+                [
+                    new DeviceGroupDto(id, "A", null, 0, true, MonitorGroupType.Chute, 1),
+                    new DeviceGroupDto(parentId, "B", id, 0, true, null, 1),
+                    new DeviceGroupDto(conflictRootId, "Conflict Root", null, 0, true, MonitorGroupType.Chute, 1)
                 ],
                 []),
             UpdateGroupResult = new CatalogRepositoryResult<DeviceGroupDto>(
@@ -191,8 +530,8 @@ public sealed class CatalogApplicationServiceTests
         var conflict = await InvokeAsync(
             service,
             "UpdateGroupAsync",
-            parentId,
-            new UpdateGroupRequest("B2", null, 0, true, 1),
+            conflictRootId,
+            new UpdateGroupRequest("B2", null, 0, true, MonitorGroupType.Chute, 1),
             CancellationToken.None);
 
         AssertError(conflict, "GROUP_REVISION_CONFLICT", 409, 4);
@@ -224,13 +563,11 @@ public sealed class CatalogApplicationServiceTests
     public async Task CreateDeviceAsync_AllowsEmptyPasswordAndMapsTrustedModel()
     {
         var groupId = Guid.NewGuid();
-        var fake = new FakeCentralCatalogRepository
-        {
-            Groups = { [groupId] = new DeviceGroupDto(groupId, "Group", null, 0, true, 1) },
-            CreateDeviceResult = new CatalogRepositoryResult<CameraDeviceDto>(
-                CatalogRepositoryStatus.Success,
-                DeviceDto(Guid.NewGuid(), groupId, "Camera", hasPassword: false))
-        };
+        var fake = new FakeCentralCatalogRepository();
+        AddBusinessChild(fake, groupId);
+        fake.CreateDeviceResult = new CatalogRepositoryResult<CameraDeviceDto>(
+            CatalogRepositoryStatus.Success,
+            DeviceDto(Guid.NewGuid(), groupId, "Camera", hasPassword: false));
         var service = CreateService(fake);
         var deviceId = Guid.NewGuid();
         var request = new CreateDeviceRequest(
@@ -262,10 +599,8 @@ public sealed class CatalogApplicationServiceTests
     public async Task CreateDeviceAsync_RejectsInvalidInputAndDuplicateChannelIdentity()
     {
         var groupId = Guid.NewGuid();
-        var fake = new FakeCentralCatalogRepository
-        {
-            Groups = { [groupId] = new DeviceGroupDto(groupId, "Group", null, 0, true, 1) }
-        };
+        var fake = new FakeCentralCatalogRepository();
+        AddBusinessChild(fake, groupId);
         var service = CreateService(fake);
         var channelId = Guid.NewGuid();
         var request = new CreateDeviceRequest(
@@ -300,10 +635,8 @@ public sealed class CatalogApplicationServiceTests
     public async Task CreateDeviceAsync_NullPasswordIsValidationFailureWithoutWrite()
     {
         var groupId = Guid.NewGuid();
-        var fake = new FakeCentralCatalogRepository
-        {
-            Groups = { [groupId] = new DeviceGroupDto(groupId, "Group", null, 0, true, 1) }
-        };
+        var fake = new FakeCentralCatalogRepository();
+        AddBusinessChild(fake, groupId);
         var service = CreateService(fake);
         var result = await InvokeAsync(
             service,
@@ -434,13 +767,11 @@ public sealed class CatalogApplicationServiceTests
     {
         var groupId = Guid.NewGuid();
         var deviceId = Guid.NewGuid();
-        var fake = new FakeCentralCatalogRepository
-        {
-            Groups = { [groupId] = new DeviceGroupDto(groupId, "Group", null, 0, true, 1) },
-            UpdateDeviceResult = new CatalogRepositoryResult<CameraDeviceDto>(
-                CatalogRepositoryStatus.Success,
-                DeviceDto(deviceId, groupId, "Updated", hasPassword: true))
-        };
+        var fake = new FakeCentralCatalogRepository();
+        AddBusinessChild(fake, groupId);
+        fake.UpdateDeviceResult = new CatalogRepositoryResult<CameraDeviceDto>(
+            CatalogRepositoryStatus.Success,
+            DeviceDto(deviceId, groupId, "Updated", hasPassword: true));
         var service = CreateService(fake);
         var request = ValidUpdateDeviceRequest(groupId, expectedRevision: 3);
 
@@ -462,10 +793,8 @@ public sealed class CatalogApplicationServiceTests
     public async Task UpdateDeviceAsync_RejectsEmptyPasswordBeforeRepositoryWrite()
     {
         var groupId = Guid.NewGuid();
-        var fake = new FakeCentralCatalogRepository
-        {
-            Groups = { [groupId] = new DeviceGroupDto(groupId, "Group", null, 0, true, 1) }
-        };
+        var fake = new FakeCentralCatalogRepository();
+        AddBusinessChild(fake, groupId);
         var service = CreateService(fake);
         var request = ValidUpdateDeviceRequest(groupId, expectedRevision: 1) with
         {
@@ -487,13 +816,11 @@ public sealed class CatalogApplicationServiceTests
     public async Task UpdateDeviceAsync_ForwardsNonEmptyPasswordAndMapsConflict()
     {
         var groupId = Guid.NewGuid();
-        var fake = new FakeCentralCatalogRepository
-        {
-            Groups = { [groupId] = new DeviceGroupDto(groupId, "Group", null, 0, true, 1) },
-            UpdateDeviceResult = new CatalogRepositoryResult<CameraDeviceDto>(
-                CatalogRepositoryStatus.RevisionConflict,
-                CurrentRevision: 8)
-        };
+        var fake = new FakeCentralCatalogRepository();
+        AddBusinessChild(fake, groupId);
+        fake.UpdateDeviceResult = new CatalogRepositoryResult<CameraDeviceDto>(
+            CatalogRepositoryStatus.RevisionConflict,
+            CurrentRevision: 8);
         var service = CreateService(fake);
         var result = await InvokeAsync(
             service,
@@ -586,12 +913,10 @@ public sealed class CatalogApplicationServiceTests
     public async Task UpdateDeviceAsync_MapsNotFound()
     {
         var groupId = Guid.NewGuid();
-        var fake = new FakeCentralCatalogRepository
-        {
-            Groups = { [groupId] = new DeviceGroupDto(groupId, "Group", null, 0, true, 1) },
-            UpdateDeviceResult = new CatalogRepositoryResult<CameraDeviceDto>(
-                CatalogRepositoryStatus.NotFound)
-        };
+        var fake = new FakeCentralCatalogRepository();
+        AddBusinessChild(fake, groupId);
+        fake.UpdateDeviceResult = new CatalogRepositoryResult<CameraDeviceDto>(
+            CatalogRepositoryStatus.NotFound);
         var service = CreateService(fake);
 
         var result = await InvokeAsync(
@@ -630,7 +955,6 @@ public sealed class CatalogApplicationServiceTests
         var groupId = Guid.NewGuid();
         var fake = new FakeCentralCatalogRepository
         {
-            Groups = { [groupId] = new DeviceGroupDto(groupId, "Group", null, 0, true, 1) },
             CreateGroupException = new InvalidOperationException(
                 "TOP-SECRET-PASSWORD C:\\secret\\catalog.db")
         };
@@ -638,7 +962,13 @@ public sealed class CatalogApplicationServiceTests
         var failure = await InvokeAsync(
             service,
             "CreateGroupAsync",
-            new CreateGroupRequest(Guid.NewGuid(), "Group", null, 0, true),
+            new CreateGroupRequest(
+                Guid.NewGuid(),
+                "Group",
+                null,
+                0,
+                true,
+                MonitorGroupType.Chute),
             CancellationToken.None);
 
         AssertError(failure, "CATALOG_WRITE_FAILED", 500);
@@ -662,6 +992,29 @@ public sealed class CatalogApplicationServiceTests
         var service = Activator.CreateInstance(serviceType!, repository);
         Assert.NotNull(service);
         return service!;
+    }
+
+    private static void AddBusinessChild(
+        FakeCentralCatalogRepository fake,
+        Guid childId)
+    {
+        var rootId = Guid.NewGuid();
+        fake.Groups[rootId] = new DeviceGroupDto(
+            rootId,
+            "Root",
+            null,
+            0,
+            true,
+            MonitorGroupType.Chute,
+            1);
+        fake.Groups[childId] = new DeviceGroupDto(
+            childId,
+            "Child",
+            rootId,
+            0,
+            true,
+            null,
+            1);
     }
 
     private static async Task<object?> InvokeAsync(
@@ -849,7 +1202,14 @@ public sealed class CatalogApplicationServiceTests
             ThrowIfConfigured(CreateGroupException, cancellationToken);
             return Task.FromResult(CreateGroupResult ?? new CatalogRepositoryResult<DeviceGroupDto>(
                 CatalogRepositoryStatus.Success,
-                new DeviceGroupDto(group.Id, group.Name, group.ParentId, group.Sort, group.Enabled, 1)));
+                new DeviceGroupDto(
+                    group.Id,
+                    group.Name,
+                    group.ParentId,
+                    group.Sort,
+                    group.Enabled,
+                    group.Kind,
+                    1)));
         }
 
         public Task<CatalogRepositoryResult<CameraDeviceDto>> CreateDeviceAsync(
@@ -874,7 +1234,13 @@ public sealed class CatalogApplicationServiceTests
             CapturedExpectedRevision = expectedRevision;
             return Task.FromResult(UpdateGroupResult ?? new CatalogRepositoryResult<DeviceGroupDto>(
                 CatalogRepositoryStatus.Success,
-                new DeviceGroupDto(group.Id, group.Name, group.ParentId, group.Sort, group.Enabled,
+                new DeviceGroupDto(
+                    group.Id,
+                    group.Name,
+                    group.ParentId,
+                    group.Sort,
+                    group.Enabled,
+                    group.Kind,
                     expectedRevision + 1)));
         }
 

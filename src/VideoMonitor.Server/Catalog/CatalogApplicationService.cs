@@ -134,26 +134,24 @@ public sealed class CatalogApplicationService
 
         try
         {
-            if (request!.ParentId is Guid parentId)
+            var validRequest = request!;
+            var parentValidation = await ValidateCreateGroupParentAsync(
+                    validRequest,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (parentValidation is not null)
             {
-                var parent = await repository.GetGroupAsync(parentId, cancellationToken)
-                    .ConfigureAwait(false);
-                if (parent is null)
-                {
-                    return Failure<DeviceGroupDto>(
-                        StatusCodes.Status404NotFound,
-                        GroupNotFoundCode,
-                        "Group was not found.");
-                }
+                return parentValidation;
             }
 
             var group = new DeviceGroup
             {
-                Id = request.Id,
-                Name = request.Name,
-                ParentId = request.ParentId,
-                Sort = request.Sort,
-                Enabled = request.Enabled
+                Id = validRequest.Id,
+                Name = validRequest.Name,
+                ParentId = validRequest.ParentId,
+                Sort = validRequest.Sort,
+                Enabled = validRequest.Enabled,
+                Kind = validRequest.Kind
             };
             var result = await repository.CreateGroupAsync(group, cancellationToken)
                 .ConfigureAwait(false);
@@ -181,37 +179,36 @@ public sealed class CatalogApplicationService
 
         try
         {
-            if (request!.ParentId is Guid parentId)
+            var validRequest = request!;
+            var snapshot = await repository.GetCatalogAsync(cancellationToken)
+                .ConfigureAwait(false);
+            var groupsById = snapshot.Groups.ToDictionary(group => group.Id);
+            if (!groupsById.TryGetValue(id, out var current))
             {
-                var snapshot = await repository.GetCatalogAsync(cancellationToken)
-                    .ConfigureAwait(false);
-                var groupsById = snapshot.Groups.ToDictionary(group => group.Id);
-                if (!groupsById.ContainsKey(parentId))
-                {
-                    return Failure<DeviceGroupDto>(
-                        StatusCodes.Status404NotFound,
-                        GroupNotFoundCode,
-                        "Group was not found.");
-                }
+                return Failure<DeviceGroupDto>(
+                    StatusCodes.Status404NotFound,
+                    GroupNotFoundCode,
+                    "Group was not found.");
+            }
 
-                if (CreatesParentCycle(groupsById, id, parentId))
-                {
-                    return ValidationFailure<DeviceGroupDto>();
-                }
+            if (!ValidateGroupUpdate(current, validRequest, groupsById, out var groupError))
+            {
+                return groupError!;
             }
 
             var group = new DeviceGroup
             {
                 Id = id,
-                Name = request.Name,
-                ParentId = request.ParentId,
-                Sort = request.Sort,
-                Enabled = request.Enabled,
-                Revision = request.ExpectedRevision
+                Name = validRequest.Name,
+                ParentId = validRequest.ParentId,
+                Sort = validRequest.Sort,
+                Enabled = validRequest.Enabled,
+                Kind = validRequest.Kind,
+                Revision = validRequest.ExpectedRevision
             };
             var result = await repository.UpdateGroupAsync(
                     group,
-                    request.ExpectedRevision,
+                    validRequest.ExpectedRevision,
                     cancellationToken)
                 .ConfigureAwait(false);
             return MapGroupResult(result, StatusCodes.Status200OK);
@@ -266,14 +263,13 @@ public sealed class CatalogApplicationService
 
         try
         {
-            var group = await repository.GetGroupAsync(request!.GroupId, cancellationToken)
+            var targetValidation = await ValidateDeviceTargetAsync<CameraDeviceDto>(
+                    request!.GroupId,
+                    cancellationToken)
                 .ConfigureAwait(false);
-            if (group is null)
+            if (targetValidation is not null)
             {
-                return Failure<CameraDeviceDto>(
-                    StatusCodes.Status404NotFound,
-                    GroupNotFoundCode,
-                    "Group was not found.");
+                return targetValidation;
             }
 
             var device = ToDevice(request);
@@ -303,14 +299,13 @@ public sealed class CatalogApplicationService
 
         try
         {
-            var group = await repository.GetGroupAsync(request!.GroupId, cancellationToken)
+            var targetValidation = await ValidateDeviceTargetAsync<CameraDeviceDto>(
+                    request!.GroupId,
+                    cancellationToken)
                 .ConfigureAwait(false);
-            if (group is null)
+            if (targetValidation is not null)
             {
-                return Failure<CameraDeviceDto>(
-                    StatusCodes.Status404NotFound,
-                    GroupNotFoundCode,
-                    "Group was not found.");
+                return targetValidation;
             }
 
             var device = ToDevice(request, id);
@@ -489,6 +484,110 @@ public sealed class CatalogApplicationService
             && remark is not null
             && Enum.IsDefined(transportMode);
     }
+
+    private async Task<CatalogOperationResult<DeviceGroupDto>?> ValidateCreateGroupParentAsync(
+        CreateGroupRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.ParentId is null)
+        {
+            return IsValidGroupKind(request.Kind)
+                ? null
+                : ValidationFailure<DeviceGroupDto>();
+        }
+
+        var parent = await repository.GetGroupAsync(
+                request.ParentId.Value,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (parent is null)
+        {
+            return Failure<DeviceGroupDto>(
+                StatusCodes.Status404NotFound,
+                GroupNotFoundCode,
+                "Group was not found.");
+        }
+
+        return parent.ParentId is null && request.Kind is null
+            ? null
+            : ValidationFailure<DeviceGroupDto>();
+    }
+
+    private static bool ValidateGroupUpdate(
+        DeviceGroupDto current,
+        UpdateGroupRequest request,
+        IReadOnlyDictionary<Guid, DeviceGroupDto> groupsById,
+        out CatalogOperationResult<DeviceGroupDto>? error)
+    {
+        if (current.ParentId is null)
+        {
+            if (request.ParentId is not null
+                || !IsValidGroupKind(request.Kind)
+                || current.Kind is not null && current.Kind != request.Kind)
+            {
+                error = ValidationFailure<DeviceGroupDto>();
+                return false;
+            }
+        }
+        else
+        {
+            if (request.ParentId is not Guid parentId)
+            {
+                error = ValidationFailure<DeviceGroupDto>();
+                return false;
+            }
+
+            if (!groupsById.TryGetValue(parentId, out var parent))
+            {
+                error = Failure<DeviceGroupDto>(
+                    StatusCodes.Status404NotFound,
+                    GroupNotFoundCode,
+                    "Group was not found.");
+                return false;
+            }
+
+            if (parent.ParentId is not null
+                || request.Kind is not null
+                || CreatesParentCycle(groupsById, current.Id, parentId))
+            {
+                error = ValidationFailure<DeviceGroupDto>();
+                return false;
+            }
+        }
+
+        error = null;
+        return true;
+    }
+
+    private async Task<CatalogOperationResult<T>?> ValidateDeviceTargetAsync<T>(
+        Guid groupId,
+        CancellationToken cancellationToken)
+    {
+        var group = await repository.GetGroupAsync(groupId, cancellationToken)
+            .ConfigureAwait(false);
+        if (group is null)
+        {
+            return Failure<T>(
+                StatusCodes.Status404NotFound,
+                GroupNotFoundCode,
+                "Group was not found.");
+        }
+
+        if (group.ParentId is not Guid parentId || group.Kind is not null)
+        {
+            return ValidationFailure<T>();
+        }
+
+        var parent = await repository.GetGroupAsync(parentId, cancellationToken)
+            .ConfigureAwait(false);
+        return parent is not null && parent.ParentId is null
+            ? null
+            : ValidationFailure<T>();
+    }
+
+    private static bool IsValidGroupKind(MonitorGroupType? kind) =>
+        kind is MonitorGroupType value
+        && Enum.IsDefined(typeof(MonitorGroupType), value);
 
     private static bool ValidateChannels(
         IReadOnlyList<CameraChannelInput>? channels,

@@ -28,6 +28,41 @@ public sealed class CatalogApiTests
     }
 
     [Fact]
+    public async Task GetCatalog_SerializesRootKindAndChildNullKind()
+    {
+        using var factory = new TestServerFactory();
+        using var client = factory.CreateClient();
+        var rootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+
+        var rootResponse = await client.PostAsJsonAsync(
+            "/api/v1/device-groups",
+            new CreateGroupRequest(
+                rootId,
+                "Chute Root",
+                null,
+                0,
+                true,
+                MonitorGroupType.Chute));
+        rootResponse.EnsureSuccessStatusCode();
+        var childResponse = await client.PostAsJsonAsync(
+            "/api/v1/device-groups",
+            new CreateGroupRequest(childId, "Child", rootId, 0, true, null));
+        childResponse.EnsureSuccessStatusCode();
+
+        var response = await client.GetAsync("/api/v1/catalog");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<CatalogSnapshotDto>();
+        Assert.NotNull(body);
+        var root = Assert.Single(body.Groups, group => group.Id == rootId);
+        var child = Assert.Single(body.Groups, group => group.Id == childId);
+        Assert.Equal(MonitorGroupType.Chute, root.Kind);
+        Assert.Null(child.Kind);
+        Assert.Equal(rootId, child.ParentId);
+    }
+
+    [Fact]
     public async Task GetGroupsAndDevices_ReturnsCollectionsAndSupportsGroupFilter()
     {
         using var factory = new TestServerFactory();
@@ -90,7 +125,13 @@ public sealed class CatalogApiTests
 
         var createResponse = await client.PostAsJsonAsync(
             "/api/v1/device-groups",
-            new CreateGroupRequest(groupId, "Group A", null, 0, true));
+            new CreateGroupRequest(
+                groupId,
+                "Group A",
+                null,
+                0,
+                true,
+                MonitorGroupType.Chute));
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
         var created = await createResponse.Content.ReadFromJsonAsync<DeviceGroupDto>();
         Assert.NotNull(created);
@@ -99,7 +140,13 @@ public sealed class CatalogApiTests
 
         var updateResponse = await client.PutAsJsonAsync(
             $"/api/v1/device-groups/{groupId}",
-            new UpdateGroupRequest("Group B", null, 1, true, 1));
+            new UpdateGroupRequest(
+                "Group B",
+                null,
+                1,
+                true,
+                MonitorGroupType.Chute,
+                1));
         Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
         var updated = await updateResponse.Content.ReadFromJsonAsync<DeviceGroupDto>();
         Assert.NotNull(updated);
@@ -458,11 +505,16 @@ public sealed class CatalogApiTests
 
     private static async Task<DeviceGroupDto> CreateGroupAsync(HttpClient client)
     {
+        var rootId = Guid.NewGuid();
         var response = await client.PostAsJsonAsync(
             "/api/v1/device-groups",
-            new CreateGroupRequest(Guid.NewGuid(), "Group", null, 0, true));
+            new CreateGroupRequest(rootId, "Root", null, 0, true, MonitorGroupType.Chute));
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<DeviceGroupDto>())!;
+        var childResponse = await client.PostAsJsonAsync(
+            "/api/v1/device-groups",
+            new CreateGroupRequest(Guid.NewGuid(), "Group", rootId, 0, true, null));
+        childResponse.EnsureSuccessStatusCode();
+        return (await childResponse.Content.ReadFromJsonAsync<DeviceGroupDto>())!;
     }
 
     private static async Task<CameraDeviceDto> CreateDeviceAsync(
