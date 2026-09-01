@@ -34,7 +34,7 @@ public sealed class TestStreamOrphanReconcileContributor : IMediaReconcileContri
             return;
         }
 
-        foreach (var expired in sessionRegistry.TakeExpired())
+        foreach (var expired in sessionRegistry.GetExpired())
         {
             var cleanup = await gateway.DeleteStreamProxyAsync(
                     expired.Handle.ProxyKey,
@@ -44,6 +44,10 @@ public sealed class TestStreamOrphanReconcileContributor : IMediaReconcileContri
             {
                 throw new InvalidOperationException("测试视频会话清理失败。");
             }
+
+            sessionRegistry.RemoveAfterSuccessfulCleanup(
+                expired.Dto.SessionId,
+                expired);
         }
 
         var response = await gateway.GetMediaListAsync(

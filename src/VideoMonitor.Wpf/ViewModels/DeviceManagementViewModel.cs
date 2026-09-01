@@ -1348,8 +1348,13 @@ public sealed class DeviceManagementViewModel : ObservableObject
         await testPreview.StartAsync(request).ConfigureAwait(true);
     }
 
-    public Task StopTestPreviewAsync() =>
-        testPreview?.StopAsync() ?? Task.CompletedTask;
+    public async Task StopTestPreviewAsync()
+    {
+        if (testPreview is not null)
+        {
+            await testPreview.StopAsync().ConfigureAwait(true);
+        }
+    }
 
     private bool CanCommitGroupEdit() =>
         !centralMode || IsServerAvailable && EditingGroupId is not null;

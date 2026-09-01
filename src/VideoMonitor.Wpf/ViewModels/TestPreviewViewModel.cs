@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using LibVLCSharp.Shared;
 using VideoMonitor.Core.Media;
 using VideoMonitor.Wpf.Catalog;
@@ -36,12 +37,19 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
             ?? throw new ArgumentNullException(nameof(playbackEngine));
         this.baseUriProvider = baseUriProvider
             ?? throw new ArgumentNullException(nameof(baseUriProvider));
+        StopCommand = new AsyncRelayCommand(ExecuteStopCommandAsync, CanStop);
     }
 
     public TestPreviewState State
     {
         get => state;
-        private set => SetProperty(ref state, value);
+        private set
+        {
+            if (SetProperty(ref state, value))
+            {
+                StopCommand.NotifyCanExecuteChanged();
+            }
+        }
     }
 
     public string StatusText
@@ -56,6 +64,8 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsActive => session is not null || playbackSession is not null;
 
+    public IAsyncRelayCommand StopCommand { get; }
+
     public async Task StartAsync(
         TestStreamStartRequest request,
         CancellationToken cancellationToken = default)
@@ -63,7 +73,10 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         ObjectDisposedException.ThrowIf(disposed != 0, this);
         if (IsActive)
         {
-            await StopAsync(cancellationToken).ConfigureAwait(false);
+            if (!await StopAsync(cancellationToken).ConfigureAwait(false))
+            {
+                return;
+            }
         }
 
         State = TestPreviewState.Starting;
@@ -82,16 +95,13 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
             createdSession = await apiClient
                 .StartAsync(baseUri, request, cancellationToken)
                 .ConfigureAwait(false);
-            session = createdSession;
-            OnPropertyChanged(nameof(Session));
-            OnPropertyChanged(nameof(IsActive));
+            SetSession(createdSession);
             var source = new TestPreviewSource(
                 createdSession.ChannelId,
                 createdSession.StreamId,
                 createdSession.PlaybackUrl);
             playbackSession = playbackEngine.Start(source.ToPlaybackSource());
-            OnPropertyChanged(nameof(MediaPlayer));
-            OnPropertyChanged(nameof(IsActive));
+            OnPlaybackSessionChanged();
             State = TestPreviewState.Playing;
             StatusText = "测试视频播放中。";
         }
@@ -99,34 +109,39 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         {
             if (createdSession is not null)
             {
-                await StopServerSessionAsync(baseUri, createdSession.SessionId)
+                await ReleaseCreatedSessionAsync(baseUri, createdSession)
                     .ConfigureAwait(false);
             }
 
-            session = null;
-            OnPropertyChanged(nameof(Session));
-            OnPropertyChanged(nameof(IsActive));
             State = TestPreviewState.Failure;
             StatusText = "测试视频已取消。";
             throw;
+        }
+        catch (CatalogApiException exception)
+        {
+            if (createdSession is not null)
+            {
+                await ReleaseCreatedSessionAsync(baseUri, createdSession)
+                    .ConfigureAwait(false);
+            }
+
+            State = TestPreviewState.Failure;
+            StatusText = ToSafeFailureStatus(exception.Code);
         }
         catch
         {
             if (createdSession is not null)
             {
-                await StopServerSessionAsync(baseUri, createdSession.SessionId)
+                await ReleaseCreatedSessionAsync(baseUri, createdSession)
                     .ConfigureAwait(false);
             }
 
-            session = null;
-            OnPropertyChanged(nameof(Session));
-            OnPropertyChanged(nameof(IsActive));
             State = TestPreviewState.Failure;
             StatusText = "播放准备失败。";
         }
     }
 
-    public async Task StopAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> StopAsync(CancellationToken cancellationToken = default)
     {
         var currentSession = session;
         var currentPlayback = playbackSession;
@@ -134,44 +149,58 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         {
             State = TestPreviewState.Idle;
             StatusText = string.Empty;
-            return;
+            return true;
         }
 
         State = TestPreviewState.Stopping;
         var baseUri = baseUriProvider();
-        playbackSession = null;
-        session = null;
-        OnPropertyChanged(nameof(MediaPlayer));
-        OnPropertyChanged(nameof(Session));
-        OnPropertyChanged(nameof(IsActive));
         try
         {
             if (currentPlayback is not null)
             {
                 playbackEngine.Stop(currentPlayback);
+                playbackSession = null;
+                OnPlaybackSessionChanged();
             }
 
-            if (currentSession is not null && baseUri is not null)
+            if (currentSession is not null)
             {
-                await StopServerSessionAsync(baseUri, currentSession.SessionId)
-                    .ConfigureAwait(false);
+                if (baseUri is null
+                    || !await StopServerSessionAsync(baseUri, currentSession.SessionId)
+                        .ConfigureAwait(false))
+                {
+                    State = TestPreviewState.Failure;
+                    StatusText = "测试视频清理失败。";
+                    return false;
+                }
+
+                if (ReferenceEquals(session, currentSession))
+                {
+                    SetSession(null);
+                }
             }
 
             State = TestPreviewState.Idle;
             StatusText = string.Empty;
+            return true;
         }
         catch
         {
             State = TestPreviewState.Failure;
             StatusText = "测试视频清理失败。";
+            return false;
         }
     }
 
-    public Task CloseAsync(CancellationToken cancellationToken = default) =>
-        StopAsync(cancellationToken);
+    public async Task CloseAsync(CancellationToken cancellationToken = default)
+    {
+        await StopAsync(cancellationToken).ConfigureAwait(false);
+    }
 
-    public Task ShutdownAsync(CancellationToken cancellationToken = default) =>
-        StopAsync(cancellationToken);
+    public async Task ShutdownAsync(CancellationToken cancellationToken = default)
+    {
+        await StopAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -187,14 +216,77 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task StopServerSessionAsync(Uri baseUri, Guid sessionId)
+    private bool CanStop() =>
+        IsActive
+        && State is not TestPreviewState.Starting
+        && State is not TestPreviewState.Stopping;
+
+    private async Task ExecuteStopCommandAsync()
+    {
+        await StopAsync().ConfigureAwait(false);
+    }
+
+    private async Task ReleaseCreatedSessionAsync(
+        Uri? baseUri,
+        TestSessionDto createdSession)
+    {
+        if (baseUri is not null
+            && await StopServerSessionAsync(baseUri, createdSession.SessionId)
+                .ConfigureAwait(false))
+        {
+            if (ReferenceEquals(session, createdSession))
+            {
+                SetSession(null);
+            }
+
+            return;
+        }
+
+        SetSession(createdSession);
+    }
+
+    private async Task<bool> StopServerSessionAsync(Uri baseUri, Guid sessionId)
     {
         try
         {
             await apiClient.StopAsync(baseUri, sessionId).ConfigureAwait(false);
+            return true;
         }
         catch
         {
+            return false;
         }
     }
+
+    private void SetSession(TestSessionDto? value)
+    {
+        session = value;
+        OnPropertyChanged(nameof(Session));
+        OnPropertyChanged(nameof(IsActive));
+        StopCommand.NotifyCanExecuteChanged();
+    }
+
+    private void OnPlaybackSessionChanged()
+    {
+        OnPropertyChanged(nameof(MediaPlayer));
+        OnPropertyChanged(nameof(IsActive));
+        StopCommand.NotifyCanExecuteChanged();
+    }
+
+    private static string ToSafeFailureStatus(string code) => code switch
+    {
+        "InvalidDraft"
+            or "MediaServerUnavailable"
+            or "AuthFailed"
+            or "ConnectFailed"
+            or "MediaRegistrationTimeout"
+            or "PlaybackPreparationFailed"
+            or "CatalogUnavailable"
+            or "IdentityConflict"
+            or "SessionNotFound"
+            or "CATALOG_UNAVAILABLE"
+            or "CATALOG_VALIDATION_FAILED"
+            => $"测试视频失败：{code}",
+        _ => "播放准备失败。"
+    };
 }

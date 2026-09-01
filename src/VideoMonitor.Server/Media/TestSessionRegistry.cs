@@ -47,13 +47,13 @@ public sealed class TestSessionRegistry
         return dto;
     }
 
-    public bool TryTake(
+    public bool TryGet(
         Guid sessionId,
         out TestSessionRegistration? registration)
     {
         lock (sync)
         {
-            if (!sessions.Remove(sessionId, out registration))
+            if (!sessions.TryGetValue(sessionId, out registration))
             {
                 registration = null;
                 return false;
@@ -63,7 +63,20 @@ public sealed class TestSessionRegistry
         }
     }
 
-    public IReadOnlyList<TestSessionRegistration> TakeExpired()
+    public bool RemoveAfterSuccessfulCleanup(
+        Guid sessionId,
+        TestSessionRegistration registration)
+    {
+        ArgumentNullException.ThrowIfNull(registration);
+        lock (sync)
+        {
+            return sessions.TryGetValue(sessionId, out var current)
+                && ReferenceEquals(current, registration)
+                && sessions.Remove(sessionId);
+        }
+    }
+
+    public IReadOnlyList<TestSessionRegistration> GetExpired()
     {
         var now = utcNow();
         lock (sync)
@@ -71,11 +84,6 @@ public sealed class TestSessionRegistry
             var expired = sessions.Values
                 .Where(item => item.Dto.ExpiresUtc <= now)
                 .ToArray();
-            foreach (var item in expired)
-            {
-                sessions.Remove(item.Dto.SessionId);
-            }
-
             return expired;
         }
     }

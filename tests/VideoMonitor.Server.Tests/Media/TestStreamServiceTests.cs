@@ -192,6 +192,43 @@ public sealed class TestStreamServiceTests
         Assert.Equal(1, fixture.Proxy.StopCalls);
     }
 
+    [Fact]
+    public async Task StopFailureRetainsExactSessionForRetry()
+    {
+        var fixture = new ServiceFixture();
+        var start = await fixture.Service.StartAsync(Request(DeviceId, ChannelId, "secret"));
+        var sessionId = start.Value!.SessionId;
+        fixture.Proxy.StopFailure = true;
+
+        var first = await fixture.Service.StopAsync(sessionId);
+
+        Assert.False(first.IsSuccess);
+        Assert.True(fixture.Registry.TryGet(sessionId, out var retained));
+        Assert.Equal("proxy", retained!.Handle.ProxyKey);
+
+        fixture.Proxy.StopFailure = false;
+        var second = await fixture.Service.StopAsync(sessionId);
+
+        Assert.True(second.IsSuccess);
+        Assert.False(fixture.Registry.TryGet(sessionId, out _));
+        Assert.Equal(new[] { "proxy", "proxy" }, fixture.Proxy.StoppedProxyKeys);
+    }
+
+    [Fact]
+    public async Task InvalidExistingRelationDoesNotCreateFormalObservation()
+    {
+        var fixture = new ServiceFixture();
+        fixture.Resolver.Failure = new TestStreamOperationException(
+            TestStreamErrorCode.CatalogUnavailable,
+            "relation is invalid");
+        fixture.RebuildService();
+
+        var result = await fixture.Service.StartAsync(Request(DeviceId, ChannelId, "secret"));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(0, fixture.Recorder.Calls);
+    }
+
     private static TestStreamStartRequest Request(
         Guid? deviceId,
         Guid? channelId,
@@ -209,6 +246,8 @@ public sealed class TestStreamServiceTests
 
         public FakeProxy Proxy { get; set; } = new();
 
+        public TestSessionRegistry Registry { get; } = new(() => Now);
+
         public FakeUrlBuilder UrlBuilder { get; set; } = new();
 
         public RecordingObservationRecorder Recorder { get; } = new();
@@ -224,7 +263,7 @@ public sealed class TestStreamServiceTests
                 Proxy,
                 new FakeTicketIssuer(),
                 UrlBuilder,
-                new TestSessionRegistry(() => Now),
+                Registry,
                 Recorder,
                 () => Now);
         }
@@ -234,10 +273,17 @@ public sealed class TestStreamServiceTests
     {
         public TestStreamStartRequest? LastRequest { get; private set; }
 
+        public TestStreamOperationException? Failure { get; set; }
+
         public Task<ResolvedTestCameraSource> ResolveAsync(
             TestStreamStartRequest request,
             CancellationToken cancellationToken = default)
         {
+            if (Failure is not null)
+            {
+                throw Failure;
+            }
+
             LastRequest = request;
             return Task.FromResult(new ResolvedTestCameraSource(
                 new Uri("rtsp://10.0.0.5:554/Streaming/Channels/101"),
@@ -252,7 +298,11 @@ public sealed class TestStreamServiceTests
     {
         public TestStreamOperationException? Failure { get; init; }
 
+        public bool StopFailure { get; set; }
+
         public int StopCalls { get; private set; }
+
+        public List<string> StoppedProxyKeys { get; } = [];
 
         public Task<TestStreamProxyHandle> StartAsync(
             ResolvedTestCameraSource source,
@@ -267,6 +317,14 @@ public sealed class TestStreamServiceTests
             CancellationToken cancellationToken = default)
         {
             StopCalls++;
+            StoppedProxyKeys.Add(handle.ProxyKey);
+            if (StopFailure)
+            {
+                throw new TestStreamOperationException(
+                    TestStreamErrorCode.MediaServerUnavailable,
+                    "cleanup failed");
+            }
+
             return Task.CompletedTask;
         }
     }

@@ -150,7 +150,7 @@ public sealed class TestStreamService : ITestStreamService
         Guid sessionId,
         CancellationToken cancellationToken = default)
     {
-        if (!sessionRegistry.TryTake(sessionId, out var registration))
+        if (!sessionRegistry.TryGet(sessionId, out var registration))
         {
             return Failure<object?>(TestStreamErrorCode.SessionNotFound);
         }
@@ -159,11 +159,6 @@ public sealed class TestStreamService : ITestStreamService
         {
             await proxyController.StopAsync(registration!.Handle, cancellationToken)
                 .ConfigureAwait(false);
-            return new CatalogOperationResult<object?>(
-                true,
-                null,
-                StatusCodes.Status200OK,
-                null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -173,6 +168,19 @@ public sealed class TestStreamService : ITestStreamService
         {
             return Failure<object?>(TestStreamErrorCode.MediaServerUnavailable);
         }
+
+        if (!sessionRegistry.RemoveAfterSuccessfulCleanup(
+                sessionId,
+                registration!))
+        {
+            return Failure<object?>(TestStreamErrorCode.MediaServerUnavailable);
+        }
+
+        return new CatalogOperationResult<object?>(
+            true,
+            null,
+            StatusCodes.Status200OK,
+            null);
     }
 
     private async Task CleanupAfterPreparationFailureAsync(
@@ -209,8 +217,8 @@ public sealed class TestStreamService : ITestStreamService
         ResolvedTestCameraSource? source,
         TestStreamErrorCode errorCode)
     {
-        var deviceId = source?.ExistingDeviceId ?? request.ExistingDeviceId;
-        var channelId = source?.ExistingChannelId ?? request.ExistingChannelId;
+        var deviceId = source?.ExistingDeviceId;
+        var channelId = source?.ExistingChannelId;
         if (deviceId is not { } existingDeviceId
             || channelId is not { } existingChannelId)
         {

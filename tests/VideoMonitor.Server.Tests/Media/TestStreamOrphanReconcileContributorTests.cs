@@ -69,6 +69,43 @@ public sealed class TestStreamOrphanReconcileContributorTests
         Assert.Equal(0, gateway.CloseCalls);
     }
 
+    [Fact]
+    public async Task ExpiredCleanupFailureRetainsCurrentProcessHandle()
+    {
+        var currentTime = Now;
+        var registry = new TestSessionRegistry(() => currentTime);
+        var session = registry.Add(
+            new TestStreamProxyHandle(
+                "configured-vhost",
+                "videomonitor-test",
+                "test_0123456789abcdef0123456789abcdef",
+                "test-proxy-key",
+                Now),
+            null,
+            null,
+            new Uri("rtsp://playback.example/live"));
+        currentTime = Now.AddMinutes(2).AddTicks(1);
+        var gateway = new RecordingGateway
+        {
+            DeleteResults = new Queue<bool>(new[] { false, true })
+        };
+        var contributor = new TestStreamOrphanReconcileContributor(
+            gateway,
+            new FixedSettingsProvider(),
+            registry,
+            () => currentTime);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => contributor.ReconcileAsync());
+        Assert.True(registry.TryGet(session.SessionId, out _));
+
+        await contributor.ReconcileAsync();
+
+        Assert.Equal(2, gateway.DeleteCalls);
+        Assert.Equal("test-proxy-key", gateway.DeletedProxyKey);
+        Assert.False(registry.TryGet(session.SessionId, out _));
+    }
+
     private static ZlmMediaEvidence Evidence(
         string vhost,
         string app,
@@ -109,6 +146,12 @@ public sealed class TestStreamOrphanReconcileContributorTests
 
         public (string Schema, string Vhost, string App, string Stream)? ClosedIdentity { get; private set; }
 
+        public Queue<bool> DeleteResults { get; init; } = new();
+
+        public int DeleteCalls { get; private set; }
+
+        public string? DeletedProxyKey { get; private set; }
+
         public Task<ZlmApiResponse<IReadOnlyList<ZlmMediaEvidence>>> GetMediaListAsync(
             string vhost,
             string app,
@@ -127,8 +170,17 @@ public sealed class TestStreamOrphanReconcileContributorTests
 
         public Task<ZlmApiResponse<ZlmDeleteStreamProxyData>> DeleteStreamProxyAsync(
             string proxyKey,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            CancellationToken cancellationToken = default)
+        {
+            DeleteCalls++;
+            DeletedProxyKey = proxyKey;
+            var success = DeleteResults.Count == 0 || DeleteResults.Dequeue();
+            return Task.FromResult(new ZlmApiResponse<ZlmDeleteStreamProxyData>(
+                true,
+                0,
+                string.Empty,
+                new ZlmDeleteStreamProxyData { Flag = success }));
+        }
 
         public Task<ZlmApiResponse<JsonElement>> CloseExactStreamAsync(
             string schema,

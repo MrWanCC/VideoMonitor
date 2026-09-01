@@ -29,7 +29,7 @@ public sealed class TestSessionRegistryTests
     }
 
     [Fact]
-    public void TryTakeUsesExactSessionId()
+    public void TryGetUsesExactSessionIdAndRemovesOnlyAfterSuccessfulCleanup()
     {
         var registry = new TestSessionRegistry(() => Now);
         var session = registry.Add(
@@ -38,14 +38,15 @@ public sealed class TestSessionRegistryTests
             null,
             new Uri("http://server/live"));
 
-        Assert.False(registry.TryTake(Guid.NewGuid(), out _));
-        Assert.True(registry.TryTake(session.SessionId, out var taken));
+        Assert.False(registry.TryGet(Guid.NewGuid(), out _));
+        Assert.True(registry.TryGet(session.SessionId, out var taken));
         Assert.Equal(session.SessionId, taken!.Dto.SessionId);
-        Assert.False(registry.TryTake(session.SessionId, out _));
+        Assert.True(registry.RemoveAfterSuccessfulCleanup(session.SessionId, taken));
+        Assert.False(registry.TryGet(session.SessionId, out _));
     }
 
     [Fact]
-    public void TakeExpiredReturnsOnlySessionsPastTtl()
+    public void GetExpiredReturnsOnlySessionsPastTtlUntilCleanupSucceeds()
     {
         var time = Now;
         var registry = new TestSessionRegistry(() => time);
@@ -57,11 +58,13 @@ public sealed class TestSessionRegistryTests
 
         time = Now.AddMinutes(2).AddTicks(1);
 
-        var expired = registry.TakeExpired();
+        var expired = registry.GetExpired();
 
         var item = Assert.Single(expired);
         Assert.Equal(session.SessionId, item.Dto.SessionId);
-        Assert.False(registry.TryTake(session.SessionId, out _));
+        Assert.True(registry.TryGet(session.SessionId, out var retained));
+        Assert.True(registry.RemoveAfterSuccessfulCleanup(session.SessionId, retained!));
+        Assert.False(registry.TryGet(session.SessionId, out _));
     }
 
     private static TestStreamProxyHandle Handle(string stream, string proxyKey) => new(

@@ -1,5 +1,6 @@
 using VideoMonitor.Core.Media;
 using VideoMonitor.Core.Models;
+using VideoMonitor.Core.Catalog;
 using VideoMonitor.Infrastructure.Hikvision;
 using VideoMonitor.Infrastructure.Persistence;
 
@@ -8,11 +9,16 @@ namespace VideoMonitor.Server.Media;
 public sealed class TestCameraSourceResolver : ITestCameraSourceResolver
 {
     private readonly ICameraMediaCredentialReader credentialReader;
+    private readonly ICentralCatalogRepository catalogRepository;
 
-    public TestCameraSourceResolver(ICameraMediaCredentialReader credentialReader)
+    public TestCameraSourceResolver(
+        ICameraMediaCredentialReader credentialReader,
+        ICentralCatalogRepository catalogRepository)
     {
         this.credentialReader = credentialReader
             ?? throw new ArgumentNullException(nameof(credentialReader));
+        this.catalogRepository = catalogRepository
+            ?? throw new ArgumentNullException(nameof(catalogRepository));
     }
 
     public async Task<ResolvedTestCameraSource> ResolveAsync(
@@ -35,10 +41,13 @@ public sealed class TestCameraSourceResolver : ITestCameraSourceResolver
         if (request.ExistingDeviceId is { } deviceId
             && request.ExistingChannelId is { } channelId)
         {
-            var credential = await credentialReader
-                .ReadAsync(deviceId, channelId, cancellationToken)
+            var catalogDevice = await catalogRepository
+                .GetDeviceAsync(deviceId, cancellationToken)
                 .ConfigureAwait(false);
-            if (credential.DeviceId != deviceId || credential.ChannelId != channelId)
+            if (catalogDevice is null
+                || catalogDevice.Id != deviceId
+                || catalogDevice.Channels.All(channel =>
+                    channel.Id != channelId || channel.DeviceId != deviceId))
             {
                 throw new TestStreamOperationException(
                     TestStreamErrorCode.CatalogUnavailable,
@@ -47,6 +56,16 @@ public sealed class TestCameraSourceResolver : ITestCameraSourceResolver
 
             if (string.IsNullOrWhiteSpace(password))
             {
+                var credential = await credentialReader
+                    .ReadAsync(deviceId, channelId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (credential.DeviceId != deviceId || credential.ChannelId != channelId)
+                {
+                    throw new TestStreamOperationException(
+                        TestStreamErrorCode.CatalogUnavailable,
+                        "设备媒体身份无效。");
+                }
+
                 password = credential.Password;
             }
         }

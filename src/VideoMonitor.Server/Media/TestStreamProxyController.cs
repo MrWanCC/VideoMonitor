@@ -95,37 +95,49 @@ public sealed class TestStreamProxyController : ITestStreamProxyController
             }
 
             var proxyKey = added.Data.Key;
-            for (var poll = 0; poll < maxRegistrationPolls; poll++)
+            var ownershipTransferred = false;
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var observed = await gateway.GetMediaListAsync(
-                        settings.Vhost,
-                        settings.TestApp,
-                        stream,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                if (observed.IsSuccess
-                    && ContainsExact(observed.Data, settings.Vhost, settings.TestApp, stream))
+                for (var poll = 0; poll < maxRegistrationPolls; poll++)
                 {
-                    return new TestStreamProxyHandle(
-                        settings.Vhost,
-                        settings.TestApp,
-                        stream,
-                        proxyKey,
-                        utcNow());
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var observed = await gateway.GetMediaListAsync(
+                            settings.Vhost,
+                            settings.TestApp,
+                            stream,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    if (observed.IsSuccess
+                        && ContainsExact(observed.Data, settings.Vhost, settings.TestApp, stream))
+                    {
+                        var handle = new TestStreamProxyHandle(
+                            settings.Vhost,
+                            settings.TestApp,
+                            stream,
+                            proxyKey,
+                            utcNow());
+                        ownershipTransferred = true;
+                        return handle;
+                    }
+
+                    if (poll + 1 < maxRegistrationPolls)
+                    {
+                        await delayAsync(TimeSpan.FromMilliseconds(100), cancellationToken)
+                            .ConfigureAwait(false);
+                    }
                 }
 
-                if (poll + 1 < maxRegistrationPolls)
+                throw new TestStreamOperationException(
+                    TestStreamErrorCode.MediaRegistrationTimeout,
+                    "媒体服务注册测试视频超时。");
+            }
+            finally
+            {
+                if (!ownershipTransferred)
                 {
-                    await delayAsync(TimeSpan.FromMilliseconds(100), cancellationToken)
-                        .ConfigureAwait(false);
+                    await TryCleanupProxyAsync(proxyKey).ConfigureAwait(false);
                 }
             }
-
-            await CleanupProxyAsync(proxyKey, cancellationToken).ConfigureAwait(false);
-            throw new TestStreamOperationException(
-                TestStreamErrorCode.MediaRegistrationTimeout,
-                "媒体服务注册测试视频超时。");
         }
 
         throw new TestStreamOperationException(
@@ -159,6 +171,20 @@ public sealed class TestStreamProxyController : ITestStreamProxyController
             throw new TestStreamOperationException(
                 ClassifyApiFailure(result.Code),
                 "测试视频清理失败。");
+        }
+    }
+
+    private async Task<bool> TryCleanupProxyAsync(string proxyKey)
+    {
+        try
+        {
+            await CleanupProxyAsync(proxyKey, CancellationToken.None)
+                .ConfigureAwait(false);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 

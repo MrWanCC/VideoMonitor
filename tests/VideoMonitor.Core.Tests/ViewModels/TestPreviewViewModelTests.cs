@@ -57,9 +57,84 @@ public sealed class TestPreviewViewModelTests
         Assert.Equal(TestPreviewState.Playing, fixture.ViewModel.State);
     }
 
+    [Fact]
+    public async Task StopActionDoesNotRestartPreview()
+    {
+        var fixture = new Fixture();
+
+        await fixture.ViewModel.StartAsync(Request);
+        await fixture.ViewModel.StopCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fixture.Api.StartCalls);
+        Assert.Equal(1, fixture.Api.StopCalls);
+        Assert.Equal(TestPreviewState.Idle, fixture.ViewModel.State);
+    }
+
+    [Fact]
+    public async Task ServerStopFailureRetainsSessionForRetry()
+    {
+        var fixture = new Fixture();
+        await fixture.ViewModel.StartAsync(Request);
+        var sessionId = fixture.ViewModel.Session!.SessionId;
+        fixture.Api.StopFailure = true;
+
+        await fixture.ViewModel.StopAsync();
+
+        Assert.Equal(TestPreviewState.Failure, fixture.ViewModel.State);
+        Assert.Equal(sessionId, fixture.ViewModel.Session!.SessionId);
+        Assert.Equal(1, fixture.Api.StopCalls);
+
+        fixture.Api.StopFailure = false;
+        await fixture.ViewModel.StopAsync();
+
+        Assert.Equal(TestPreviewState.Idle, fixture.ViewModel.State);
+        Assert.Null(fixture.ViewModel.Session);
+        Assert.Equal(2, fixture.Api.StopCalls);
+        Assert.Equal(new[] { sessionId, sessionId }, fixture.Api.StoppedSessionIds);
+    }
+
+    [Fact]
+    public async Task SafeServerFailureIsVisibleWithoutCredentials()
+    {
+        var fixture = new Fixture
+        {
+            Api = new FakeApi { StartFailure = new CatalogApiException("AuthFailed") }
+        };
+        fixture.RebuildViewModel();
+
+        await fixture.ViewModel.StartAsync(Request);
+
+        Assert.Equal(TestPreviewState.Failure, fixture.ViewModel.State);
+        Assert.Contains("AuthFailed", fixture.ViewModel.StatusText);
+        Assert.DoesNotContain("secret", fixture.ViewModel.StatusText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rtsp://", fixture.ViewModel.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StartFailureWithServerStopFailureRetainsSessionForRetry()
+    {
+        var fixture = new Fixture
+        {
+            Engine = new FakePlaybackEngine { ThrowOnStart = true },
+            Api = new FakeApi { StopFailure = true }
+        };
+        fixture.RebuildViewModel();
+
+        await fixture.ViewModel.StartAsync(Request);
+
+        Assert.Equal(TestPreviewState.Failure, fixture.ViewModel.State);
+        Assert.NotNull(fixture.ViewModel.Session);
+
+        fixture.Api.StopFailure = false;
+        await fixture.ViewModel.StopAsync();
+
+        Assert.Null(fixture.ViewModel.Session);
+        Assert.Equal(TestPreviewState.Idle, fixture.ViewModel.State);
+    }
+
     private sealed class Fixture
     {
-        public FakeApi Api { get; } = new();
+        public FakeApi Api { get; set; } = new();
 
         public FakePlaybackEngine Engine { get; set; } = new();
 
@@ -79,11 +154,25 @@ public sealed class TestPreviewViewModelTests
 
         public int StopCalls { get; private set; }
 
+        public int StartCalls { get; private set; }
+
+        public bool StopFailure { get; set; }
+
+        public CatalogApiException? StartFailure { get; init; }
+
+        public List<Guid> StoppedSessionIds { get; } = [];
+
         public Task<TestSessionDto> StartAsync(
             Uri baseUri,
             TestStreamStartRequest request,
             CancellationToken cancellationToken = default)
         {
+            StartCalls++;
+            if (StartFailure is not null)
+            {
+                throw StartFailure;
+            }
+
             var sessionId = new Guid(
                 unchecked((int)(0x94000000u + (uint)nextSession++)), 0, 0, new byte[8]);
             return Task.FromResult(new TestSessionDto(
@@ -102,6 +191,12 @@ public sealed class TestPreviewViewModelTests
             CancellationToken cancellationToken = default)
         {
             StopCalls++;
+            StoppedSessionIds.Add(sessionId);
+            if (StopFailure)
+            {
+                throw new CatalogApiException("MediaServerUnavailable");
+            }
+
             return Task.CompletedTask;
         }
     }

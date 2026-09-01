@@ -90,6 +90,55 @@ public sealed class TestStreamProxyControllerTests
         Assert.Equal("proxy-key", gateway.DeletedProxyKey);
     }
 
+    [Fact]
+    public async Task CancellationAfterAddCleansExactProxyKey()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var gateway = new RecordingGateway(registerOnAdd: false)
+        {
+            CancelAfterAdd = cancellation,
+            ProxyKey = "test-proxy-key"
+        };
+        var controller = new TestStreamProxyController(
+            gateway,
+            new FixedRuntimeSettingsProvider(),
+            maxAttempts: 1,
+            maxRegistrationPolls: 2,
+            delayAsync: static (_, _) => Task.CompletedTask,
+            streamIdFactory: () => "test_0123456789abcdef0123456789abcdef");
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => controller.StartAsync(Source, cancellation.Token));
+
+        Assert.Equal(1, gateway.DeleteStreamProxyCalls);
+        Assert.Equal("test-proxy-key", gateway.DeletedProxyKey);
+    }
+
+    [Fact]
+    public async Task RegistrationPollingCancellationCleansExactProxyKey()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var gateway = new RecordingGateway(registerOnAdd: false)
+        {
+            ThrowCancellationOnMediaListCall = 2,
+            Cancellation = cancellation,
+            ProxyKey = "test-proxy-key"
+        };
+        var controller = new TestStreamProxyController(
+            gateway,
+            new FixedRuntimeSettingsProvider(),
+            maxAttempts: 1,
+            maxRegistrationPolls: 2,
+            delayAsync: static (_, _) => Task.CompletedTask,
+            streamIdFactory: () => "test_0123456789abcdef0123456789abcdef");
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => controller.StartAsync(Source, cancellation.Token));
+
+        Assert.Equal(1, gateway.DeleteStreamProxyCalls);
+        Assert.Equal("test-proxy-key", gateway.DeletedProxyKey);
+    }
+
     private sealed class FixedRuntimeSettingsProvider : IMediaRuntimeSettingsProvider
     {
         public Task<MediaRuntimeSettings> GetAsync(
@@ -122,6 +171,16 @@ public sealed class TestStreamProxyControllerTests
 
         public string? DeletedProxyKey { get; private set; }
 
+        public string ProxyKey { get; init; } = "proxy-key";
+
+        public CancellationTokenSource? CancelAfterAdd { get; init; }
+
+        public int ThrowCancellationOnMediaListCall { get; init; }
+
+        public CancellationTokenSource? Cancellation { get; init; }
+
+        private int mediaListCalls;
+
         public (string Vhost, string App, string Stream)? AddedIdentity { get; private set; }
 
         public Task<ZlmApiResponse<IReadOnlyList<ZlmMediaEvidence>>> GetMediaListAsync(
@@ -130,6 +189,13 @@ public sealed class TestStreamProxyControllerTests
             string? stream,
             CancellationToken cancellationToken = default)
         {
+            mediaListCalls++;
+            if (mediaListCalls == ThrowCancellationOnMediaListCall)
+            {
+                Cancellation?.Cancel();
+                throw new OperationCanceledException(Cancellation?.Token ?? cancellationToken);
+            }
+
             var evidence = stream is not null && ExistingStreams.Contains(stream)
                 ? new[]
                 {
@@ -158,11 +224,13 @@ public sealed class TestStreamProxyControllerTests
                 ExistingStreams.Add(stream);
             }
 
+            CancelAfterAdd?.Cancel();
+
             return Task.FromResult(new ZlmApiResponse<ZlmAddStreamProxyData>(
                 true,
                 0,
                 string.Empty,
-                new ZlmAddStreamProxyData { Key = "proxy-key" }));
+                new ZlmAddStreamProxyData { Key = ProxyKey }));
         }
 
         public Task<ZlmApiResponse<ZlmDeleteStreamProxyData>> DeleteStreamProxyAsync(
