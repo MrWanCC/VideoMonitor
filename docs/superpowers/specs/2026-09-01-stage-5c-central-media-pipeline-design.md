@@ -199,6 +199,35 @@ Server introduces a formal StreamManager with these responsibilities:
 - return playback information only after the stream is Ready;
 - perform bounded retry and bounded cleanup on failed setup.
 
+“Reuse a matching registered stream” means more than matching
+`schema + vhost + app + stream`. Before reuse, StreamManager must prove all of
+the following:
+
+1. The observed vhost equals configured `Vhost`.
+2. The observed app equals configured `FormalApp`.
+3. The deterministic StreamId represents the requested `MediaStreamKey`.
+4. The corresponding Device, Channel, and StreamType still exist in the
+   authoritative Catalog.
+5. The observed origin type is pull/proxy-compatible.
+6. The observed source binding matches the current authoritative camera source
+   expected by Server.
+7. The ownership state permits reuse.
+
+`OwnedCurrentProcess` (with its retained `ProxyKey`) and a strictly proven
+`OwnedAdopted` stream may be reused. NotOwned cannot be reused. If an exact
+formal identity is occupied but ownership proof fails, source binding does not
+match, evidence is insufficient, or the stream is classified as
+`NotOwned`/`External`, an identity conflict fails closed. `EnsureStream` must
+not reuse, delete, overwrite, or call `addStreamProxy` again for that identity.
+The safe failure category is the identity-conflict semantic
+`MediaStreamIdentityConflict`; the
+safe message only says that the target media identity is occupied by a stream
+that cannot be safely taken over.
+
+The same identity may be attempted again only after the conflicting stream
+disappears, an administrator handles it outside VideoMonitor, or later
+reconciliation obtains sufficient evidence for safe adoption.
+
 For concurrent requests for one key, only one Camera-to-ZLM proxy creation
 attempt is allowed. A successful `addStreamProxy` response alone is not proof
 that the stream is ready.
@@ -557,7 +586,11 @@ For a new Device there is no existing Server credential, so the Draft supplies
 the connection values; an empty password remains a legal possible value.
 
 Test Stream uses the isolated `videomonitor-test` app and a random test Stream
-ID. Its lifecycle and cleanup cannot affect a formal stream. Test playback is
+ID. If a newly generated ID already exists under the configured vhost and
+`TestApp`, Test Stream must not reuse, delete, or overwrite that existing
+stream. It generates another high-entropy test ID, subject to a bounded number
+of attempts, and fails safely if no unoccupied ID can be obtained. Its
+lifecycle and cleanup cannot affect a formal stream. Test playback is
 also authorized: WPF must obtain a Server-issued ticket bound to the
 configured `Vhost`, `TestApp`, and exact `test_<valid-high-entropy-guid>`
 stream ID. A formal ticket cannot authorize `TestApp`, and a test ticket
@@ -583,12 +616,13 @@ hard TTL is two minutes.
 
 If WPF crashes, the in-memory Test Session and its expiry may be lost on a
 Server restart. Reconciliation can identify a restart orphan only when all of
-these conditions hold: `app` equals the configured `TestApp`; `stream` exactly
-matches `test_<valid-high-entropy-guid>`; the origin type is pull/proxy
-compatible; and `createStamp` or `aliveSecond` proves that the stream has
-exceeded the two-minute Test TTL. The TestApp namespace is reserved for
-VideoMonitor. A `test_` prefix in another app is not sufficient. When any
-evidence is missing, the stream is `NotOwned` and is not deleted.
+these conditions hold: `vhost` equals the configured `Vhost`; `app` equals the
+configured `TestApp`; `stream` exactly matches
+`test_<valid-high-entropy-guid>`; the origin type is pull/proxy-compatible;
+and `createStamp` or `aliveSecond` proves that the stream has exceeded the
+two-minute Test TTL. The TestApp namespace is reserved for VideoMonitor. A
+`test_` prefix in another app is not sufficient. When any evidence is missing,
+the stream is `NotOwned` and is not deleted.
 
 An expired, proven managed test orphan may be closed with the exact
 `schema + vhost + app + stream` identity. Test lifecycle is not implemented as
