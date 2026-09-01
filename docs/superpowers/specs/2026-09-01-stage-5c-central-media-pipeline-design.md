@@ -308,6 +308,12 @@ normal interval.
 Server may delete only a proxy that is demonstrably in the VideoMonitor
 management domain. The presence of a stream in ZLM is not proof of ownership.
 
+The internal media query used for this decision must retain enough evidence to
+make the comparison. Depending on the ZLM API version, that evidence includes
+`schema`, `vhost`, `app`, `stream`, `originType`/`originTypeStr`, `originUrl`,
+`createStamp` or `aliveSecond`, and `totalReaderCount`. These are
+Server-internal media fields, not public DTO fields.
+
 The managed namespaces `videomonitor` and `videomonitor-test` are reserved for
 VideoMonitor. Formal IDs are deterministic under the `vm_` namespace and test
 IDs use the `test_` namespace. Server must also verify the configured vhost,
@@ -319,11 +325,44 @@ by VideoMonitor. A stream in a reserved namespace that cannot be verified as
 created for the matching Device/Channel is `NotOwned` until a safe ownership
 proof is available.
 
-After restart, Server may adopt a reserved stream only when the query data
-proves the expected managed identity and source binding under the reserved
-namespace. If the available ZLM data cannot provide that proof, Server keeps
-the stream visible as `External`/`NotOwned` and does not delete it. It must
-never infer ownership from Camera Name or Group Name.
+Within the current Server process, a stream becomes `OwnedCurrentProcess` only
+after StreamManager itself successfully calls `addStreamProxy` and retains the
+returned `ProxyKey`. Normal cleanup of that stream may use that exact key.
+
+After restart the `ProxyKey` may be lost. Restart adoption therefore requires
+all of the following proofs:
+
+1. `vhost` equals the configured `Vhost`.
+2. `app` equals the configured `FormalApp`.
+3. `stream` strictly parses as one deterministic `MediaStreamKey`.
+4. The parsed `DeviceId`, `ChannelId`, and `StreamType` still exist in the
+   authoritative Catalog.
+5. `originType`/`originTypeStr` identifies a pull/proxy-compatible source.
+6. The observed source binding matches the exact camera source that Server
+   would construct from the current Catalog and internally resolved
+   credential.
+
+The source comparison may use the sensitive `originUrl` internally, but its
+result is reduced to a safe state such as `SourceBindingMatched=true/false`.
+If any proof is unavailable or fails, the stream is `NotOwned` and is not
+deleted. `app == videomonitor`, a `vm_` prefix, or any other single signal is
+insufficient. Server must never infer ownership from Camera Name or Group
+Name.
+
+`originUrl` may contain a credential-bearing value such as
+`rtsp://username:password@camera/...`. It is therefore secret-bearing
+internal data. It may be used transiently by Server media foundation for
+source-binding verification, but it must never be returned to WPF, placed in
+a public media DTO or diagnostics row, written to ordinary or structured logs,
+included in exception details, or emitted as plaintext telemetry. After the
+comparison, only a safe result such as `SourceBindingMatched` and a sanitized
+error category may remain in runtime diagnostics.
+
+A restart-adopted stream that has passed every proof but has no original
+`ProxyKey` may be cleaned up only with a ZLM-supported exact stream-close
+operation such as `close_streams`. The operation must specify the complete
+`schema + vhost + app + stream` identity. App-only, vhost-only, prefix-only,
+and broad batch deletion are forbidden.
 
 This rule allows a Server restart to preserve a still-live stream without
 turning arbitrary external ZLM media into a deletion target.
@@ -361,8 +400,10 @@ rechecks all cleanup conditions:
 - no `EnsureStream` or `Starting` critical section is active;
 - the stream still satisfies the cleanup policy.
 
-Only then may Server delete the owned proxy. The default grace period is 30
-seconds. A no-reader hook alone must never directly trigger deletion.
+Only then may Server delete the owned proxy. Current-process ownership uses
+the retained exact `ProxyKey`; restart-adopted ownership without that key uses
+the exact stream-close identity described above. The default grace period is
+30 seconds. A no-reader hook alone must never directly trigger deletion.
 
 Test Stream lifecycle is separate: it is controlled by a test session and a
 hard TTL rather than by the formal reader-driven policy.
@@ -402,11 +443,14 @@ a raw ZLM administrator URL.
 ## 16. Playback authorization
 
 All formal central playback uses a short-lived authorization. The first
-implementation uses a stateless HMAC token containing at least:
+implementation uses a stateless HMAC ticket bound to the complete media
+identity and containing at least:
 
+- `Vhost`;
+- `App`;
 - `StreamId`;
-- expiration time;
-- a random nonce.
+- `ExpiresUtc`;
+- a random `Nonce`.
 
 The default TTL is 60 seconds. This is a 60-second connection authorization
 window; it does not limit an already authorized playback session to 60
@@ -416,9 +460,16 @@ The playback signing key is distinct from camera passwords and the ZLM secret.
 Server generates it securely, stores it with machine-level protection, and
 never logs it or asks the user to configure it.
 
-WPF cannot generate a bare formal playback URL. ZLM `on_play` validation
-connects the token to the expected stream, binding, expiry, and HMAC rules.
-ZLM administrator bypass parameters are not formal WPF playback credentials.
+WPF cannot generate a bare formal playback URL. When ZLM `on_play` reports the
+actual `vhost`, `app`, and `stream`, Server validates all three against the
+ticket claims, then validates expiry and the HMAC. Any mismatch rejects the
+playback request. ZLM administrator bypass parameters are not formal WPF
+playback credentials.
+
+The nonce provides entropy and domain separation; it does not make the ticket
+one-time-use. Within its 60-second TTL, a valid signed ticket may be reused to
+establish connections for the same bound media identity. Stage 5C does not add
+a token state table.
 
 This token is a media access ticket, not a user login system. Stage 5C does
 not introduce User Login, JWT identity, or RBAC.
@@ -506,7 +557,16 @@ For a new Device there is no existing Server credential, so the Draft supplies
 the connection values; an empty password remains a legal possible value.
 
 Test Stream uses the isolated `videomonitor-test` app and a random test Stream
-ID. Its lifecycle and cleanup cannot affect a formal stream.
+ID. Its lifecycle and cleanup cannot affect a formal stream. Test playback is
+also authorized: WPF must obtain a Server-issued ticket bound to the
+configured `Vhost`, `TestApp`, and exact `test_<valid-high-entropy-guid>`
+stream ID. A formal ticket cannot authorize `TestApp`, and a test ticket
+cannot authorize `FormalApp`; WPF may not play a random test ID directly.
+
+Test Session TTL and playback-ticket TTL are independent. A Test Session has a
+hard two-minute lifetime, while a playback ticket has a 60-second connection
+authorization window. The ticket window does not extend the Test Session and
+the Test Session does not turn the ticket into a long-lived credential.
 
 ## 21. Test Preview lifecycle
 
@@ -521,9 +581,18 @@ Cleanup occurs when the user stops the test, the editor closes, device
 selection changes, the application/session ends, or the hard TTL expires. The
 hard TTL is two minutes.
 
-If WPF crashes, Server reconciliation eventually removes orphan test streams
-that are proven to be VideoMonitor-owned and expired. Test lifecycle is not
-implemented as a simplified copy of formal reader-driven lifecycle.
+If WPF crashes, the in-memory Test Session and its expiry may be lost on a
+Server restart. Reconciliation can identify a restart orphan only when all of
+these conditions hold: `app` equals the configured `TestApp`; `stream` exactly
+matches `test_<valid-high-entropy-guid>`; the origin type is pull/proxy
+compatible; and `createStamp` or `aliveSecond` proves that the stream has
+exceeded the two-minute Test TTL. The TestApp namespace is reserved for
+VideoMonitor. A `test_` prefix in another app is not sufficient. When any
+evidence is missing, the stream is `NotOwned` and is not deleted.
+
+An expired, proven managed test orphan may be closed with the exact
+`schema + vhost + app + stream` identity. Test lifecycle is not implemented as
+a simplified copy of formal reader-driven lifecycle.
 
 ## 22. Test error taxonomy
 
