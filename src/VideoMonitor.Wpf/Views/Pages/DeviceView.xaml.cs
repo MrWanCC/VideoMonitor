@@ -20,7 +20,7 @@ public partial class DeviceView
         _drawerCloseStoryboard = (Storyboard)Resources["DrawerCloseStoryboard"];
         _drawerCloseStoryboard.Completed += OnDrawerCloseStoryboardCompleted;
         DataContextChanged += OnDataContextChanged;
-        Unloaded += (_, _) => DetachViewModel(DataContext as DeviceManagementViewModel);
+        Unloaded += OnUnloaded;
     }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -40,6 +40,16 @@ public partial class DeviceView
         {
             viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         }
+    }
+
+    private async void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is DeviceManagementViewModel viewModel)
+        {
+            await viewModel.StopTestPreviewAsync();
+        }
+
+        DetachViewModel(DataContext as DeviceManagementViewModel);
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

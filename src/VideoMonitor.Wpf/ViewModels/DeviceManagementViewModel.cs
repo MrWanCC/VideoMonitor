@@ -3,9 +3,11 @@ using System.Net;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VideoMonitor.Core.Catalog;
+using VideoMonitor.Core.Media;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Core.Services;
 using VideoMonitor.Wpf.Catalog;
+using VideoMonitor.Wpf.Playback;
 
 namespace VideoMonitor.Wpf.ViewModels;
 
@@ -52,10 +54,12 @@ public sealed class DeviceManagementViewModel : ObservableObject
     private string? operationErrorCode;
     private string operationError = string.Empty;
     private bool lastOperationSucceeded;
+    private readonly TestPreviewViewModel? testPreview;
 
     public DeviceManagementViewModel(IDeviceCatalog catalog)
     {
         this.catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
+        testPreview = null;
         readModel = new LegacyDeviceCatalogReadModel(this.catalog);
         commandService = new LegacyDeviceCatalogCommandService(this.catalog);
         Groups = [];
@@ -89,6 +93,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
             _ => !centralMode || IsServerAvailable);
         SaveDeviceCommand = new AsyncRelayCommand(SaveDeviceAsync, CanSaveDevice);
         CancelEditCommand = new RelayCommand(CancelEdit);
+        TestStreamCommand = new AsyncRelayCommand(StartTestAsync, CanStartTest);
 
         catalog.Changed += OnCatalogChanged;
         EditDraft.PropertyChanged += OnEditDraftPropertyChanged;
@@ -97,11 +102,13 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
     public DeviceManagementViewModel(
         IDeviceCatalogReadModel catalog,
-        IDeviceCatalogCommandService commands)
+        IDeviceCatalogCommandService commands,
+        TestPreviewViewModel? testPreview = null)
     {
         readModel = catalog ?? throw new ArgumentNullException(nameof(catalog));
         commandService = commands ?? throw new ArgumentNullException(nameof(commands));
         this.catalog = null!;
+        this.testPreview = testPreview;
         centralMode = true;
         Groups = [];
         Devices = [];
@@ -133,7 +140,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
             DeleteDevice,
             _ => !centralMode || IsServerAvailable);
         SaveDeviceCommand = new AsyncRelayCommand(SaveDeviceAsync, CanSaveDevice);
-        CancelEditCommand = new RelayCommand(CancelEdit);
+        CancelEditCommand = new AsyncRelayCommand(CancelEditAsync);
+        TestStreamCommand = new AsyncRelayCommand(StartTestAsync, CanStartTest);
 
         readModel.Changed += OnReadModelChanged;
         commandService.AvailabilityChanged += OnCommandAvailabilityChanged;
@@ -154,6 +162,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
     public ObservableCollection<CameraDeviceDto> CatalogDevices { get; }
 
     public DeviceEditDraftViewModel EditDraft { get; }
+
+    public TestPreviewViewModel? TestPreview => testPreview;
 
     public IEnumerable<DeviceGroup> EditableGroups => Groups
         .Where(group => group.ParentId is not null && group.Enabled)
@@ -226,6 +236,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
     public IRelayCommand CancelEditCommand { get; }
 
+    public IAsyncRelayCommand TestStreamCommand { get; }
+
     public bool IsSaving
     {
         get => isSaving;
@@ -236,6 +248,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 ((AsyncRelayCommand)SaveDeviceCommand).NotifyCanExecuteChanged();
                 ((AsyncRelayCommand)SaveRootCommand).NotifyCanExecuteChanged();
                 ((AsyncRelayCommand<Guid?>)DeleteRootCommand).NotifyCanExecuteChanged();
+                ((AsyncRelayCommand)TestStreamCommand).NotifyCanExecuteChanged();
             }
         }
     }
@@ -253,6 +266,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 ((AsyncRelayCommand<Guid?>)DeleteRootCommand).NotifyCanExecuteChanged();
                 ((RelayCommand<object?>)DeleteGroupCommand).NotifyCanExecuteChanged();
                 ((RelayCommand<object?>)DeleteDeviceCommand).NotifyCanExecuteChanged();
+                ((AsyncRelayCommand)TestStreamCommand).NotifyCanExecuteChanged();
             }
         }
     }
@@ -426,7 +440,13 @@ public sealed class DeviceManagementViewModel : ObservableObject
     public bool IsEditPanelOpen
     {
         get => isEditPanelOpen;
-        private set => SetProperty(ref isEditPanelOpen, value);
+        private set
+        {
+            if (SetProperty(ref isEditPanelOpen, value))
+            {
+                ((AsyncRelayCommand)TestStreamCommand).NotifyCanExecuteChanged();
+            }
+        }
     }
 
     public bool IsEditing
@@ -1268,6 +1288,69 @@ public sealed class DeviceManagementViewModel : ObservableObject
     private bool CanSaveDevice() =>
         !IsSaving && (!centralMode || IsServerAvailable);
 
+    private bool CanStartTest() =>
+        centralMode
+        && testPreview is not null
+        && IsEditPanelOpen
+        && !IsSaving
+        && IsServerAvailable;
+
+    public TestStreamStartRequest? CreateTestStreamRequest()
+    {
+        if (!centralMode
+            || !int.TryParse(EditDraft.RtspPort, out var rtspPort)
+            || !int.TryParse(EditDraft.ChannelNo, out var channelNo)
+            || string.IsNullOrWhiteSpace(EditDraft.IpAddress)
+            || string.IsNullOrWhiteSpace(EditDraft.Username)
+            || channelNo < 1
+            || rtspPort is < 1 or > 65535)
+        {
+            return null;
+        }
+
+        var existingDeviceId = editingCatalogDevice?.Id;
+        var existingChannelId = existingDeviceId is not null
+            ? editingCatalogDevice?.Channels.FirstOrDefault()?.Id
+            : null;
+        if (existingDeviceId is not null && existingChannelId is null)
+        {
+            return null;
+        }
+
+        return new TestStreamStartRequest(
+            existingDeviceId,
+            existingChannelId,
+            new CameraDeviceDraftDto(
+                EditDraft.IpAddress.Trim(),
+                rtspPort,
+                EditDraft.Username.Trim(),
+                EditDraft.Password,
+                channelNo,
+                EditDraft.StreamType,
+                EditDraft.TransportMode),
+            DateTimeOffset.UtcNow);
+    }
+
+    public async Task StartTestAsync()
+    {
+        if (!CanStartTest() || testPreview is null)
+        {
+            return;
+        }
+
+        var request = CreateTestStreamRequest();
+        if (request is null)
+        {
+            SetOperationError("CATALOG_VALIDATION_FAILED", "测试视频配置无效。");
+            return;
+        }
+
+        await testPreview.StartAsync(request).ConfigureAwait(true);
+    }
+
+    public Task StopTestPreviewAsync() =>
+        testPreview?.StopAsync() ?? Task.CompletedTask;
+
     private bool CanCommitGroupEdit() =>
         !centralMode || IsServerAvailable && EditingGroupId is not null;
 
@@ -1330,6 +1413,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
             SetDeviceDraftPending(false);
             LastOperationSucceeded = true;
+            await StopTestPreviewAsync().ConfigureAwait(true);
             CloseCentralEditor();
         }
         catch (CatalogMutationUncertainException exception)
@@ -1779,6 +1863,19 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
     private void CancelEdit()
     {
+        if (centralMode)
+        {
+            CloseCentralEditor();
+        }
+        else
+        {
+            CloseEditor();
+        }
+    }
+
+    private async Task CancelEditAsync()
+    {
+        await StopTestPreviewAsync().ConfigureAwait(true);
         if (centralMode)
         {
             CloseCentralEditor();

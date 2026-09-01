@@ -69,7 +69,8 @@ public partial class App
             ? new DeviceManagementViewModel(localCatalogForManagement)
             : new DeviceManagementViewModel(
                 composition.ReadModel,
-                composition.CommandService);
+                composition.CommandService,
+                composition.TestPreview);
         var secondaryViewModel = composition.LocalCatalog is { } localCatalogForSecondary
             ? new SecondaryMonitorViewModel(
                 switchService,

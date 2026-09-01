@@ -4,6 +4,7 @@
              xmlns:behaviors="clr-namespace:VideoMonitor.Wpf.Behaviors"
              xmlns:converters="clr-namespace:VideoMonitor.Wpf.Converters"
              xmlns:vm="clr-namespace:VideoMonitor.Wpf.ViewModels"
+             xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
              PreviewKeyDown="OnDeviceViewPreviewKeyDown">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
@@ -605,8 +606,26 @@
                                    FontSize="{StaticResource FontSizeAuxiliary}" Text="{Binding OperationError}" TextWrapping="Wrap" />
                     </StackPanel>
                 </ScrollViewer>
+                <Grid Grid.Row="1" Panel.ZIndex="2" IsHitTestVisible="False">
+                    <Border Width="240" Height="135" Margin="0,0,18,18"
+                            HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                            Background="Black" BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1" CornerRadius="5">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding TestPreview.State}" Value="Playing">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <vlc:VideoView MediaPlayer="{Binding TestPreview.MediaPlayer}" />
+                    </Border>
+                </Grid>
                 <Border Grid.Row="2" Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
                     <StackPanel Margin="18,0" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal">
+                        <Button Margin="0,0,10,0" Command="{Binding TestStreamCommand}" Style="{StaticResource SecondaryButtonStyle}" Content="测试视频" />
                         <Button Margin="0,0,10,0" Command="{Binding CancelEditCommand}" Style="{StaticResource SecondaryButtonStyle}" Content="取消" />
                         <Button Command="{Binding SaveDeviceCommand}" Style="{StaticResource PrimaryButtonStyle}" Content="保存" />
                     </StackPanel>

@@ -49,6 +49,11 @@ builder.Services.AddSingleton<
     ICameraMediaCredentialReader,
     SqliteCameraMediaCredentialReader>();
 builder.Services.AddSingleton<ICameraSourceResolver, CameraSourceResolver>();
+builder.Services.AddSingleton<ITestCameraSourceResolver, TestCameraSourceResolver>();
+builder.Services.AddSingleton<ITestStreamProxyController, TestStreamProxyController>();
+builder.Services.AddSingleton<TestSessionRegistry>();
+builder.Services.AddSingleton<ITestStreamService, TestStreamService>();
+builder.Services.AddSingleton<TestStreamOrphanReconcileContributor>();
 builder.Services.AddSingleton<SourceBindingVerifier>();
 builder.Services.AddSingleton<MediaRuntimeRegistry>();
 builder.Services.AddSingleton<IMediaRuntimeStore>(serviceProvider =>
@@ -63,6 +68,8 @@ builder.Services.AddSingleton<IStreamManager>(serviceProvider =>
     serviceProvider.GetRequiredService<StreamManager>());
 builder.Services.AddSingleton<IMediaReconcileContributor>(serviceProvider =>
     serviceProvider.GetRequiredService<StreamManager>());
+builder.Services.AddSingleton<IMediaReconcileContributor>(serviceProvider =>
+    serviceProvider.GetRequiredService<TestStreamOrphanReconcileContributor>());
 builder.Services.AddSingleton<IZlmHookTrustPolicy, LoopbackZlmHookTrustPolicy>();
 builder.Services.AddSingleton<MediaEventProcessor>();
 builder.Services.AddHostedService(serviceProvider =>
@@ -111,6 +118,7 @@ app.MapCatalogEndpoints();
 app.MapMediaSettingsEndpoints();
 app.MapMediaHookEndpoints();
 app.MapPlaybackAuthorizationEndpoints();
+app.MapTestStreamEndpoints();
 
 app.Run();
 

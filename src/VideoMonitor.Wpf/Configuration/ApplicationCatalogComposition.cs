@@ -31,6 +31,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         InMemoryDeviceCatalog? localCatalog,
         DeviceCatalogPersistenceCoordinator? persistenceCoordinator,
         IPlaybackSourceProvider? localPlaybackSource,
+        TestStreamApiClient? testStreamApiClient,
+        TestPreviewViewModel? testPreview,
         HttpClient? centralHttpClient,
         HttpClient? localHttpClient,
         CancellationTokenSource? centralCancellation,
@@ -47,6 +49,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         LocalCatalog = localCatalog;
         PersistenceCoordinator = persistenceCoordinator;
         LocalPlaybackSource = localPlaybackSource;
+        TestStreamApiClient = testStreamApiClient;
+        TestPreview = testPreview;
         this.centralHttpClient = centralHttpClient;
         this.localHttpClient = localHttpClient;
         this.centralCancellation = centralCancellation;
@@ -79,6 +83,9 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
 
         public Func<IClientConnectionClock> ConnectionClockFactory { get; init; } =
             static () => new SystemClientConnectionClock();
+
+        public Func<IPlaybackEngine> CentralPlaybackEngineFactory { get; init; } =
+            static () => new VlcPlaybackService();
     }
 
     public bool IsFormalCentralMode { get; }
@@ -100,6 +107,10 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
     public DeviceCatalogPersistenceCoordinator? PersistenceCoordinator { get; }
 
     public IPlaybackSourceProvider? LocalPlaybackSource { get; }
+
+    public TestStreamApiClient? TestStreamApiClient { get; }
+
+    public TestPreviewViewModel? TestPreview { get; }
 
     public Task? CoordinatorRunTask => coordinatorRunTask;
 
@@ -176,6 +187,11 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             apiClient,
             coordinator);
         var serverStatus = new ServerStatusViewModel(coordinator);
+        var testStreamApiClient = new TestStreamApiClient(httpClient);
+        var testPreview = new TestPreviewViewModel(
+            testStreamApiClient,
+            new LazyPlaybackEngine(dependencies.CentralPlaybackEngineFactory),
+            () => coordinator.Status.BaseUri);
 
         return new ApplicationCatalogComposition(
             true,
@@ -188,6 +204,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             null,
             null,
             null,
+            testStreamApiClient,
+            testPreview,
             httpClient,
             null,
             new CancellationTokenSource(),
@@ -235,6 +253,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             persistenceCoordinator,
             playbackSource,
             null,
+            null,
+            null,
             localHttpClient,
             null,
             bootstrapper.LastMigrationWarning,
@@ -269,6 +289,11 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
 
         try
         {
+            if (TestPreview is not null)
+            {
+                await TestPreview.DisposeAsync().ConfigureAwait(false);
+            }
+
             if (Coordinator is not null)
             {
                 await Coordinator.DisposeAsync().ConfigureAwait(false);
