@@ -61,7 +61,13 @@ public sealed class ServerSettingsViewModel : ObservableObject
     public bool IsBusy
     {
         get => isBusy;
-        private set => SetProperty(ref isBusy, value);
+        private set
+        {
+            if (SetProperty(ref isBusy, value))
+            {
+                OnPropertyChanged(nameof(ConnectionStatusText));
+            }
+        }
     }
 
     public bool IsTestSuccessful
@@ -73,20 +79,47 @@ public sealed class ServerSettingsViewModel : ObservableObject
     public string TestResultText
     {
         get => testResultText;
-        private set => SetProperty(ref testResultText, value);
+        private set
+        {
+            if (SetProperty(ref testResultText, value))
+            {
+                OnPropertyChanged(nameof(ConnectionStatusText));
+            }
+        }
     }
 
     public string SaveError
     {
         get => saveError;
-        private set => SetProperty(ref saveError, value);
+        private set
+        {
+            if (SetProperty(ref saveError, value))
+            {
+                OnPropertyChanged(nameof(ConnectionStatusText));
+            }
+        }
     }
 
     public bool HasSaveError
     {
         get => hasSaveError;
-        private set => SetProperty(ref hasSaveError, value);
+        private set
+        {
+            if (SetProperty(ref hasSaveError, value))
+            {
+                OnPropertyChanged(nameof(ConnectionStatusText));
+            }
+        }
     }
+
+    public string ConnectionStatusText =>
+        IsBusy
+            ? "正在连接服务器…"
+            : HasSaveError && !string.IsNullOrWhiteSpace(SaveError)
+                ? SaveError
+                : string.IsNullOrWhiteSpace(TestResultText)
+                    ? "尚未测试连接"
+                    : TestResultText;
 
     public IAsyncRelayCommand TestConnectionCommand { get; }
 
