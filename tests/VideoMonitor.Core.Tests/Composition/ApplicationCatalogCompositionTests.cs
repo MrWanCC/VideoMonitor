@@ -57,6 +57,16 @@ public sealed class ApplicationCatalogCompositionTests
     }
 
     [Fact]
+    public async Task FormalMode_ExposesMediaSettingsApiClient()
+    {
+        await using var formal = await CreateAsync(false);
+        await using var singleCamera = await CreateAsync(true);
+
+        Assert.NotNull(formal.MediaSettingsApiClient);
+        Assert.Null(singleCamera.MediaSettingsApiClient);
+    }
+
+    [Fact]
     public async Task FormalMode_DoesNotCreatePersistenceCoordinator()
     {
         await using var composition = await CreateAsync(false);

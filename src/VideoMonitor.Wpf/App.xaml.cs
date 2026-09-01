@@ -88,6 +88,9 @@ public partial class App
                     composition.Coordinator!,
                     composition.ClientSettingsStore!,
                     () => deviceManagementViewModel.HasUnsavedDraft),
+                new MediaSettingsViewModel(
+                    composition.MediaSettingsApiClient!,
+                    () => composition.ServerStatus!.BaseUri),
                 screenService.HasSecondaryScreen)
             : new MainViewModel(
                 monitorViewModel,

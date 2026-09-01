@@ -24,6 +24,7 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         bool isFormalCentralMode,
         IDeviceCatalogReadModel readModel,
         IDeviceCatalogCommandService commandService,
+        IMediaSettingsApiClient? mediaSettingsApiClient,
         IClientSettingsStore? clientSettings,
         ServerConnectionCoordinator? coordinator,
         ServerStatusViewModel? serverStatus,
@@ -39,6 +40,7 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         IsFormalCentralMode = isFormalCentralMode;
         ReadModel = readModel;
         CommandService = commandService;
+        MediaSettingsApiClient = mediaSettingsApiClient;
         ClientSettingsStore = clientSettings;
         Coordinator = coordinator;
         ServerStatus = serverStatus;
@@ -63,6 +65,9 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         public Func<HttpClient, CatalogApiClient> CatalogApiClientFactory { get; init; } =
             static httpClient => new CatalogApiClient(httpClient);
 
+        public Func<HttpClient, IMediaSettingsApiClient> MediaSettingsApiClientFactory { get; init; } =
+            static httpClient => new MediaSettingsApiClient(httpClient);
+
         public Func<CatalogApiClient, ICatalogConnectionClient> CatalogConnectionClientFactory { get; init; } =
             static apiClient => apiClient;
 
@@ -81,6 +86,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
     public IDeviceCatalogReadModel ReadModel { get; }
 
     public IDeviceCatalogCommandService CommandService { get; }
+
+    public IMediaSettingsApiClient? MediaSettingsApiClient { get; }
 
     public IClientSettingsStore? ClientSettingsStore { get; }
 
@@ -149,6 +156,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             ?? throw new InvalidOperationException("Central HTTP client factory returned null.");
         var apiClient = dependencies.CatalogApiClientFactory(httpClient)
             ?? throw new InvalidOperationException("Catalog API client factory returned null.");
+        var mediaSettingsApiClient = dependencies.MediaSettingsApiClientFactory(httpClient)
+            ?? throw new InvalidOperationException("Media settings API client factory returned null.");
         var connectionClient = dependencies.CatalogConnectionClientFactory(apiClient)
             ?? throw new InvalidOperationException("Catalog connection client factory returned null.");
         var dispatcher = dependencies.UiDispatcherFactory()
@@ -172,6 +181,7 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             true,
             cache,
             commandService,
+            mediaSettingsApiClient,
             settingsStore,
             coordinator,
             serverStatus,
@@ -217,6 +227,7 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             false,
             readModel,
             commandService,
+            null,
             null,
             null,
             null,

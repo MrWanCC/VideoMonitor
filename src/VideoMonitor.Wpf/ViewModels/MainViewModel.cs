@@ -12,6 +12,7 @@ public sealed class MainViewModel : ObservableObject
     private bool isSecondaryScreenVisible;
     private readonly ServerStatusViewModel? serverStatus;
     private readonly Func<ServerSettingsViewModel>? serverSettingsFactory;
+    private readonly MediaSettingsViewModel? mediaSettings;
 
     public MainViewModel(
         MonitorViewModel monitor,
@@ -34,12 +35,30 @@ public sealed class MainViewModel : ObservableObject
         ServerStatusViewModel serverStatus,
         Func<ServerSettingsViewModel> serverSettingsFactory,
         bool isSecondaryScreenVisible = false)
+        : this(
+            monitor,
+            deviceManagement,
+            serverStatus,
+            serverSettingsFactory,
+            null,
+            isSecondaryScreenVisible)
+    {
+    }
+
+    public MainViewModel(
+        MonitorViewModel monitor,
+        DeviceManagementViewModel deviceManagement,
+        ServerStatusViewModel serverStatus,
+        Func<ServerSettingsViewModel> serverSettingsFactory,
+        MediaSettingsViewModel? mediaSettings,
+        bool isSecondaryScreenVisible = false)
         : this(monitor, deviceManagement, isSecondaryScreenVisible)
     {
         this.serverStatus = serverStatus
             ?? throw new ArgumentNullException(nameof(serverStatus));
         this.serverSettingsFactory = serverSettingsFactory
             ?? throw new ArgumentNullException(nameof(serverSettingsFactory));
+        this.mediaSettings = mediaSettings;
     }
 
     public MonitorViewModel Monitor { get; }
@@ -47,6 +66,10 @@ public sealed class MainViewModel : ObservableObject
     public DeviceManagementViewModel DeviceManagement { get; }
 
     public ServerStatusViewModel? ServerStatus => serverStatus;
+
+    public MediaSettingsViewModel? MediaSettings => mediaSettings;
+
+    public bool IsMediaSettingsAvailable => mediaSettings is not null;
 
     public bool IsCentralServerUiAvailable =>
         serverStatus is not null && serverSettingsFactory is not null;

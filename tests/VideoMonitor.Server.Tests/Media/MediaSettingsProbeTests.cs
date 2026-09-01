@@ -40,7 +40,7 @@ public sealed class MediaSettingsProbeTests
     {
         var handler = new RecordingHandler
         {
-            ResponseBody = "{\"code\":401,\"msg\":\"bad secret\",\"data\":{}}"
+            ResponseBody = "{\"code\":-100,\"msg\":\"Incorrect secret\",\"data\":{}}"
         };
         var probe = new MediaSettingsProbe(
             new FakeMediaSettingsRepository(),
@@ -53,7 +53,28 @@ public sealed class MediaSettingsProbeTests
         Assert.Equal("AuthFailed", result.FailureCode);
         var serialized = JsonSerializer.Serialize(result);
         Assert.DoesNotContain("Wrong-Secret", serialized, StringComparison.Ordinal);
-        Assert.DoesNotContain("bad secret", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("Incorrect secret", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NonAuthenticationFailureDoesNotMapToAuthFailed()
+    {
+        var handler = new RecordingHandler
+        {
+            ResponseBody = "{\"code\":-300,\"msg\":\"server unavailable\",\"data\":{}}"
+        };
+        var probe = new MediaSettingsProbe(
+            new FakeMediaSettingsRepository(),
+            new FakeSecretProtector(),
+            () => handler);
+
+        var result = await probe.TestAsync(CreateRequest("Candidate-Secret"));
+
+        Assert.False(result.IsReachable);
+        Assert.Equal("MediaServerUnavailable", result.FailureCode);
+        var serialized = JsonSerializer.Serialize(result);
+        Assert.DoesNotContain("server unavailable", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("Candidate-Secret", serialized, StringComparison.Ordinal);
     }
 
     [Fact]

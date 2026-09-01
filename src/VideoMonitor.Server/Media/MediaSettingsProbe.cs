@@ -91,7 +91,7 @@ public sealed class MediaSettingsProbe : IMediaSettingsProbe
         && string.IsNullOrEmpty(uri.UserInfo);
 
     private static string MapFailure<T>(ZlmApiResponse<T> response) =>
-        response.Code is 400 or 401 or 403
+        response.Code is -100 or 401 or 403
             ? "AuthFailed"
             : "MediaServerUnavailable";
 
