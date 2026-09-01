@@ -18,6 +18,20 @@ public sealed class StreamTypeToTextConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+public sealed class MonitorGroupTypeToTextConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture) => value switch
+    {
+        MonitorGroupType.UnloadingStation => "卸矿站",
+        MonitorGroupType.Chute => "溜井",
+        MonitorGroupType.Tunnel => "巷道",
+        _ => "--"
+    };
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 public sealed class TransportModeToTextConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture) => value switch

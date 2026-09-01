@@ -12,6 +12,7 @@
         <converters:FirstChannelNoConverter x:Key="FirstChannelNoConverter" />
         <converters:FirstChannelStreamConverter x:Key="FirstChannelStreamConverter" />
         <converters:StreamTypeToTextConverter x:Key="StreamTypeTextConverter" />
+        <converters:MonitorGroupTypeToTextConverter x:Key="MonitorGroupTypeTextConverter" />
         <converters:TransportModeToTextConverter x:Key="TransportModeTextConverter" />
         <Storyboard x:Key="DrawerOpenStoryboard">
             <DoubleAnimation Storyboard.TargetName="DrawerTranslate" Storyboard.TargetProperty="X"
@@ -355,7 +356,13 @@
                                   Style="{StaticResource IndustrialComboBoxStyle}"
                                   ItemsSource="{Binding RootKindOptions}"
                                   SelectedItem="{Binding RootEditKind, Mode=TwoWay}"
-                                  IsEnabled="{Binding CanEditRootKind}" />
+                                  IsEnabled="{Binding CanEditRootKind}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Converter={StaticResource MonitorGroupTypeTextConverter}}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
                         <TextBlock Margin="0,8,0,0" Foreground="{StaticResource WarningOrangeBrush}"
                                    TextWrapping="Wrap" Text="{Binding RootEditError}" />
                         <StackPanel Margin="0,18,0,0" HorizontalAlignment="Right" Orientation="Horizontal">
@@ -592,8 +599,6 @@
                             <TextBlock Foreground="{StaticResource SecondaryTextBrush}" FontFamily="Consolas" FontSize="{StaticResource FontSizeCaption}"
                                        Text="{Binding EditDraft.RtspPreview}" TextWrapping="Wrap" />
                         </Border>
-                        <Button Height="34" Margin="0,10,0,0" IsEnabled="False" ToolTip="接入ZLMediaKit后启用"
-                                Style="{StaticResource SecondaryButtonStyle}" Content="测试拉流" />
                         <TextBlock Margin="0,10,0,0" Foreground="{StaticResource WarningOrangeBrush}"
                                    FontSize="{StaticResource FontSizeAuxiliary}" Text="{Binding ValidationMessage}" TextWrapping="Wrap" />
                         <TextBlock Margin="0,6,0,0" Foreground="{StaticResource WarningOrangeBrush}"
