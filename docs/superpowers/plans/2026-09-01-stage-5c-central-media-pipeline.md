@@ -32,10 +32,10 @@
 
 | Producer | Types made available | Consumers |
 | --- | --- | --- |
-| Task 1 | `MediaSettingsDto`, `UpdateMediaSettingsRequest`, `TestMediaSettingsRequest`, `IMediaSettingsRepository`, `IMediaSettingsService`, `MediaRuntimeSettings`, `IMediaRuntimeSettingsProvider` | Task 2, Task 3, Task 4, Task 7 |
-| Task 2 | `MediaStreamKey`, `MediaStreamNamespace`, `MediaStreamRequest`, `ResolvedCameraSource`, `ZlmMediaEvidence`, `IZlmMediaGateway`, `ICameraMediaCredentialReader`, `CameraMediaCredential`, `ICameraSourceResolver`, `SourceBindingResult` | Task 3, Task 5 |
+| Task 1 | `MediaSettingsDto`, `UpdateMediaSettingsRequest`, `TestMediaSettingsRequest`, `MediaSettingsTestResult`, `IMediaSettingsRepository`, `IMediaSettingsService`, `IMediaSettingsProbe`, `MediaSettingsProbe`, `MediaRuntimeSettings`, `IMediaRuntimeSettingsProvider` | Task 2, Task 3, Task 4, Task 7 |
+| Task 2 | `MediaStreamKey`, `MediaStreamNamespace`, `MediaStreamRequest`, `ResolvedCameraSource`, `ZlmMediaEvidence`, `ZlmServerHttpTransport`, `IZlmMediaGateway`, `ICameraMediaCredentialReader`, `CameraMediaCredential`, `ICameraSourceResolver`, `SourceBindingResult` | Task 3, Task 5 |
 | Task 3 | `IStreamManager`, `StreamEnsureResult`, `FormalStreamDescriptor`, `StreamOwnership`, `MediaServerHealth`, `StreamRuntimeState`, `SourceObservation`, `MediaRuntimeSnapshot`, complete observation fields, `IMediaObservationRecorder`, `IMediaReconcileContributor`, `IZlmHookTrustPolicy` | Task 4, Task 5, Task 6, Task 7 |
-| Task 4 | `PlaybackMediaIdentity`, `EnsurePlaybackStreamRequest`, `EnsurePlaybackStreamResponse`, `IPlaybackStreamService`, `IPlaybackSigningKeyProvider`, `IPlaybackTicketIssuer`, `IPlaybackTicketValidator`, `PlaybackTicket`, `PlaybackTicketValidationResult`, `PlaybackAuthorizationResult` | Task 5, Task 6 |
+| Task 4 | `PlaybackMediaIdentity`, `EnsurePlaybackStreamRequest`, `EnsurePlaybackStreamResponse`, `IPlaybackStreamService`, `IPlaybackSigningKeyProvider`, `IPlaybackTicketIssuer`, `IPlaybackTicketValidator`, `IPlaybackUrlBuilder`, `PlaybackUrlBuilder`, `PlaybackTicket`, `PlaybackTicketValidationResult` | Task 5, Task 6 |
 | Task 5 | `TestStreamStartRequest`, `CameraDeviceDraftDto`, `ResolvedTestCameraSource`, `TestStreamErrorCode`, `TestSessionDto`, `ITestCameraSourceResolver`, `ITestStreamProxyController`, `TestStreamProxyHandle`, `ITestStreamService`, `TestStreamApiClient`, `TestPreviewSource`, `TestStreamOrphanReconcileContributor` | Task 8 and existing WPF test-preview surface |
 | Task 6 | `IFormalPlaybackSourceProvider`, `FormalPlaybackSource`, `PlaybackRuntimeEvent`, `IPlaybackRuntimeEventSink`, `FormalPlaybackCoordinator` | Task 7 and acceptance |
 | Task 7 | `MediaDiagnosticsSnapshotDto`, `MediaStreamDiagnosticsDto`, `IMediaDiagnosticsReadModel` | WPF diagnostics and Task 8 |
@@ -80,6 +80,8 @@ The second scan is reviewed rather than blindly rejected: legitimate private fie
 - Create: `src/VideoMonitor.Infrastructure/Persistence/SqliteMediaSettingsRepository.cs` — transactional read/update implementation over the new `media_settings` singleton table.
 - Modify: `src/VideoMonitor.Infrastructure/Persistence/SqliteDatabaseInitializer.cs:CurrentSchemaVersion and migration methods` — add the next schema migration required by the approved design, preserving the existing V3 history and schema version discipline.
 - Create: `src/VideoMonitor.Server/Media/MediaSettingsService.cs` — validation, revision checks, secret-preservation semantics and non-persistent test operation.
+- Create: `src/VideoMonitor.Server/Media/IMediaSettingsProbe.cs` — candidate-only media configuration probe contract.
+- Create: `src/VideoMonitor.Server/Media/MediaSettingsProbe.cs` — validates candidate URLs/secret and calls only ZLM `getServerConfig` without saving or pulling a camera.
 - Create: `src/VideoMonitor.Server/Media/MediaSettingsEndpoints.cs` — `GET /api/v1/media/settings`, `PUT /api/v1/media/settings`, `POST /api/v1/media/settings/test`.
 - Modify: `src/VideoMonitor.Server/Program.cs` — register repository/service and map the media settings endpoints.
 - Create: `src/VideoMonitor.Wpf/Catalog/MediaSettingsApiClient.cs` — safe read/update/test client using the existing absolute HTTP/HTTPS and `CatalogApiException` conventions.
@@ -88,6 +90,7 @@ The second scan is reviewed rather than blindly rejected: legitimate private fie
 - Modify: `src/VideoMonitor.Wpf/Views/Pages/MediaView.xaml.cs` — only the required view hookup.
 - Test: `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteMediaSettingsRepositoryTests.cs`.
 - Test: `tests/VideoMonitor.Server.Tests/Media/MediaSettingsApiTests.cs`.
+- Test: `tests/VideoMonitor.Server.Tests/Media/MediaSettingsProbeTests.cs`.
 - Test: `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteMediaRuntimeSettingsProviderTests.cs`.
 - Test: `tests/VideoMonitor.Core.Tests/Catalog/MediaSettingsApiClientTests.cs`.
 - Test: `tests/VideoMonitor.Core.Tests/ViewModels/MediaSettingsViewModelTests.cs`.
@@ -95,7 +98,7 @@ The second scan is reviewed rather than blindly rejected: legitimate private fie
 **Interfaces**
 
 - Consumes: existing `SqliteConnectionFactory`, `IMasterKeyProvider`, `ISecretProtector`, `CatalogOperationResult<T>`, `CatalogApiException`, and `ServerReadinessState`.
-- Produces: `MediaSettingsDto`, `UpdateMediaSettingsRequest`, `TestMediaSettingsRequest`, `IMediaSettingsRepository`, `IMediaSettingsService`, `MediaRuntimeSettings`, and `IMediaRuntimeSettingsProvider`.
+- Produces: `MediaSettingsDto`, `UpdateMediaSettingsRequest`, `TestMediaSettingsRequest`, `MediaSettingsTestResult`, `IMediaSettingsRepository`, `IMediaSettingsService`, `IMediaSettingsProbe`, `MediaSettingsProbe`, `MediaRuntimeSettings`, and `IMediaRuntimeSettingsProvider`.
 
 Lock these signatures before implementation:
 
@@ -176,6 +179,13 @@ public interface IMediaSettingsService
         CancellationToken cancellationToken = default);
 }
 
+public interface IMediaSettingsProbe
+{
+    Task<MediaSettingsTestResult> TestAsync(
+        TestMediaSettingsRequest request,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed record MediaSettingsTestResult(
     bool IsReachable,
     string? FailureCode);
@@ -201,6 +211,8 @@ CREATE TABLE IF NOT EXISTS media_settings (
 
 The V3-to-V4 migration creates this table and inserts exactly one row: `id = 1`, `zlm_api_base_url = ''`, `playback_base_url = ''`, `vhost = '__defaultVhost__'`, `formal_app = 'videomonitor'`, `test_app = 'videomonitor-test'`, `zlm_secret_ciphertext = ''`, `no_reader_grace_seconds = 30`, and `revision = 1`. Empty URLs plus empty secret project to `Unconfigured`, not `ConfigurationError`; the runtime provider returns an empty runtime secret for this initial row without attempting to decrypt an empty ciphertext. `SqliteDatabaseInitializer.CurrentSchemaVersion` becomes exactly 4. Updating settings protects a replacement secret before the SQLite transaction, then updates all non-secret fields and increments `revision` only under `WHERE id = 1 AND revision = expectedRevision`; a null or blank edit secret binds the existing ciphertext unchanged. For a configured row, the runtime provider reads the protected value and calls `UnprotectAsync` with a dedicated media-settings purpose. Its plaintext result is consumed only by Server/Infrastructure services and is never injected into WPF.
 
+`MediaSettingsProbe.TestAsync` is the only implementation behind `POST /api/v1/media/settings/test`. It validates `ZlmApiBaseUrl` as an absolute HTTP/HTTPS URI, validates the candidate `PlaybackBaseUrl` as an absolute RTSP URI with a host and empty `UserInfo`, and rejects embedded playback credentials before any ZLM call. A non-blank request secret is the transient candidate; a null/blank request secret reads the current storage row and decrypts the saved ciphertext with the media-settings purpose only when `HasSecret` is true; with no saved secret it returns safe `ZLM_SECRET_REQUIRED`. It constructs one candidate-scoped `ZlmClient` over a no-URI-logging `SocketsHttpHandler`, passes the candidate base URL/secret/vhost/app values, and calls only `CheckServerAsync` (`getServerConfig`). It never calls `IMediaRuntimeSettingsProvider` as a substitute for the candidate, never calls `AddStreamProxyAsync`, never pulls a camera, never updates `media_settings`, never changes `ZlmSecretCiphertext`, and never increments `Revision`. `MediaSettingsService.TestAsync` delegates to this probe and returns only `MediaSettingsTestResult`.
+
 ### TDD steps
 
 - [ ] Add `SqliteDatabaseInitializerTests.V3DatabaseUpgradesToV4MediaSettings`, arrange a V3 database with existing groups/devices/channels, run `InitializeAsync`, and assert `MAX(schema_migrations.version) == 4`, one `media_settings` row with the exact initial values above, and unchanged Catalog counts.
@@ -217,9 +229,12 @@ The V3-to-V4 migration creates this table and inserts exactly one row: `id = 1`,
 - [ ] Run `dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~SqliteMediaSettingsRepositoryTests.NullOrBlankSecretPreservesExistingProtectedValue|FullyQualifiedName~SqliteMediaSettingsRepositoryTests.StaleRevisionDoesNotChangeSettings"`; expected RED is missing preserve/conflict behavior.
 - [ ] Add `SqliteMediaRuntimeSettingsProviderTests.GetDecryptsSavedCredentialOnlyAtRuntimeBoundary` and `SqliteMediaRuntimeSettingsProviderTests.EmptyInitialRowProjectsUnconfiguredWithoutDecrypt`; run `dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~SqliteMediaRuntimeSettingsProviderTests"`; expected RED identifies the missing provider and empty-initial-row behavior.
 - [ ] Implement `MediaRuntimeSettings` and `SqliteMediaRuntimeSettingsProvider.GetAsync` with this shape: `var stored = await repository.ReadStorageAsync(cancellationToken); var secret = await protector.UnprotectAsync(stored.ZlmSecretCiphertext, "media-settings:zlm-secret", cancellationToken); return new MediaRuntimeSettings(stored.ZlmApiBaseUrl, stored.PlaybackBaseUrl, stored.Vhost, stored.FormalApp, stored.TestApp, secret, stored.NoReaderGraceSeconds, stored.Revision);` The provider has no public DTO or retained secret field; for the exact empty initial row it returns the unconfigured runtime state without decrypting an empty ciphertext. Run the same focused provider test command and expect GREEN.
-- [ ] Add `MediaSettingsApiTests.GetNeverReturnsSecretOrCiphertext`, `MediaSettingsApiTests.PutUsesExpectedRevisionAndReturns409OnConflict`, `MediaSettingsApiTests.PostTestDoesNotPersistCandidate`, and `MediaSettingsApiTests.BlankEditSecretPreservesExistingSecret`; assert status codes and safe JSON fields, never secret values.
+- [ ] Add `MediaSettingsProbeTests.ValidCandidateCallsGetServerConfigWithoutPersisting`, `MediaSettingsProbeTests.InvalidSecretFailsSafely`, `MediaSettingsProbeTests.BlankCandidateSecretUsesSavedSecretWhenPresent`, `MediaSettingsProbeTests.BlankCandidateSecretWithoutSavedSecretFailsSafely`, and `MediaSettingsProbeTests.InvalidPlaybackBaseUrlFailsBeforeZlmCall`; use a fake handler to prove `getServerConfig` is called, `AddStreamProxyAsync` is never called, and candidate values never enter logs or the response.
+- [ ] Run `dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter "FullyQualifiedName~MediaSettingsProbeTests"`; expected RED identifies the absent candidate probe and validation boundary.
+- [ ] Implement `MediaSettingsProbe.TestAsync` with the exact candidate-secret selection, URL validation and `CheckServerAsync`-only behavior above; run the probe filter and expect GREEN.
+- [ ] Add `MediaSettingsApiTests.GetNeverReturnsSecretOrCiphertext`, `MediaSettingsApiTests.PutUsesExpectedRevisionAndReturns409OnConflict`, `MediaSettingsApiTests.PostTestDoesNotChangeRevisionOrCiphertext`, and `MediaSettingsApiTests.BlankEditSecretPreservesExistingSecret`; assert status codes and safe JSON fields, never secret values.
 - [ ] Run `dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter "FullyQualifiedName~MediaSettingsApiTests"`; expected RED is the absent endpoint/service behavior.
-- [ ] Implement service and endpoint mapping for `GET /api/v1/media/settings`, `PUT /api/v1/media/settings`, and `POST /api/v1/media/settings/test`; run the same command and expect GREEN.
+- [ ] Implement `MediaSettingsService.TestAsync` as a direct `IMediaSettingsProbe` call and map `GET /api/v1/media/settings`, `PUT /api/v1/media/settings`, and `POST /api/v1/media/settings/test`; run the same command and expect GREEN with no repository update from the test endpoint.
 - [ ] Add `MediaSettingsApiClientTests.GetAndPutUseVersionedMediaSettingsPaths` and `MediaSettingsViewModelTests.TestDoesNotSaveOrStartCamera`; assert safe WPF state and no camera API call.
 - [ ] Implement the WPF client/view using existing `CatalogApiException` mapping and safe state messages; run both focused client/view-model tests and expect GREEN.
 - [ ] Run focused Core and Server media-settings tests, then the full Core, Server and solution suites; build/rebuild and run the shared security/diff scans.
@@ -239,7 +254,7 @@ Assert.DoesNotContain("ZlmSecret", fixture.Serialize(result.Value));
 
 ### Acceptance
 
-The settings screen can read and validate media configuration, update only with the expected Revision, preserve a null/blank edit secret, replace a non-empty secret through protection, and run a candidate connectivity test without saving it. GET and all WPF read models contain no secret or ciphertext. Task 1 does not resolve or pull a camera.
+The settings screen can read and validate media configuration, update only with the expected Revision, preserve a null/blank edit secret, replace a non-empty secret through protection, and run a real candidate probe that calls ZLM `getServerConfig` without saving it or pulling a camera. GET and all WPF read models contain no secret or ciphertext. Task 1 does not resolve or pull a camera.
 
 ## Task 2 — Server Media Foundation
 
@@ -248,7 +263,8 @@ The settings screen can read and validate media configuration, update only with 
 - Create: `src/VideoMonitor.Core/Media/MediaStreamKey.cs` — immutable `DeviceId + ChannelId + StreamType` identity and deterministic formal stream ID input.
 - Create: `src/VideoMonitor.Server/Media/MediaStreamRequest.cs` — Server-internal request containing namespace, stream identity and source URI; no Core or public DTO exposes the source URI.
 - Create: `src/VideoMonitor.Infrastructure/ZLMediaKit/IZlmMediaGateway.cs` — gateway contract over existing ZLM calls.
-- Modify: `src/VideoMonitor.Infrastructure/ZLMediaKit/ZlmClient.cs` — implement the gateway and extend existing media calls; do not create a parallel HTTP client.
+- Create: `src/VideoMonitor.Infrastructure/ZLMediaKit/ZlmServerHttpTransport.cs` — one long-lived formal Server `HttpClient` backed by `SocketsHttpHandler`, with no URI-logging pipeline.
+- Modify: `src/VideoMonitor.Infrastructure/ZLMediaKit/ZlmClient.cs` — implement the gateway and extend existing media calls using the dedicated formal transport; preserve the existing constructor/path for SingleCameraTest.
 - Modify: `src/VideoMonitor.Infrastructure/ZLMediaKit/ZlmStreamInfo.cs` — deserialize `schema`, `vhost`, `app`, `stream`, `originType`, `originTypeStr`, `originUrl`, `createStamp`, `aliveSecond`, and `totalReaderCount`.
 - Create: `src/VideoMonitor.Infrastructure/ZLMediaKit/ZlmMediaEvidence.cs` — internal evidence record with the complete fields above.
 - Create: `src/VideoMonitor.Infrastructure/ZLMediaKit/MediaStreamIdGenerator.cs` — formal deterministic ID derived from `MediaStreamKey`, not names.
@@ -266,6 +282,7 @@ The settings screen can read and validate media configuration, update only with 
 - Test: `tests/VideoMonitor.Server.Tests/Media/CameraSourceResolverTests.cs`.
 - Test: `tests/VideoMonitor.Core.Tests/Infrastructure/SqliteCameraMediaCredentialReaderTests.cs`.
 - Test: `tests/VideoMonitor.Server.Tests/Media/SourceBindingVerifierTests.cs`.
+- Test: `tests/VideoMonitor.Server.Tests/Media/ZlmTransportSecurityTests.cs` — capture Server/Infrastructure logs while checking query-bearing control calls.
 - Test: `tests/VideoMonitor.Core.Tests/Infrastructure/HikvisionRtspUrlBuilderTests.cs` — extend existing URI tests.
 
 **Interfaces**
@@ -359,7 +376,25 @@ public interface ICameraSourceResolver
 public enum SourceBindingResult { Matched, Mismatch, InsufficientEvidence }
 ```
 
-`ZlmMediaEvidence.OriginUrl` is internal-only and credential-bearing. It may be used by `SourceBindingVerifier` and ownership proof, but it must never be part of a public DTO or diagnostic result. The Server-side `ZlmClient` construction receives `IMediaRuntimeSettingsProvider`, so its request URI uses the current runtime `ZlmApiBaseUrl`, `Vhost`, app and plaintext secret only inside the request scope; the existing `(HttpClient, ZlmOptions)` constructor remains for SingleCameraTest. URI construction must pass tests containing `@`, `%`, `#`, `&`, and `:` in credentials. Request failure messages and logs contain only safe categories and exception type names.
+`ZlmMediaEvidence.OriginUrl` is internal-only and credential-bearing. It may be used by `SourceBindingVerifier` and ownership proof, but it must never be part of a public DTO or diagnostic result. Formal Server composition creates exactly one long-lived `ZlmServerHttpTransport`:
+
+```csharp
+public sealed class ZlmServerHttpTransport : IDisposable
+{
+    public ZlmServerHttpTransport()
+    {
+        Client = new HttpClient(
+            new SocketsHttpHandler(),
+            disposeHandler: true);
+    }
+
+    public HttpClient Client { get; }
+
+    public void Dispose() => Client.Dispose();
+}
+```
+
+`Program.cs` registers this transport as a singleton and constructs the formal `ZlmClient`/`IZlmMediaGateway` with `transport.Client`; it does not route secret-bearing requests through a default `IHttpClientFactory` logging pipeline or create a second formal client. The formal client uses the current runtime `ZlmApiBaseUrl`, `Vhost`, app and plaintext secret only inside the request scope; the existing `(HttpClient, ZlmOptions)` constructor remains for SingleCameraTest. URI construction must pass tests containing `@`, `%`, `#`, `&`, and `:` in credentials. A request URI may exist transiently in memory because ZLM requires query parameters, but `RequestUri`/`RequestUri.ToString()` and any exception text containing it must never enter `ILogger`, structured logs, telemetry or diagnostic DTOs. Failure output keeps only the safe operation name, HTTP status, exception type and sanitized failure code.
 
 `SqliteCameraMediaCredentialReader` validates the `DeviceId`/`ChannelId` relation before decrypting `password_ciphertext` with the existing purpose `camera-password:{DeviceId:N}`. `CameraMediaCredential.Password` is consumed only by `CameraSourceResolver` to build one transient source URI and is not returned by any catalog, playback or diagnostic contract.
 
@@ -371,13 +406,16 @@ public enum SourceBindingResult { Matched, Mismatch, InsufficientEvidence }
 - [ ] Add `ZlmClientTests.GetMediaListParsesCompleteEvidenceWithoutLoggingOriginUrl` and extend the existing request test to assert encoded query values; use a fake HTTP handler and no real secret.
 - [ ] Run `dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~MediaStreamKeyTests|FullyQualifiedName~ZlmClientTests"`; expected RED is the absent `vm_` generator and complete evidence mapping.
 - [ ] Add `MediaStreamKey`, `MediaStreamNamespace`, `MediaStreamRequest`, and `ZlmMediaEvidence` with the exact signatures above; run the same filter and expect the key/evidence compile failures to become GREEN after the minimal implementation.
+- [ ] Add `ZlmTransportSecurityTests.AddStreamProxyDoesNotLogZlmSecret`, `ZlmTransportSecurityTests.AddStreamProxyDoesNotLogCameraSourceUri`, and `ZlmTransportSecurityTests.HttpFailureDoesNotExposeRequestUri`; use fake markers `fake-zlm-secret`, `fake-camera-password`, and `fake-camera-host`, let the fake handler inspect the actual encoded query, and capture Server/Infrastructure logs.
+- [ ] Run `dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter "FullyQualifiedName~ZlmTransportSecurityTests"`; expected RED identifies the absent dedicated transport/log-sanitization boundary.
+- [ ] Add `ZlmServerHttpTransport` with one long-lived `HttpClient(new SocketsHttpHandler())`, register that singleton for formal Server ZLM calls, and ensure `ZlmClient` never logs or propagates a complete secret-bearing `RequestUri`; run the transport security filter and expect GREEN while preserving the local SingleCameraTest constructor.
 - [ ] Add `HikvisionRtspUrlBuilderTests.SpecialCharactersRemainInUriComponents` for each of `@`, `%`, `#`, `&`, and `:` and assert only URI component round-trip, not a printed full credential URI.
 - [ ] Add `SqliteCameraMediaCredentialReaderTests.ReadDecryptsSavedCredentialInternally`, `SqliteCameraMediaCredentialReaderTests.WrongDeviceChannelRelationFailsSafely`, and `CameraSourceResolverTests.PublicCatalogReadRemainsPasswordSafe`; the first asserts the internal reader calls `UnprotectAsync`, the second asserts a safe failure before decryption, and the third asserts `GetDeviceAsync` has no password/ciphertext field.
 - [ ] Run `dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~HikvisionRtspUrlBuilderTests|FullyQualifiedName~SqliteCameraMediaCredentialReaderTests"`; expected RED is the absent credential reader and special-character coverage.
 - [ ] Implement `ICameraMediaCredentialReader.ReadAsync(Guid deviceId, Guid channelId, CancellationToken cancellationToken = default)` against the authoritative SQLite row, validate the channel belongs to the device, decrypt the saved credential only in this boundary, and run the focused filter expecting GREEN.
 - [ ] Add `CameraSourceResolverTests.ResolveUsesCredentialReaderAndRuntimeSettings` and `SourceBindingVerifierTests.ReturnsInsufficientEvidenceWhenOriginOrIdentityEvidenceIsMissing`; assert safe status values and verify no source URI is included in a failure.
 - [ ] Run `dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter "FullyQualifiedName~CameraSourceResolverTests|FullyQualifiedName~SourceBindingVerifierTests"`; expected RED is the absent resolver/verifier behavior.
-- [ ] Implement the smallest gateway extension, evidence mapping, `vm_` deterministic generator, resolver and verifier; make `ZlmClient` use `IMediaRuntimeSettingsProvider` for Server requests while preserving the local constructor.
+- [ ] Implement the smallest gateway extension, evidence mapping, `vm_` deterministic generator, resolver and verifier; make formal `ZlmClient` use `ZlmServerHttpTransport` plus `IMediaRuntimeSettingsProvider` for Server requests while preserving the local constructor and safe failure/logging rules.
 - [ ] Run `dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~MediaStreamKeyTests|FullyQualifiedName~ZlmClientTests|FullyQualifiedName~HikvisionRtspUrlBuilderTests|FullyQualifiedName~SqliteCameraMediaCredentialReaderTests"` and the Server media filter; confirm GREEN.
 - [ ] Run full Core, Server and solution tests, build/rebuild, the credential/log scan, `git diff --check`, and changed-file scan.
 - [ ] Commit on `review/stage-5c-task2-media-foundation` with `feat: add server media foundation`, push only that review branch, and stop for Sol review.
@@ -567,19 +605,21 @@ Concurrent callers for one key cannot create duplicate upstreams; unrelated keys
 - Create: `src/VideoMonitor.Infrastructure/Persistence/SqlitePlaybackSigningKeyProvider.cs` — protected durable key in the existing `server_settings` table.
 - Create: `src/VideoMonitor.Server/Playback/IPlaybackStreamService.cs` — formal stream ensure orchestration contract.
 - Create: `src/VideoMonitor.Server/Playback/PlaybackStreamService.cs` — Catalog validation, stream ensure, ticket issue and safe URL assembly.
-- Create: `src/VideoMonitor.Server/Playback/PlaybackAuthorizationResult.cs` — safe success/failure categories.
+- Create: `src/VideoMonitor.Server/Playback/IPlaybackUrlBuilder.cs` — namespace-neutral safe playback URL contract.
+- Create: `src/VideoMonitor.Server/Playback/PlaybackUrlBuilder.cs` — builds safe RTSP URLs from `PlaybackBaseUrl`, media identity and ticket only.
 - Create: `src/VideoMonitor.Server/Playback/PlaybackAuthorizationEndpoints.cs` — issue endpoint and ZLM `on-play` validation endpoint.
 - Modify: `src/VideoMonitor.Server/Program.cs` — register issuer, validator, key provider and map endpoints.
 - Test: `tests/VideoMonitor.Server.Tests/Playback/PlaybackTicketIssuerTests.cs`.
 - Test: `tests/VideoMonitor.Server.Tests/Playback/PlaybackTicketValidatorTests.cs`.
 - Test: `tests/VideoMonitor.Server.Tests/Playback/PlaybackAuthorizationTests.cs`.
+- Test: `tests/VideoMonitor.Server.Tests/Playback/PlaybackUrlBuilderTests.cs`.
 - Test: `tests/VideoMonitor.Core.Tests/Infrastructure/SqlitePlaybackSigningKeyProviderTests.cs`.
 - Test: `tests/VideoMonitor.Core.Tests/Playback/PlaybackContractTests.cs`.
 
 **Interfaces**
 
 - Consumes: Task 1 `IMediaRuntimeSettingsProvider`, Task 2 credential/source boundaries, Task 3 `IStreamManager`, `FormalStreamDescriptor`, and `IZlmHookTrustPolicy`, current-process machine protection, actual ZLM `vhost/app/stream` callback fields.
-- Produces: `PlaybackMediaIdentity`, `EnsurePlaybackStreamRequest`, `EnsurePlaybackStreamResponse`, `IPlaybackStreamService`, `IPlaybackSigningKeyProvider`, `IPlaybackTicketIssuer`, `IPlaybackTicketValidator`, `PlaybackTicket`, `PlaybackTicketValidationResult`, and `PlaybackAuthorizationResult`.
+- Produces: `PlaybackMediaIdentity`, `EnsurePlaybackStreamRequest`, `EnsurePlaybackStreamResponse`, `IPlaybackStreamService`, `IPlaybackSigningKeyProvider`, `IPlaybackTicketIssuer`, `IPlaybackTicketValidator`, `IPlaybackUrlBuilder`, `PlaybackUrlBuilder`, `PlaybackTicket`, and `PlaybackTicketValidationResult`.
 
 Lock these signatures:
 
@@ -604,6 +644,14 @@ public interface IPlaybackStreamService
 {
     Task<CatalogOperationResult<EnsurePlaybackStreamResponse>> EnsureAsync(
         EnsurePlaybackStreamRequest request,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IPlaybackUrlBuilder
+{
+    Task<Uri> BuildAsync(
+        PlaybackMediaIdentity media,
+        PlaybackTicket ticket,
         CancellationToken cancellationToken = default);
 }
 
@@ -640,14 +688,11 @@ public sealed record PlaybackTicket(
 public sealed record PlaybackTicketValidationResult(
     bool IsValid,
     string? FailureCode);
-
-public sealed record PlaybackAuthorizationResult(
-    bool IsSuccess,
-    Uri? PlaybackUrl,
-    string? FailureCode);
 ```
 
-`POST /api/v1/playback/streams/ensure` accepts only `EnsurePlaybackStreamRequest`. `PlaybackStreamService.EnsureAsync` executes this order: validate DeviceId/ChannelId/StreamType against the authoritative Catalog; obtain the Server-only `CameraMediaCredential`; build the `MediaStreamKey`; call Task 3 `IStreamManager.EnsureStreamAsync`; require `StreamRuntimeState.Ready`; convert the returned `FormalStreamDescriptor` to `new PlaybackMediaIdentity(stream.Vhost, stream.App, stream.Stream)`; issue a Task 4 ticket; build the playback URL from `PlaybackBaseUrl`; return `EnsurePlaybackStreamResponse`. WPF never sends camera source URL, camera password or ZLM Secret. Test Stream uses the same issuer with `new PlaybackMediaIdentity(configuredVhost, configuredTestApp, testStreamId)`; the issuer is neutral over Formal and Test namespaces.
+`POST /api/v1/playback/streams/ensure` accepts only `EnsurePlaybackStreamRequest`. `PlaybackStreamService.EnsureAsync` executes this exact order: validate DeviceId/ChannelId/StreamType against the authoritative Catalog; build the `MediaStreamKey`; call `ICameraSourceResolver.ResolveAsync(key)` so camera credentials remain behind `ICameraMediaCredentialReader`; obtain `IMediaRuntimeSettingsProvider.GetAsync()`; construct the exact Server-internal request `new MediaStreamRequest(MediaStreamNamespace.Formal, key, settings.Vhost, settings.FormalApp, MediaStreamIdGenerator.GenerateFormal(key), resolved.SourceUri)`; call `IStreamManager.EnsureStreamAsync(mediaRequest)`; require `StreamRuntimeState.Ready`; convert the returned `FormalStreamDescriptor` to `new PlaybackMediaIdentity(stream.Vhost, stream.App, stream.Stream)`; issue a Task 4 ticket; call `IPlaybackUrlBuilder.BuildAsync(media, ticket, cancellationToken)`; and return `EnsurePlaybackStreamResponse`. `PlaybackStreamService` never reads or decrypts camera passwords itself. WPF never sends camera source URL, camera password or ZLM Secret. Test Stream uses the same issuer with `new PlaybackMediaIdentity(configuredVhost, configuredTestApp, testStreamId)`; the issuer is neutral over Formal and Test namespaces.
+
+`PlaybackUrlBuilder` is the single URL producer for Formal and Test. It reads only `PlaybackBaseUrl` from `IMediaRuntimeSettingsProvider`, rejects a base URI that is not absolute RTSP, has no host, or contains `UserInfo`, and combines that base with the ticket-bound `App`/`Stream` path plus the ticket query. It never substitutes `ZlmApiBaseUrl`, accepts a camera source URI, emits camera credentials or ZLM Secret, preserves UserInfo, or adds an admin bypass parameter. `PlaybackStreamService` consumes it for Formal playback; `TestStreamService` consumes it for Test playback.
 
 The HMAC payload binds `Vhost`, `App`, `StreamId`, `ExpiresUtc`, and a random `Nonce`. The signing key is persisted under the existing `server_settings` key `playback.signing-key.v1`: first use creates 32 random bytes with `RandomNumberGenerator`, protects the Base64 value using `ISecretProtector.ProtectAsync(value, "playback-signing-key:v1", cancellationToken)`, and stores the protected envelope in one SQLite transaction; concurrent callers use a gate and re-read before insert. A restart reads and unprotects the same value. The key is separate from camera password and ZLM Secret, never returned by Media Settings GET, has no WPF UI, and is never logged. Ticket lifetime is a 60-second connection authorization window, not playback duration. Nonces are not stored for one-time consumption and no token table is added. Formal tickets bind `FormalApp`; test tickets bind `TestApp`.
 
@@ -664,9 +709,12 @@ The ZLM `on-play` endpoint is `POST /api/v1/media/hooks/on-play` and first appli
 - [ ] Add `PlaybackTicketValidatorTests.RejectsMissingMalformedBadSignatureExpiredAndMismatchedClaims`; assert each result is invalid and contains no secret material.
 - [ ] Run `dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter "FullyQualifiedName~PlaybackTicketValidatorTests"`; expected RED identifies missing fail-closed validation.
 - [ ] Implement constant-time signature and exact vhost/app/stream claim validation; run the validator filter and expect GREEN.
+- [ ] Add `PlaybackUrlBuilderTests.FormalUsesPlaybackBaseUrlFormalAppAndVmStream`, `PlaybackUrlBuilderTests.TestUsesPlaybackBaseUrlTestAppAndTestStream`, `PlaybackUrlBuilderTests.NeverUsesZlmApiBaseUrl`, `PlaybackUrlBuilderTests.RejectsPlaybackBaseUrlWithUserInfo`, and `PlaybackUrlBuilderTests.DoesNotContainCameraOrZlmCredentials`; use fake runtime settings/tickets and assert only safe RTSP URL components are emitted.
+- [ ] Run `dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter "FullyQualifiedName~PlaybackUrlBuilderTests"`; expected RED identifies the absent shared URL-builder contract.
+- [ ] Implement `IPlaybackUrlBuilder`/`PlaybackUrlBuilder` with the exact base-URI validation and safe composition above; run the URL-builder filter and expect GREEN.
 - [ ] Add `PlaybackAuthorizationTests.EnsureValidIdsReturnsSafePlaybackResponse`, `PlaybackAuthorizationTests.WrongDeviceChannelRelationIsRejected`, `PlaybackAuthorizationTests.WrongStreamTypeIsRejected`, `PlaybackAuthorizationTests.NotOwnedIdentityConflictIsSafe`, `PlaybackAuthorizationTests.ZlmUnavailableIsSafe`, `PlaybackAuthorizationTests.OnPlayRequiresExactVhostAppAndStream`, `PlaybackAuthorizationTests.OnPlayRejectsUntrustedCallerBeforeTicketValidation`, `PlaybackAuthorizationTests.FormalTicketCannotAuthorizeTest`, `PlaybackAuthorizationTests.TestTicketCannotAuthorizeFormal`, and `PlaybackAuthorizationTests.NoAdminBypassIsReturnedToClient`.
 - [ ] Run `dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter "FullyQualifiedName~PlaybackAuthorizationTests"`; expected RED identifies missing `POST /api/v1/playback/streams/ensure` and on-play mapping.
-- [ ] Implement `PlaybackStreamService.EnsureAsync` and map `CATALOG_VALIDATION_FAILED` to 400, missing identity to 404, `MediaStreamIdentityConflict` to 409, and media unavailability to 503. Add the `on-play` hook guard using `IZlmHookTrustPolicy` before exact ticket validation. Return no source URI, password, ZLM Secret or admin URL; run the authorization filter and expect GREEN.
+- [ ] Implement `PlaybackStreamService.EnsureAsync` with the exact Catalog → `MediaStreamKey` → `ICameraSourceResolver` → `ResolvedCameraSource` → `IMediaRuntimeSettingsProvider` → `MediaStreamRequest` → `IStreamManager` → Ready → ticket → `IPlaybackUrlBuilder` chain; map `CATALOG_VALIDATION_FAILED` to 400, missing identity to 404, `MediaStreamIdentityConflict` to 409, and media unavailability to 503. Add the `on-play` hook guard using `IZlmHookTrustPolicy` before exact ticket validation. Return no source URI, password, ZLM Secret or admin URL; run the authorization filter and expect GREEN.
 - [ ] Add `PlaybackContractsTests.EnsureRequestContainsOnlyIdsAndStreamType` and `PlaybackResponseTests.ResponseContainsOnlySafePlaybackFields` in `tests/VideoMonitor.Core.Tests/Playback/PlaybackContractTests.cs`; assert the client contract cannot carry a source URI or password.
 - [ ] Run `dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter "FullyQualifiedName~PlaybackTicketIssuerTests|FullyQualifiedName~PlaybackTicketValidatorTests|FullyQualifiedName~PlaybackAuthorizationTests"`; expected: all Task 4 focused Server tests PASS.
 - [ ] Run `dotnet test .\tests\VideoMonitor.Core.Tests\VideoMonitor.Core.Tests.csproj --filter "FullyQualifiedName~SqlitePlaybackSigningKeyProviderTests|FullyQualifiedName~PlaybackContractTests"`; expected: all Task 4 focused Core tests PASS.
@@ -733,7 +781,7 @@ Only a fresh Server-issued ticket for the exact configured vhost, app and stream
 
 **Interfaces**
 
-- Consumes: Task 2 `ICameraMediaCredentialReader`, `IZlmMediaGateway` and RTSP builder, Task 3 `IMediaObservationRecorder`, `IMediaReconcileContributor`, and `IZlmHookTrustPolicy`, Task 4 `IPlaybackTicketIssuer`/`PlaybackMediaIdentity` safety rules, existing `DeviceEditDraftViewModel`, `IPlaybackEngine`, and WPF cancellation patterns. It does not consume or fabricate a formal `MediaStreamKey`, and it does not call formal `IStreamManager`.
+- Consumes: Task 2 `ICameraMediaCredentialReader`, `IZlmMediaGateway` and RTSP builder, Task 3 `IMediaObservationRecorder`, `IMediaReconcileContributor`, and `IZlmHookTrustPolicy`, Task 4 `IPlaybackTicketIssuer`, `IPlaybackUrlBuilder`/`PlaybackMediaIdentity` safety rules, existing `DeviceEditDraftViewModel`, `IPlaybackEngine`, and WPF cancellation patterns. It does not consume or fabricate a formal `MediaStreamKey`, and it does not call formal `IStreamManager`.
 - Produces: `TestStreamStartRequest`, source-only `CameraDeviceDraftDto`, `ResolvedTestCameraSource`, `ITestCameraSourceResolver`, `ITestStreamProxyController`, `TestStreamProxyHandle`, `TestStreamErrorCode`, `TestSessionDto`, `ITestStreamService`, `TestStreamApiClient`, `TestPreviewSource`, and `TestStreamOrphanReconcileContributor`.
 
 Lock these signatures:
@@ -821,7 +869,7 @@ The service accepts a new unsaved draft, an existing device with unsaved edits, 
 
 `TestStreamProxyController` is the test-only proxy authority. It reads the configured Vhost/TestApp, generates a high-entropy random `test_<valid GUID>`, checks the exact identity before calling `addStreamProxy`, polls for registration, and retains the current-process ProxyKey in the `TestStreamProxyHandle`. It never calls formal `IStreamManager`, never creates a formal `MediaStreamKey`, and never applies formal restart-adoption reuse rules. If an exact identity collision is observed, it regenerates within a bounded count or fails safely; it never reuses, deletes or overwrites the collision. Stop and TTL cleanup use only the current-process handle.
 
-The session TTL is two minutes, independent of the 60-second playback ticket. Stop, editor close, device switch, application shutdown and TTL expiry all perform exact session cleanup. `TestStreamOrphanReconcileContributor` is registered in the shared `MediaReconcilerHostedService` through `IMediaReconcileContributor`; it lists the configured TestApp with `GetMediaListAsync(configuredVhost, configuredTestApp, null, cancellationToken)`, skips active session/current-process handles, and exact-closes only evidence proving configured Vhost, configured TestApp, exact valid `test_<GUID>`, pull/proxy-compatible origin and age greater than two minutes. It never closes a collision or evidence with a different Vhost/App/identity. Test preview uses a Server-issued ticket and shows a real Camera -> ZLM -> LibVLC image.
+The session TTL is two minutes, independent of the 60-second playback ticket. Stop, editor close, device switch, application shutdown and TTL expiry all perform exact session cleanup. `TestStreamOrphanReconcileContributor` is registered in the shared `MediaReconcilerHostedService` through `IMediaReconcileContributor`; it lists the configured TestApp with `GetMediaListAsync(configuredVhost, configuredTestApp, null, cancellationToken)`, skips active session/current-process handles, and exact-closes only evidence proving configured Vhost, configured TestApp, exact valid `test_<GUID>`, pull/proxy-compatible origin and age greater than two minutes. It never closes a collision or evidence with a different Vhost/App/identity. Test preview uses `TestStreamProxyHandle` -> `PlaybackMediaIdentity(configuredVhost, configuredTestApp, testStreamId)` -> `IPlaybackTicketIssuer` -> `IPlaybackUrlBuilder` -> `TestSessionDto.PlaybackUrl`, then shows a real Camera -> ZLM -> LibVLC image.
 
 `ITestCameraSourceResolver` is separate from Task 2 `ICameraSourceResolver`: it receives the source-only `CameraDeviceDraftDto` assembled from the current `DeviceEditDraftViewModel` fields `IpAddress`, `RtspPort`, `Username`, `Password`, `ChannelNo`, `StreamType` and `TransportMode`. For an existing device, blank `Password` selects the protected saved credential through `ICameraMediaCredentialReader`; a non-empty `Password` is a transient override. For a new device, the draft value, including empty password, is used directly. It returns `ResolvedTestCameraSource` with nullable existing IDs and no required formal key. The resulting source URI exists only during the test operation.
 
@@ -839,7 +887,7 @@ For an existing saved device/channel, `TestStreamService` records successful or 
 - [ ] Implement `TestStreamProxyController.StartAsync` as a bounded loop over a random `test_<GUID>`: read Vhost/TestApp, call `GetMediaListAsync(vhost, app, candidate)`, regenerate on any exact collision, call `AddStreamProxyAsync` only for an empty identity, poll evidence until registration, and retain only the current-process `ProxyKey` in the handle; run the proxy filter and expect GREEN.
 - [ ] Add `TestStreamServiceTests.NewDraftStartsWithoutCatalogWrite`, `TestStreamServiceTests.ExistingEditUsesSavedPasswordWhenDraftIsBlank`, `TestStreamServiceTests.SuccessfulExistingTestUpdatesObservedAtUtc`, `TestStreamServiceTests.FailedExistingTestUpdatesObservation`, `TestStreamServiceTests.NewDraftDoesNotCreateFormalObservation`, and `TestStreamServiceTests.EmptyNewPasswordIsAllowed`; assert existing saved identities use `IMediaObservationRecorder`, new drafts do not, and no Catalog repository write occurs.
 - [ ] Run `dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter "FullyQualifiedName~TestStreamServiceTests.NewDraftStartsWithoutCatalogWrite|FullyQualifiedName~TestStreamServiceTests.ExistingEditUsesSavedPasswordWhenDraftIsBlank|FullyQualifiedName~TestStreamServiceTests.SuccessfulExistingTestUpdatesObservedAtUtc|FullyQualifiedName~TestStreamServiceTests.FailedExistingTestUpdatesObservation|FullyQualifiedName~TestStreamServiceTests.NewDraftDoesNotCreateFormalObservation|FullyQualifiedName~TestStreamServiceTests.EmptyNewPasswordIsAllowed"`; expected RED identifies the service's missing resolver/proxy/observation orchestration.
-- [ ] Implement `TestStreamService.StartAsync` with `ResolvedTestCameraSource`, `ITestStreamProxyController`, `new PlaybackMediaIdentity(proxy.Vhost, proxy.App, proxy.StreamId)`, the Task 4 ticket issuer, nullable session IDs and a two-minute registry entry; call `IMediaObservationRecorder` only when both existing IDs are present and never call `IStreamManager`; run the service filter and expect GREEN.
+- [ ] Implement `TestStreamService.StartAsync` with `ResolvedTestCameraSource`, `ITestStreamProxyController`, `new PlaybackMediaIdentity(proxy.Vhost, proxy.App, proxy.StreamId)`, the Task 4 ticket issuer, `IPlaybackUrlBuilder.BuildAsync` for `TestSessionDto.PlaybackUrl`, nullable session IDs and a two-minute registry entry; call `IMediaObservationRecorder` only when both existing IDs are present and never call `IStreamManager`; run the service filter and expect GREEN.
 - [ ] Add `TestStreamServiceTests.MediaServerUnavailableIsMapped`, `TestStreamServiceTests.AuthFailedRequiresEvidence`, `TestStreamServiceTests.ConnectFailedIsSafeWithoutAuthEvidence`, `TestStreamServiceTests.MediaRegistrationTimeoutIsMapped`, and `TestStreamServiceTests.PlaybackPreparationFailedIsMapped`; assert each safe `TestStreamErrorCode` and absence of source URI/password in the result.
 - [ ] Run `dotnet test .\tests\VideoMonitor.Server.Tests\VideoMonitor.Server.Tests.csproj --filter "FullyQualifiedName~TestStreamServiceTests.MediaServerUnavailableIsMapped|FullyQualifiedName~TestStreamServiceTests.AuthFailedRequiresEvidence|FullyQualifiedName~TestStreamServiceTests.ConnectFailedIsSafeWithoutAuthEvidence|FullyQualifiedName~TestStreamServiceTests.MediaRegistrationTimeoutIsMapped|FullyQualifiedName~TestStreamServiceTests.PlaybackPreparationFailedIsMapped"`; expected RED identifies missing evidence-backed error mapping.
 - [ ] Implement the five required mappings, returning `AuthFailed` only when the source evidence proves authentication failure and otherwise `ConnectFailed`; run the error filter and expect GREEN.
@@ -1135,8 +1183,9 @@ For every Task 1–8:
 
 - [ ] Spec coverage: sections 1–9 are covered by Global Constraints and Tasks 1–2; sections 10–14 by Task 3; sections 15–16 by Task 4; sections 17–18 by Task 6; sections 19–22 by Tasks 3–5; section 23 by Task 7; section 24 by Task 8; sections 25–28 by this decomposition, review gate and verification strategy.
 - [ ] Placeholder scan: run the seven-token unresolved-plan scan required by the task against `docs/superpowers/plans/2026-09-01-stage-5c-central-media-pipeline.md`; it returns no matches.
-- [ ] Type consistency: Task 1 owns the runtime media-settings provider; Task 2 owns `MediaStreamKey`, `MediaStreamRequest`, `ResolvedCameraSource`, the gateway, camera credential reader, resolver and evidence; Task 3 consumes those boundaries and produces stream/ownership state; Task 4 consumes `FormalStreamDescriptor`, owns durable signing-key storage and produces the exact Ensure Playback contracts/tickets; Task 5 consumes the credential reader and ticket boundary, owns the draft-aware `ITestCameraSourceResolver` and `TestStreamErrorCode`, and produces TestSession contracts; Task 6 consumes the same `EnsurePlaybackStreamRequest`/`EnsurePlaybackStreamResponse` through its `PrepareAsync(Guid deviceId, Guid channelId, StreamType streamType, ...)` signature and produces formal WPF contracts; Task 7 consumes runtime state and produces diagnostics DTOs with complete observation fields.
+- [ ] Type consistency: Task 1 owns the media-settings repository, candidate `IMediaSettingsProbe`/`MediaSettingsProbe`, runtime provider and safe test result; Task 2 owns `MediaStreamKey`, `MediaStreamRequest`, `ResolvedCameraSource`, the dedicated formal ZLM transport, gateway, camera credential reader, resolver and evidence; Task 3 consumes those boundaries and produces stream/ownership state; Task 4 consumes `FormalStreamDescriptor`, owns durable signing-key storage and produces the exact Ensure Playback contracts, `IPlaybackUrlBuilder`/`PlaybackUrlBuilder` and tickets; Task 5 consumes the credential reader, ticket issuer and URL builder, owns the draft-aware `ITestCameraSourceResolver` and `TestStreamErrorCode`, and produces TestSession contracts; Task 6 consumes the same `EnsurePlaybackStreamRequest`/`EnsurePlaybackStreamResponse` through its `PrepareAsync(Guid deviceId, Guid channelId, StreamType streamType, ...)` signature and produces formal WPF contracts; Task 7 consumes runtime state and produces diagnostics DTOs with complete observation fields.
 - [ ] Review-fix boundary checks: Task 1 keeps the ZLM Secret inside `IMediaRuntimeSettingsProvider`; Task 2 keeps camera credential reads Server/Infrastructure-only; Task 4 persists the protected playback signing key and exposes `POST /api/v1/playback/streams/ensure`; Task 5 supports unsaved drafts without Catalog writes and maps the five required safe error categories; Task 3 uses the strict `vm_` namespace and observation timestamps; Task 6 release only disconnects the reader and never directly deletes a shared formal proxy.
 - [ ] Second-review checklist: new unsaved Test Stream uses `ResolvedTestCameraSource` without a fake formal key; `TestSessionDto` has nullable `DeviceId`/`ChannelId`; the draft DTO contains only real source fields; test proxy lifecycle is separate from formal `IStreamManager`; orphan cleanup is registered through `IMediaReconcileContributor`; saved test identities update observations while new drafts do not; `PlaybackMediaIdentity` supports Formal and Test; Ensure response permits safe RTSP; all hooks use loopback trust and the three exact paths; no stale bulk RED/implementation steps remain.
+- [ ] Final-review checklist: Task 1 candidate testing calls `getServerConfig` through `IMediaSettingsProbe` without persistence or camera pull; Task 4's Formal Ensure constructs `MediaStreamRequest` through `ICameraSourceResolver`; Formal and Test use `IPlaybackUrlBuilder`; the formal ZLM client uses a dedicated `SocketsHttpHandler` transport; transport tests prove secret/source/request URI markers never enter logs; no unused playback authorization result contract remains.
 - [ ] Safety consistency: no task persists runtime status, returns origin evidence, reintroduces JSON authority, bypasses tickets, lowers ownership proof, adds account/RBAC/JWT, or makes formal WPF depend on password-bearing `CameraDevice`.
 - [ ] Scope consistency: no design spec modification is included; this plan is the only file created by the documentation task; Task 8 is hardware acceptance and does not invent production implementation.
