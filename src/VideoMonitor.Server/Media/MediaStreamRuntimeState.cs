@@ -18,6 +18,8 @@ internal sealed class MediaStreamRuntimeState
 
     public DateTimeOffset? LastSuccessUtc { get; set; }
 
+    public DateTimeOffset? NoReaderSinceUtc { get; set; }
+
     public string? SafeLastErrorCode { get; set; }
 
     public string? SafeLastErrorMessage { get; set; }

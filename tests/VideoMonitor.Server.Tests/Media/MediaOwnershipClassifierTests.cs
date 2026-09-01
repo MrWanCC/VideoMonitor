@@ -68,6 +68,44 @@ public sealed class MediaOwnershipClassifierTests
         Assert.Equal(StreamOwnership.OwnedCurrentProcess, result);
     }
 
+    [Fact]
+    public void CurrentProcessOwnershipStillRequiresPullCompatibleEvidence()
+    {
+        var classifier = new MediaOwnershipClassifier(
+            "configured-vhost",
+            "videomonitor",
+            requestedKey => requestedKey == Key);
+
+        var result = classifier.Classify(
+            Evidence() with
+            {
+                OriginType = 1,
+                OriginTypeStr = "rtmp_push"
+            },
+            Key,
+            SourceBindingResult.Matched,
+            currentProcessOwnsProxy: true);
+
+        Assert.Equal(StreamOwnership.NotOwned, result);
+    }
+
+    [Fact]
+    public void CurrentProcessOwnershipStillRequiresCatalogIdentity()
+    {
+        var classifier = new MediaOwnershipClassifier(
+            "configured-vhost",
+            "videomonitor",
+            catalogIdentityExists: _ => false);
+
+        var result = classifier.Classify(
+            Evidence(),
+            Key,
+            SourceBindingResult.Matched,
+            currentProcessOwnsProxy: true);
+
+        Assert.Equal(StreamOwnership.NotOwned, result);
+    }
+
     private static ZlmMediaEvidence Evidence() => new(
         "rtsp",
         "configured-vhost",

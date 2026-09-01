@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using VideoMonitor.Core.Media;
 using VideoMonitor.Core.Models;
+using VideoMonitor.Infrastructure.Persistence;
 using VideoMonitor.Server.Media;
 using Microsoft.AspNetCore.Http;
 
@@ -69,6 +70,54 @@ public sealed class MediaHookTests
         await processor.StopAsync(CancellationToken.None);
     }
 
+    [Fact]
+    public async Task StreamChangedTriggersRecoveryReconcileOnlyAfterDequeue()
+    {
+        var initialReconcile = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var recoveryReconcile = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var reconcileCalls = 0;
+        var contributor = new DelegateContributor(_ =>
+        {
+            var call = Interlocked.Increment(ref reconcileCalls);
+            if (call == 1)
+            {
+                initialReconcile.TrySetResult(null);
+            }
+            else if (call == 2)
+            {
+                recoveryReconcile.TrySetResult(null);
+            }
+
+            return Task.CompletedTask;
+        });
+        var reconcile = new MediaReconcilerHostedService(
+            new[] { contributor },
+            new MediaServerHealthState(),
+            new FakeRuntimeSettingsProvider(),
+            (_, token) => Task.Delay(Timeout.InfiniteTimeSpan, token));
+        var manager = new FakeStreamManager();
+        using var processor = new MediaEventProcessor(manager, reconcile);
+
+        await reconcile.StartAsync(CancellationToken.None);
+        await initialReconcile.Task;
+        await processor.StartAsync(CancellationToken.None);
+
+        var status = await SendAsync(processor, "on-stream-changed", IPAddress.Loopback);
+        var recoveryWasTriggered =
+            await Task.WhenAny(recoveryReconcile.Task, Task.Delay(TimeSpan.FromSeconds(1)))
+            == recoveryReconcile.Task;
+
+        await processor.StopAsync(CancellationToken.None);
+        await reconcile.StopAsync(CancellationToken.None);
+
+        Assert.Equal(StatusCodes.Status202Accepted, status);
+        Assert.True(recoveryWasTriggered);
+        Assert.Equal(2, reconcileCalls);
+        Assert.False(manager.CleanupCalled.Task.IsCompleted);
+    }
+
     private static async Task<int> SendAsync(
         MediaEventProcessor processor,
         string routeKind,
@@ -113,5 +162,33 @@ public sealed class MediaHookTests
 
         public MediaRuntimeSnapshot GetSnapshot() =>
             new(MediaServerHealth.Healthy, Array.Empty<MediaStreamRuntimeInfo>());
+    }
+
+    private sealed class DelegateContributor : IMediaReconcileContributor
+    {
+        private readonly Func<CancellationToken, Task> action;
+
+        public DelegateContributor(Func<CancellationToken, Task> action)
+        {
+            this.action = action;
+        }
+
+        public Task ReconcileAsync(CancellationToken cancellationToken = default) =>
+            action(cancellationToken);
+    }
+
+    private sealed class FakeRuntimeSettingsProvider : IMediaRuntimeSettingsProvider
+    {
+        public Task<MediaRuntimeSettings> GetAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new MediaRuntimeSettings(
+                "http://127.0.0.1:8080",
+                "",
+                "configured-vhost",
+                "videomonitor",
+                "videomonitor-test",
+                "",
+                30,
+                1));
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using VideoMonitor.Core.Media;
 using VideoMonitor.Infrastructure.Persistence;
 using VideoMonitor.Infrastructure.ZLMediaKit;
@@ -11,6 +12,8 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
     private const string SourceResolutionCode = "MEDIA_SOURCE_RESOLUTION_FAILED";
     private const string ServerUnavailableCode = "MEDIA_SERVER_UNAVAILABLE";
     private const string ServerUnconfiguredCode = "MEDIA_SERVER_UNCONFIGURED";
+    private const string ScopeInvalidCode = "MEDIA_STREAM_SCOPE_INVALID";
+    private const string CleanupFailedCode = "MEDIA_STREAM_CLEANUP_FAILED";
 
     private readonly IZlmMediaGateway gateway;
     private readonly ICameraSourceResolver sourceResolver;
@@ -83,6 +86,12 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
         if (string.IsNullOrWhiteSpace(settings.ZlmApiBaseUrl))
         {
             return Fail(key, MediaServerHealth.Unconfigured, SourceObservation.Unknown, ServerUnconfiguredCode);
+        }
+
+        if (!string.Equals(request.Vhost, settings.Vhost, StringComparison.Ordinal)
+            || !string.Equals(request.App, settings.FormalApp, StringComparison.Ordinal))
+        {
+            return Fail(key, MediaServerHealth.Healthy, SourceObservation.Unknown, ScopeInvalidCode);
         }
 
         SetServerHealth(MediaServerHealth.Healthy);
@@ -173,13 +182,19 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
             var binding = sourceBindingVerifier.Verify(registered, resolvedSource);
             if (binding != SourceBindingResult.Matched)
             {
-                await DeleteCurrentProxyQuietlyAsync(added.Data.Key, cancellationToken)
+                var cleanupSucceeded = await TryDeleteCurrentProxyAsync(added.Data.Key, cancellationToken)
                     .ConfigureAwait(false);
-                return Fail(
+                var result = Fail(
                     key,
                     MediaServerHealth.Healthy,
                     SourceObservation.ConnectFailed,
-                    IdentityConflictCode);
+                    cleanupSucceeded ? IdentityConflictCode : CleanupFailedCode);
+                if (cleanupSucceeded)
+                {
+                    runtimeRegistry.MarkIdle(key, utcNow());
+                }
+
+                return result;
             }
 
             runtimeRegistry.MarkReady(
@@ -190,9 +205,19 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
             return Success(request, key);
         }
 
-        await DeleteCurrentProxyQuietlyAsync(added.Data.Key, cancellationToken)
+        var timeoutCleanupSucceeded = await TryDeleteCurrentProxyAsync(added.Data.Key, cancellationToken)
             .ConfigureAwait(false);
-        return Fail(key, MediaServerHealth.Healthy, SourceObservation.ConnectFailed, NotRegisteredCode);
+        var timeoutResult = Fail(
+            key,
+            MediaServerHealth.Healthy,
+            SourceObservation.ConnectFailed,
+            timeoutCleanupSucceeded ? NotRegisteredCode : CleanupFailedCode);
+        if (timeoutCleanupSucceeded)
+        {
+            runtimeRegistry.MarkIdle(key, utcNow());
+        }
+
+        return timeoutResult;
     }
 
     public async Task CleanupOwnedStreamIfEligibleAsync(
@@ -277,20 +302,34 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
         if (ownership == StreamOwnership.OwnedCurrentProcess
             && !string.IsNullOrWhiteSpace(proxyKey))
         {
-            await DeleteCurrentProxyQuietlyAsync(proxyKey, cancellationToken)
+            var deleted = await TryDeleteCurrentProxyAsync(proxyKey, cancellationToken)
                 .ConfigureAwait(false);
-            runtimeRegistry.MarkIdle(key, utcNow());
+            if (deleted)
+            {
+                runtimeRegistry.MarkIdle(key, utcNow());
+            }
+            else
+            {
+                MarkCleanupFailed(key);
+            }
         }
         else if (ownership == StreamOwnership.OwnedAdopted)
         {
-            await gateway.CloseExactStreamAsync(
+            var closed = await TryCloseExactStreamAsync(
                     evidence.Schema,
                     evidence.Vhost,
                     evidence.App,
                     evidence.Stream,
                     cancellationToken)
                 .ConfigureAwait(false);
-            runtimeRegistry.MarkIdle(key, utcNow());
+            if (closed)
+            {
+                runtimeRegistry.MarkIdle(key, utcNow());
+            }
+            else
+            {
+                MarkCleanupFailed(key);
+            }
         }
     }
 
@@ -335,6 +374,10 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
         var classifier = ownershipClassifier.ForConfiguration(
             settings.Vhost,
             settings.FormalApp);
+        var observedKeys = new HashSet<MediaStreamKey>();
+        var cleanupCandidates = new List<MediaStreamKey>();
+        var observedAtUtc = utcNow();
+        var noReaderGrace = TimeSpan.FromSeconds(Math.Max(0, settings.NoReaderGraceSeconds));
         foreach (var evidence in response.Data ?? Array.Empty<ZlmMediaEvidence>())
         {
             if (!MediaStreamIdGenerator.TryParseFormal(evidence.Stream, out var key)
@@ -344,6 +387,8 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
             {
                 continue;
             }
+
+            observedKeys.Add(key);
 
             try
             {
@@ -362,7 +407,7 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
                         key,
                         ownership,
                         evidence.TotalReaderCount,
-                        utcNow());
+                        observedAtUtc);
                 }
                 else if (ownership == StreamOwnership.OwnedCurrentProcess)
                 {
@@ -370,7 +415,25 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
                         key,
                         ownership,
                         evidence.TotalReaderCount,
-                        utcNow());
+                        observedAtUtc);
+                }
+
+                if (ownership is StreamOwnership.OwnedAdopted or StreamOwnership.OwnedCurrentProcess)
+                {
+                    if (evidence.TotalReaderCount == 0)
+                    {
+                        var noReaderSince = runtimeRegistry.MarkNoReaderSince(
+                            key,
+                            observedAtUtc);
+                        if (observedAtUtc - noReaderSince >= noReaderGrace)
+                        {
+                            cleanupCandidates.Add(key);
+                        }
+                    }
+                    else
+                    {
+                        runtimeRegistry.ClearNoReaderSince(key);
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -381,6 +444,21 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
             {
                 // An unprovable stream remains outside the managed runtime state.
             }
+        }
+
+        foreach (var runtime in runtimeRegistry.GetSnapshot().Streams)
+        {
+            if (runtime.RuntimeState == StreamRuntimeState.Ready
+                && !observedKeys.Contains(runtime.Key))
+            {
+                runtimeRegistry.MarkIdle(runtime.Key, observedAtUtc);
+            }
+        }
+
+        foreach (var key in cleanupCandidates.Distinct())
+        {
+            await CleanupOwnedStreamIfEligibleAsync(key, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
@@ -417,14 +495,15 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
         return Failure(IdentityConflictCode);
     }
 
-    private async Task DeleteCurrentProxyQuietlyAsync(
+    private async Task<bool> TryDeleteCurrentProxyAsync(
         string proxyKey,
         CancellationToken cancellationToken)
     {
         try
         {
-            await gateway.DeleteStreamProxyAsync(proxyKey, cancellationToken)
+            var response = await gateway.DeleteStreamProxyAsync(proxyKey, cancellationToken)
                 .ConfigureAwait(false);
+            return response.IsSuccess && response.Data?.Flag == true;
         }
         catch (OperationCanceledException)
         {
@@ -432,9 +511,45 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
         }
         catch
         {
-            // Cleanup failure is reflected by the original safe setup failure.
+            return false;
         }
     }
+
+    private async Task<bool> TryCloseExactStreamAsync(
+        string schema,
+        string vhost,
+        string app,
+        string stream,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await gateway.CloseExactStreamAsync(
+                    schema,
+                    vhost,
+                    app,
+                    stream,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return response.IsSuccess;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void MarkCleanupFailed(MediaStreamKey key) =>
+        runtimeRegistry.MarkFaulted(
+            key,
+            SourceObservation.Unknown,
+            CleanupFailedCode,
+            CleanupFailedCode,
+            utcNow());
 
     private static ZlmMediaEvidence? FindExact(
         IReadOnlyList<ZlmMediaEvidence>? evidence,

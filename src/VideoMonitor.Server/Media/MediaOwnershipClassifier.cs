@@ -46,17 +46,16 @@ public sealed class MediaOwnershipClassifier
                 : StreamOwnership.External;
         }
 
-        if (currentProcessOwnsProxy
-            && binding == SourceBindingResult.Matched)
-        {
-            return StreamOwnership.OwnedCurrentProcess;
-        }
-
         if (!catalogIdentityExists(key)
             || !IsPullOrProxyCompatible(evidence)
             || binding != SourceBindingResult.Matched)
         {
             return StreamOwnership.NotOwned;
+        }
+
+        if (currentProcessOwnsProxy)
+        {
+            return StreamOwnership.OwnedCurrentProcess;
         }
 
         return StreamOwnership.OwnedAdopted;

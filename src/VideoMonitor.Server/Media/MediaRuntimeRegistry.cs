@@ -87,6 +87,7 @@ public sealed class MediaRuntimeRegistry : IMediaRuntimeStore, IMediaObservation
             var state = GetOrCreate(key);
             state.RuntimeState = StreamRuntimeState.Starting;
             state.StartedAtUtc = startedAtUtc;
+            state.NoReaderSinceUtc = null;
             state.SafeLastErrorCode = null;
             state.SafeLastErrorMessage = null;
         }
@@ -105,6 +106,10 @@ public sealed class MediaRuntimeRegistry : IMediaRuntimeStore, IMediaObservation
             state.SourceObservation = SourceObservation.Reachable;
             state.ViewerCount = new ViewerCount(readerCount);
             state.Ownership = ownership;
+            if (readerCount > 0)
+            {
+                state.NoReaderSinceUtc = null;
+            }
             state.ObservedAtUtc = observedAtUtc;
             state.LastSuccessUtc = observedAtUtc;
             state.SafeLastErrorCode = null;
@@ -152,6 +157,29 @@ public sealed class MediaRuntimeRegistry : IMediaRuntimeStore, IMediaObservation
         }
     }
 
+    internal DateTimeOffset MarkNoReaderSince(
+        MediaStreamKey key,
+        DateTimeOffset observedAtUtc)
+    {
+        lock (sync)
+        {
+            var state = GetOrCreate(key);
+            state.NoReaderSinceUtc ??= observedAtUtc;
+            return state.NoReaderSinceUtc.Value;
+        }
+    }
+
+    internal void ClearNoReaderSince(MediaStreamKey key)
+    {
+        lock (sync)
+        {
+            if (states.TryGetValue(key, out var state))
+            {
+                state.NoReaderSinceUtc = null;
+            }
+        }
+    }
+
     internal void MarkIdle(MediaStreamKey key, DateTimeOffset observedAtUtc)
     {
         lock (sync)
@@ -161,6 +189,7 @@ public sealed class MediaRuntimeRegistry : IMediaRuntimeStore, IMediaObservation
             state.Ownership = StreamOwnership.NotOwned;
             state.ProxyKey = null;
             state.ViewerCount = new ViewerCount(0);
+            state.NoReaderSinceUtc = null;
             state.ObservedAtUtc = observedAtUtc;
             state.SafeLastErrorCode = null;
             state.SafeLastErrorMessage = null;

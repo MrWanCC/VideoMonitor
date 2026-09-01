@@ -96,6 +96,12 @@ public sealed class MediaEventProcessor : IHostedService, IDisposable
     {
         await foreach (var mediaEvent in events.Reader.ReadAllAsync(cancellationToken))
         {
+            if (mediaEvent.Kind == MediaHookKind.StreamChanged)
+            {
+                reconciler?.TriggerRecovery();
+                continue;
+            }
+
             if (mediaEvent.Kind == MediaHookKind.NoneReader
                 && mediaEvent.Key is MediaStreamKey key)
             {
