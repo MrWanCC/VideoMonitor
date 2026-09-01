@@ -1040,8 +1040,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 catalog.DeleteGroup(group.Id);
                 if (SelectedGroup?.Id == group.Id)
                 {
-                    selectedGroup = Groups.FirstOrDefault(item => item.Name == "备用1" && item.ParentId is not null)
-                        ?? Groups.Where(item => item.ParentId is not null).OrderBy(item => item.Sort).FirstOrDefault();
+                    selectedGroup = SelectFirstLegacyChild();
                     OnPropertyChanged(nameof(SelectedGroup));
                 }
 
@@ -1171,6 +1170,13 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
         OnPropertyChanged(nameof(EditableGroups));
     }
+
+    private DeviceGroup? SelectFirstLegacyChild() => Groups
+        .Where(group => group.ParentId is not null)
+        .OrderBy(group => Groups.FirstOrDefault(root => root.Id == group.ParentId)?.Sort ?? int.MaxValue)
+        .ThenBy(group => group.Sort)
+        .ThenBy(group => group.Id)
+        .FirstOrDefault();
 
     private void AddDevice()
     {
@@ -1613,6 +1619,14 @@ public sealed class DeviceManagementViewModel : ObservableObject
                     IsSelected = group.Id == selectedCatalogGroup?.Id,
                     IsEditing = group.Id == EditingGroupId
                 });
+            if (editingCatalogGroupIsNew
+                && editingCatalogParentId == root.Id
+                && EditingGroupId is not null)
+            {
+                children = children.Append(
+                    DeviceGroupTreeItemViewModel.CreateCatalogChildDraft());
+            }
+
             GroupSections.Add(new DeviceGroupTreeItemViewModel(root, children));
         }
 
@@ -1881,8 +1895,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
         selectedGroup = selectedGroupId is { } id
             ? Groups.FirstOrDefault(group => group.Id == id)
             : null;
-        selectedGroup ??= Groups.FirstOrDefault(group => group.Name == "备用1" && group.ParentId is not null)
-            ?? Groups.Where(group => group.ParentId is not null).OrderBy(group => group.Sort).FirstOrDefault();
+        selectedGroup ??= SelectFirstLegacyChild();
         OnPropertyChanged(nameof(SelectedGroup));
         RebuildGroupSections();
         RefreshDevices();

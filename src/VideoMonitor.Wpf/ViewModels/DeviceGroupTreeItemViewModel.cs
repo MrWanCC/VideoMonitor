@@ -11,6 +11,13 @@ public sealed class DeviceGroupTreeItemViewModel : ObservableObject
     private bool isSelected;
     private bool isEditing;
 
+    private DeviceGroupTreeItemViewModel(bool isDraft)
+    {
+        IsDraft = isDraft;
+        Children = [];
+        IsEditing = true;
+    }
+
     public DeviceGroupTreeItemViewModel(
         DeviceGroup group,
         IEnumerable<DeviceGroupTreeItemViewModel>? children = null)
@@ -31,6 +38,11 @@ public sealed class DeviceGroupTreeItemViewModel : ObservableObject
 
     public DeviceGroupDto? CatalogGroup { get; }
 
+    public bool IsDraft { get; }
+
+    public static DeviceGroupTreeItemViewModel CreateCatalogChildDraft() =>
+        new(true);
+
     public object? ActiveGroup => CatalogGroup is not null
         ? CatalogGroup
         : Group;
@@ -39,9 +51,9 @@ public sealed class DeviceGroupTreeItemViewModel : ObservableObject
 
     public ObservableCollection<DeviceGroupTreeItemViewModel> Children { get; }
 
-    public bool IsRoot => CatalogGroup is not null
+    public bool IsRoot => !IsDraft && (CatalogGroup is not null
         ? CatalogGroup.ParentId is null
-        : Group?.ParentId is null;
+        : Group?.ParentId is null);
 
     public bool IsExpanded
     {

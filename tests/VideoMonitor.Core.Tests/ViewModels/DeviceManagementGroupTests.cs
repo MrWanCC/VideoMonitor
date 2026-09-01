@@ -419,6 +419,132 @@ public sealed class DeviceManagementGroupTests
     }
 
     [Fact]
+    public void CentralNewChildDraft_MaterializesEditableTreeItemWithoutAuthoritativeInsert()
+    {
+        var root = Root("Root");
+        var fixture = RootFixture.WithGroups(root);
+
+        fixture.ViewModel.BeginAddGroupCommand.Execute(root);
+
+        Assert.Empty(fixture.ViewModel.CatalogGroups.Where(group => group.ParentId == root.Id));
+        Assert.Equal(0, fixture.Commands.WriteCount);
+        Assert.True(fixture.ViewModel.HasUnsavedDraft);
+        var rootSection = fixture.ViewModel.GroupSections.Single(section => section.CatalogGroup?.Id == root.Id);
+        var draft = Assert.Single(rootSection.Children);
+        Assert.True(draft.IsDraft);
+        Assert.True(draft.IsEditing);
+        Assert.Null(draft.ActiveGroup);
+        Assert.Empty(draft.Name);
+        Assert.Empty(draft.Children);
+    }
+
+    [Fact]
+    public void CancelCentralNewChildDraft_RemovesProjectedEditorWithoutWrite()
+    {
+        var root = Root("Root");
+        var fixture = RootFixture.WithGroups(root);
+
+        fixture.ViewModel.BeginAddGroupCommand.Execute(root);
+        Assert.Single(fixture.ViewModel.GroupSections.Single().Children);
+
+        fixture.ViewModel.CancelGroupEditCommand.Execute(null);
+
+        Assert.Equal(0, fixture.Commands.WriteCount);
+        Assert.False(fixture.ViewModel.HasUnsavedDraft);
+        Assert.Empty(fixture.ViewModel.CatalogGroups.Where(group => group.ParentId == root.Id));
+        Assert.Empty(fixture.ViewModel.GroupSections.Single().Children);
+    }
+
+    [Fact]
+    public async Task SaveCentralNewChildDraft_UsesStableGuidAndRootParent()
+    {
+        var root = Root("Root");
+        var fixture = RootFixture.WithGroups(root);
+
+        fixture.ViewModel.BeginAddGroupCommand.Execute(root);
+        var draftId = fixture.ViewModel.EditingGroupId;
+        fixture.ViewModel.EditingGroupName = "401";
+
+        await fixture.ViewModel.CommitGroupEditCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, fixture.Commands.WriteCount);
+        Assert.Equal(draftId, fixture.Commands.LastCreateGroup!.Id);
+        Assert.Equal(root.Id, fixture.Commands.LastCreateGroup.ParentId);
+        Assert.Null(fixture.Commands.LastCreateGroup.Kind);
+        Assert.False(fixture.ViewModel.HasUnsavedDraft);
+    }
+
+    [Fact]
+    public void LegacyInitialSelection_DoesNotPreferReservedDisplayName()
+    {
+        var root = new DeviceGroup
+        {
+            Id = Guid.NewGuid(),
+            Name = "Root",
+            Sort = 0
+        };
+        var ordinary = new DeviceGroup
+        {
+            Id = Guid.NewGuid(),
+            Name = "普通分组",
+            ParentId = root.Id,
+            Sort = 1
+        };
+        var reserved = new DeviceGroup
+        {
+            Id = Guid.NewGuid(),
+            Name = "备用1",
+            ParentId = root.Id,
+            Sort = 99
+        };
+
+        var viewModel = new DeviceManagementViewModel(
+            new InMemoryDeviceCatalog([root, ordinary, reserved], []));
+
+        Assert.Equal(ordinary.Id, viewModel.SelectedGroup?.Id);
+    }
+
+    [Fact]
+    public async Task LegacyDeleteSelectedGroup_FallbackDoesNotPreferReservedDisplayName()
+    {
+        var root = new DeviceGroup
+        {
+            Id = Guid.NewGuid(),
+            Name = "Root",
+            Sort = 0
+        };
+        var target = new DeviceGroup
+        {
+            Id = Guid.NewGuid(),
+            Name = "待删除",
+            ParentId = root.Id,
+            Sort = 0
+        };
+        var ordinary = new DeviceGroup
+        {
+            Id = Guid.NewGuid(),
+            Name = "普通分组",
+            ParentId = root.Id,
+            Sort = 1
+        };
+        var reserved = new DeviceGroup
+        {
+            Id = Guid.NewGuid(),
+            Name = "备用1",
+            ParentId = root.Id,
+            Sort = 99
+        };
+        var viewModel = new DeviceManagementViewModel(
+            new InMemoryDeviceCatalog([root, target, ordinary, reserved], []));
+
+        viewModel.SelectGroupCommand.Execute(target);
+        viewModel.DeleteGroupCommand.Execute(target);
+        await viewModel.ConfirmDialogCommand.ExecuteAsync(null);
+
+        Assert.Equal(ordinary.Id, viewModel.SelectedGroup?.Id);
+    }
+
+    [Fact]
     public void RootDraft_DoesNotClearUnsavedDeviceDraft()
     {
         var root = Root("Root");
