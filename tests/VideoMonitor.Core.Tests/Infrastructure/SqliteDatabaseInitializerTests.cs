@@ -27,12 +27,13 @@ public sealed class SqliteDatabaseInitializerTests
                 "camera_channels",
                 "camera_devices",
                 "device_groups",
+                "media_settings",
                 "schema_migrations",
                 "server_settings"
             },
             tables);
 
-        Assert.Equal(3L, await ReadScalarAsync<long>(
+        Assert.Equal(4L, await ReadScalarAsync<long>(
             connection,
             "SELECT MAX(version) FROM schema_migrations;"));
 
@@ -61,7 +62,10 @@ public sealed class SqliteDatabaseInitializerTests
         Assert.Equal(1L, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM schema_migrations WHERE version = 3;"));
-        Assert.Equal(5, await ReadScalarAsync<long>(
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 4;"));
+        Assert.Equal(6, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';"));
     }
@@ -77,7 +81,7 @@ public sealed class SqliteDatabaseInitializerTests
         await using var connection = context.CreateConnection();
         await connection.OpenAsync();
 
-        Assert.Equal(3L, await ReadScalarAsync<long>(
+        Assert.Equal(4L, await ReadScalarAsync<long>(
             connection,
             "SELECT MAX(version) FROM schema_migrations;"));
         Assert.Equal("Legacy Group", await ReadScalarAsync<string>(
@@ -122,7 +126,81 @@ public sealed class SqliteDatabaseInitializerTests
         await context.CreateInitializer().InitializeAsync();
 
         Assert.Null(await context.ReadGroupKindAsync("现场自定义分类"));
-        Assert.Equal(3, await context.ReadMaxSchemaVersionAsync());
+        Assert.Equal(4, await context.ReadMaxSchemaVersionAsync());
+    }
+
+    [Fact]
+    public async Task V3DatabaseUpgradesToV4MediaSettings()
+    {
+        using var context = TestContext.Create();
+        await context.CreateV3DatabaseAsync();
+
+        await context.CreateInitializer().InitializeAsync();
+
+        await using var connection = context.CreateConnection();
+        await connection.OpenAsync();
+
+        Assert.Equal(4L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT MAX(version) FROM schema_migrations;"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM media_settings;"));
+        Assert.Equal(string.Empty, await ReadScalarAsync<string>(
+            connection,
+            "SELECT zlm_api_base_url FROM media_settings WHERE id = 1;"));
+        Assert.Equal(string.Empty, await ReadScalarAsync<string>(
+            connection,
+            "SELECT playback_base_url FROM media_settings WHERE id = 1;"));
+        Assert.Equal("__defaultVhost__", await ReadScalarAsync<string>(
+            connection,
+            "SELECT vhost FROM media_settings WHERE id = 1;"));
+        Assert.Equal("videomonitor", await ReadScalarAsync<string>(
+            connection,
+            "SELECT formal_app FROM media_settings WHERE id = 1;"));
+        Assert.Equal("videomonitor-test", await ReadScalarAsync<string>(
+            connection,
+            "SELECT test_app FROM media_settings WHERE id = 1;"));
+        Assert.Equal(string.Empty, await ReadScalarAsync<string>(
+            connection,
+            "SELECT zlm_secret_ciphertext FROM media_settings WHERE id = 1;"));
+        Assert.Equal(30L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT no_reader_grace_seconds FROM media_settings WHERE id = 1;"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT revision FROM media_settings WHERE id = 1;"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM device_groups;"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM camera_devices;"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM camera_channels;"));
+    }
+
+    [Fact]
+    public async Task V4InitializationIsIdempotent()
+    {
+        using var context = TestContext.Create();
+
+        await context.CreateInitializer().InitializeAsync();
+        await context.CreateInitializer().InitializeAsync();
+
+        await using var connection = context.CreateConnection();
+        await connection.OpenAsync();
+
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM media_settings WHERE id = 1;"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 4;"));
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT revision FROM media_settings WHERE id = 1;"));
     }
 
     [Fact]
@@ -196,7 +274,7 @@ public sealed class SqliteDatabaseInitializerTests
                     version INTEGER NOT NULL PRIMARY KEY,
                     applied_at_utc TEXT NOT NULL);
                 INSERT INTO schema_migrations (version, applied_at_utc)
-                VALUES (4, '2099-01-01T00:00:00.0000000+00:00');
+                VALUES (5, '2099-01-01T00:00:00.0000000+00:00');
                 """);
         }
 
@@ -207,7 +285,7 @@ public sealed class SqliteDatabaseInitializerTests
 
         await using var verifyConnection = context.CreateConnection();
         await verifyConnection.OpenAsync();
-        Assert.Equal(4L, await ReadScalarAsync<long>(
+        Assert.Equal(5L, await ReadScalarAsync<long>(
             verifyConnection,
             "SELECT MAX(version) FROM schema_migrations;"));
     }
@@ -234,7 +312,10 @@ public sealed class SqliteDatabaseInitializerTests
         Assert.Equal(1L, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM schema_migrations WHERE version = 3;"));
-        Assert.Equal(5L, await ReadScalarAsync<long>(
+        Assert.Equal(1L, await ReadScalarAsync<long>(
+            connection,
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 4;"));
+        Assert.Equal(6L, await ReadScalarAsync<long>(
             connection,
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';"));
     }
@@ -421,6 +502,34 @@ public sealed class SqliteDatabaseInitializerTests
 
                 INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc)
                 VALUES (2, $appliedAtUtc);
+                """;
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "$appliedAtUtc";
+            parameter.Value = DateTimeOffset.UtcNow.ToString("O");
+            command.Parameters.Add(parameter);
+            await command.ExecuteNonQueryAsync();
+            await transaction.CommitAsync();
+        }
+
+        public async Task CreateV3DatabaseAsync()
+        {
+            await CreateV2DatabaseAsync();
+            await using var connection = CreateConnection();
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                ALTER TABLE device_groups
+                ADD COLUMN group_kind TEXT NULL;
+
+                INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc)
+                VALUES (3, $appliedAtUtc);
+
+                INSERT INTO camera_channels (
+                    id, device_id, channel_no, channel_name, stream_type, enabled)
+                VALUES (
+                    'legacy-channel', 'legacy-device', 1, 'Main', 'Main', 1);
                 """;
             var parameter = command.CreateParameter();
             parameter.ParameterName = "$appliedAtUtc";

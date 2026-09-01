@@ -4,7 +4,7 @@ namespace VideoMonitor.Infrastructure.Persistence;
 
 public sealed class SqliteDatabaseInitializer
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     private static readonly SemaphoreSlim InitializationGate = new(1, 1);
 
@@ -84,6 +84,16 @@ public sealed class SqliteDatabaseInitializer
                     .ConfigureAwait(false);
 
                 await InsertV3MigrationAsync(connection, transaction, cancellationToken)
+                    .ConfigureAwait(false);
+                version = 3;
+            }
+
+            if (version < 4)
+            {
+                await ApplyV4SchemaAsync(connection, transaction, cancellationToken)
+                    .ConfigureAwait(false);
+
+                await InsertV4MigrationAsync(connection, transaction, cancellationToken)
                     .ConfigureAwait(false);
             }
 
@@ -247,6 +257,64 @@ public sealed class SqliteDatabaseInitializer
         command.CommandText = """
             INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc)
             VALUES (3, $appliedAtUtc);
+            """;
+        command.Parameters.AddWithValue(
+            "$appliedAtUtc",
+            DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task ApplyV4SchemaAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await ExecuteNonQueryAsync(connection, transaction, """
+            CREATE TABLE IF NOT EXISTS media_settings (
+                id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
+                zlm_api_base_url TEXT NOT NULL,
+                playback_base_url TEXT NOT NULL,
+                vhost TEXT NOT NULL,
+                formal_app TEXT NOT NULL,
+                test_app TEXT NOT NULL,
+                zlm_secret_ciphertext TEXT NOT NULL,
+                no_reader_grace_seconds INTEGER NOT NULL,
+                revision INTEGER NOT NULL
+            );
+
+            INSERT OR IGNORE INTO media_settings (
+                id,
+                zlm_api_base_url,
+                playback_base_url,
+                vhost,
+                formal_app,
+                test_app,
+                zlm_secret_ciphertext,
+                no_reader_grace_seconds,
+                revision)
+            VALUES (
+                1,
+                '',
+                '',
+                '__defaultVhost__',
+                'videomonitor',
+                'videomonitor-test',
+                '',
+                30,
+                1);
+            """, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task InsertV4MigrationAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc)
+            VALUES (4, $appliedAtUtc);
             """;
         command.Parameters.AddWithValue(
             "$appliedAtUtc",
