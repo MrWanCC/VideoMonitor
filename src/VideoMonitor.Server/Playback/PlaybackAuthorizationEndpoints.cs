@@ -124,12 +124,14 @@ public static class PlaybackAuthorizationEndpoints
         PlaybackTicketValidationResult validation;
         try
         {
-            validation = validator.Validate(
+            validation = await validator.ValidateAsync(
                 ticket,
                 payload.Vhost,
                 payload.App,
                 payload.Stream,
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                context.RequestAborted)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {

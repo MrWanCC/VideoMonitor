@@ -25,18 +25,18 @@ public sealed class PlaybackTicketValidatorTests
 
         var results = new[]
         {
-            validator.Validate(null, "vhost", "app", "stream", now),
-            validator.Validate("not-a-ticket", "vhost", "app", "stream", now),
-            validator.Validate(
+            await validator.ValidateAsync(null, "vhost", "app", "stream", now),
+            await validator.ValidateAsync("not-a-ticket", "vhost", "app", "stream", now),
+            await validator.ValidateAsync(
                 ReplaceSignature(ticket.Value),
                 "vhost",
                 "app",
                 "stream",
                 now),
-            validator.Validate(expired.Value, "vhost", "app", "stream", now),
-            validator.Validate(ticket.Value, "other-vhost", "app", "stream", now),
-            validator.Validate(ticket.Value, "vhost", "other-app", "stream", now),
-            validator.Validate(ticket.Value, "vhost", "app", "other-stream", now)
+            await validator.ValidateAsync(expired.Value, "vhost", "app", "stream", now),
+            await validator.ValidateAsync(ticket.Value, "other-vhost", "app", "stream", now),
+            await validator.ValidateAsync(ticket.Value, "vhost", "other-app", "stream", now),
+            await validator.ValidateAsync(ticket.Value, "vhost", "app", "other-stream", now)
         };
 
         Assert.All(results, result => Assert.False(result.IsValid));
@@ -51,8 +51,8 @@ public sealed class PlaybackTicketValidatorTests
     public async Task FormalTicketCannotAuthorizeTest()
     {
         var ticket = await CreateTicketAsync("videomonitor", "formal-stream");
-        var result = new PlaybackTicketValidator(
-            new FixedSigningKeyProvider(GetKey())).Validate(
+        var result = await new PlaybackTicketValidator(
+            new FixedSigningKeyProvider(GetKey())).ValidateAsync(
             ticket.Value,
             "__defaultVhost__",
             "videomonitor-test",
@@ -66,13 +66,64 @@ public sealed class PlaybackTicketValidatorTests
     public async Task TestTicketCannotAuthorizeFormal()
     {
         var ticket = await CreateTicketAsync("videomonitor-test", "test_stream");
-        var result = new PlaybackTicketValidator(
-            new FixedSigningKeyProvider(GetKey())).Validate(
+        var result = await new PlaybackTicketValidator(
+            new FixedSigningKeyProvider(GetKey())).ValidateAsync(
             ticket.Value,
             "__defaultVhost__",
             "videomonitor",
             "test_stream",
             DateTimeOffset.UtcNow);
+
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public async Task ValidateAsyncDoesNotUseSynchronousBlocking()
+    {
+        var now = DateTimeOffset.Parse("2026-09-01T12:00:00Z");
+        var key = GetKey();
+        var ticket = await new PlaybackTicketIssuer(
+                new FixedSigningKeyProvider(key),
+                () => now)
+            .IssueAsync(new PlaybackMediaIdentity("vhost", "app", "stream"));
+        var keyReady = new TaskCompletionSource<byte[]>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var validator = new PlaybackTicketValidator(
+            new DeferredSigningKeyProvider(keyReady.Task));
+
+        var pending = validator.ValidateAsync(
+            ticket.Value,
+            "vhost",
+            "app",
+            "stream",
+            now);
+
+        Assert.False(pending.IsCompleted);
+
+        keyReady.SetResult((byte[])key.Clone());
+        var result = await pending;
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public async Task RejectsAtExactExpiryBoundary()
+    {
+        var issuedAt = DateTimeOffset.Parse("2026-09-01T12:00:00Z");
+        var key = GetKey();
+        var ticket = await new PlaybackTicketIssuer(
+                new FixedSigningKeyProvider(key),
+                () => issuedAt)
+            .IssueAsync(new PlaybackMediaIdentity("vhost", "app", "stream"));
+
+        var result = await new PlaybackTicketValidator(
+                new FixedSigningKeyProvider(key))
+            .ValidateAsync(
+                ticket.Value,
+                "vhost",
+                "app",
+                "stream",
+                issuedAt.AddMinutes(1));
 
         Assert.False(result.IsValid);
     }
@@ -107,5 +158,16 @@ public sealed class PlaybackTicketValidatorTests
         public Task<byte[]> GetOrCreateAsync(
             CancellationToken cancellationToken = default) =>
             Task.FromResult((byte[])key.Clone());
+    }
+
+    private sealed class DeferredSigningKeyProvider : IPlaybackSigningKeyProvider
+    {
+        private readonly Task<byte[]> keyTask;
+
+        public DeferredSigningKeyProvider(Task<byte[]> keyTask) =>
+            this.keyTask = keyTask;
+
+        public Task<byte[]> GetOrCreateAsync(
+            CancellationToken cancellationToken = default) => keyTask;
     }
 }

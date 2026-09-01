@@ -6,12 +6,13 @@ namespace VideoMonitor.Server.Playback;
 
 public interface IPlaybackTicketValidator
 {
-    PlaybackTicketValidationResult Validate(
+    Task<PlaybackTicketValidationResult> ValidateAsync(
         string? encodedTicket,
         string actualVhost,
         string actualApp,
         string actualStream,
-        DateTimeOffset now);
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class PlaybackTicketValidator :
@@ -26,12 +27,13 @@ public sealed class PlaybackTicketValidator :
             ?? throw new ArgumentNullException(nameof(signingKeyProvider));
     }
 
-    public PlaybackTicketValidationResult Validate(
+    public async Task<PlaybackTicketValidationResult> ValidateAsync(
         string? encodedTicket,
         string actualVhost,
         string actualApp,
         string actualStream,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(encodedTicket))
         {
@@ -41,11 +43,13 @@ public sealed class PlaybackTicketValidator :
         byte[] key;
         try
         {
-            key = signingKeyProvider
-                .GetOrCreateAsync(CancellationToken.None)
-                .ConfigureAwait(false)
-                .GetAwaiter()
-                .GetResult();
+            key = await signingKeyProvider
+                .GetOrCreateAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -150,7 +154,7 @@ public sealed class PlaybackTicketValidator :
             return Invalid(InvalidCode);
         }
 
-        return now > expiresUtc
+        return now >= expiresUtc
             ? Invalid(InvalidCode)
             : new PlaybackTicketValidationResult(true, null);
     }
