@@ -6,6 +6,7 @@ using VideoMonitor.Infrastructure.ZLMediaKit;
 using VideoMonitor.Server.Catalog;
 using VideoMonitor.Server.Hosting;
 using VideoMonitor.Server.Media;
+using VideoMonitor.Server.Playback;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -73,6 +74,15 @@ builder.Services.AddSingleton<CatalogApplicationService>();
 builder.Services.AddSingleton<IMediaSettingsProbe, MediaSettingsProbe>();
 builder.Services.AddSingleton<IMediaSettingsService, MediaSettingsService>();
 builder.Services.AddSingleton<ISqliteBackupService, SqliteBackupService>();
+builder.Services.AddSingleton<
+    IPlaybackSigningKeyProvider,
+    SqlitePlaybackSigningKeyProvider>();
+builder.Services.AddSingleton<IPlaybackTicketIssuer, PlaybackTicketIssuer>();
+builder.Services.AddSingleton<PlaybackTicketValidator>();
+builder.Services.AddSingleton<IPlaybackTicketValidator>(serviceProvider =>
+    serviceProvider.GetRequiredService<PlaybackTicketValidator>());
+builder.Services.AddSingleton<IPlaybackUrlBuilder, PlaybackUrlBuilder>();
+builder.Services.AddSingleton<IPlaybackStreamService, PlaybackStreamService>();
 builder.Services.AddSingleton<ServerReadinessState>();
 builder.Services.AddHostedService<ServerInitializationHostedService>();
 
@@ -100,6 +110,7 @@ app.MapGet("/health/ready", (ServerReadinessState readiness) =>
 app.MapCatalogEndpoints();
 app.MapMediaSettingsEndpoints();
 app.MapMediaHookEndpoints();
+app.MapPlaybackAuthorizationEndpoints();
 
 app.Run();
 
