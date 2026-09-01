@@ -25,8 +25,8 @@ public static class HikvisionRtspUrlBuilder
             device.RtspPort,
             $"Streaming/Channels/{channelCode}")
         {
-            UserName = device.Username,
-            Password = device.Password
+            UserName = Uri.EscapeDataString(device.Username),
+            Password = Uri.EscapeDataString(device.Password)
         }.Uri;
     }
 

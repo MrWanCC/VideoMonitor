@@ -1,5 +1,6 @@
 using System.Net;
 using VideoMonitor.Infrastructure.ZLMediaKit;
+using VideoMonitor.Infrastructure.Persistence;
 
 namespace VideoMonitor.Core.Tests.Infrastructure;
 
@@ -30,6 +31,27 @@ public sealed class ZlmClientTests
         Assert.Contains("enable_hls_fmp4=0", handler.LastRequestUri.Query);
         Assert.Contains("enable_ts=0", handler.LastRequestUri.Query);
         Assert.Contains("enable_fmp4=0", handler.LastRequestUri.Query);
+    }
+
+    [Fact]
+    public async Task AddStreamProxy_EncodesQueryValues()
+    {
+        var handler = new StubHttpMessageHandler(
+            """{"code":0,"data":{"key":"proxy-key"}}""");
+        var client = CreateClient(handler, app: "mine &", vhost: "custom/vhost");
+
+        await client.AddStreamProxyAsync(
+            "stream /1",
+            new Uri("rtsp://user:pass@camera/live?x=a&b=c"),
+            CancellationToken.None);
+
+        var query = handler.LastRequestUri!.Query;
+        Assert.Contains($"app={Uri.EscapeDataString("mine &")}", query);
+        Assert.Contains($"vhost={Uri.EscapeDataString("custom/vhost")}", query);
+        Assert.Contains($"stream={Uri.EscapeDataString("stream /1")}", query);
+        Assert.Contains(
+            $"url={Uri.EscapeDataString("rtsp://user:pass@camera/live?x=a&b=c")}",
+            query);
     }
 
     [Fact]
@@ -67,6 +89,58 @@ public sealed class ZlmClientTests
         Assert.Contains("app=mine", handler.LastRequestUri!.Query);
         Assert.Contains("vhost=custom", handler.LastRequestUri.Query);
         Assert.Contains("stream=stream_1", handler.LastRequestUri.Query);
+    }
+
+    [Fact]
+    public async Task GetMediaListParsesCompleteEvidenceWithoutLoggingOriginUrl()
+    {
+        var handler = new StubHttpMessageHandler(
+            """
+            {"code":0,"data":[{"schema":"rtsp","vhost":"custom","app":"mine","stream":"stream_1","originType":4,"originTypeStr":"rtsp_pull","originUrl":"rtsp://fake-camera-user:fake-camera-password@fake-camera-host/live","createStamp":123456789,"aliveSecond":42,"totalReaderCount":3}]}
+            """);
+
+        var result = await CreateClient(handler, app: "mine", vhost: "custom")
+            .GetMediaListAsync("stream_1", CancellationToken.None);
+
+        var stream = Assert.Single(result.Data!);
+        Assert.Equal(4, stream.OriginType);
+        Assert.Equal("rtsp_pull", stream.OriginTypeStr);
+        Assert.Equal("rtsp://fake-camera-user:fake-camera-password@fake-camera-host/live", stream.OriginUrl);
+        Assert.Equal(123456789, stream.CreateStamp);
+        Assert.Equal(42, stream.AliveSecond);
+        Assert.Equal(3, stream.TotalReaderCount);
+        Assert.DoesNotContain("fake-camera-password", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FormalGetMediaListMapsCompleteEvidence()
+    {
+        var handler = new StubHttpMessageHandler(
+            """
+            {"code":0,"data":[{"schema":"rtsp","vhost":"custom","app":"mine","stream":"stream_1","originType":4,"originTypeStr":"rtsp_pull","originUrl":"rtsp://fake-camera-user:fake-camera-password@fake-camera-host/live","createStamp":123456789,"aliveSecond":42,"totalReaderCount":3}]}
+            """);
+        using var transport = new ZlmServerHttpTransport(handler);
+        var gateway = new ZlmClient(
+            transport,
+            new FakeRuntimeSettingsProvider());
+
+        var result = await gateway.GetMediaListAsync(
+            "custom",
+            "mine",
+            "stream_1");
+
+        var evidence = Assert.Single(result.Data!);
+        Assert.Equal("rtsp", evidence.Schema);
+        Assert.Equal("custom", evidence.Vhost);
+        Assert.Equal("mine", evidence.App);
+        Assert.Equal("stream_1", evidence.Stream);
+        Assert.Equal(4, evidence.OriginType);
+        Assert.Equal("rtsp_pull", evidence.OriginTypeStr);
+        Assert.Equal("rtsp://fake-camera-user:fake-camera-password@fake-camera-host/live", evidence.OriginUrl);
+        Assert.Equal(123456789, evidence.CreateStamp);
+        Assert.Equal(42, evidence.AliveSecond);
+        Assert.Equal(3, evidence.TotalReaderCount);
+        Assert.Contains("secret=fake-secret", handler.LastRequestUri!.Query, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -113,4 +187,19 @@ public sealed class ZlmClientTests
         });
 
     private static Uri CameraUri() => new("rtsp://user:password@camera/live");
+
+    private sealed class FakeRuntimeSettingsProvider : IMediaRuntimeSettingsProvider
+    {
+        public Task<MediaRuntimeSettings> GetAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new MediaRuntimeSettings(
+                "http://127.0.0.1:8080",
+                "rtsp://127.0.0.1:8554",
+                "custom",
+                "mine",
+                "mine-test",
+                "fake-secret",
+                30,
+                1));
+    }
 }

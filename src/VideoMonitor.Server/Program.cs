@@ -2,6 +2,7 @@ using VideoMonitor.Core.Services;
 using VideoMonitor.Infrastructure.Paths;
 using VideoMonitor.Infrastructure.Persistence;
 using VideoMonitor.Infrastructure.Security;
+using VideoMonitor.Infrastructure.ZLMediaKit;
 using VideoMonitor.Server.Catalog;
 using VideoMonitor.Server.Hosting;
 using VideoMonitor.Server.Media;
@@ -38,6 +39,16 @@ builder.Services.AddSingleton<IMediaSettingsRepository, SqliteMediaSettingsRepos
 builder.Services.AddSingleton<
     IMediaRuntimeSettingsProvider,
     SqliteMediaRuntimeSettingsProvider>();
+builder.Services.AddSingleton<ZlmServerHttpTransport>();
+builder.Services.AddSingleton<IZlmMediaGateway>(serviceProvider =>
+    new ZlmClient(
+        serviceProvider.GetRequiredService<ZlmServerHttpTransport>(),
+        serviceProvider.GetRequiredService<IMediaRuntimeSettingsProvider>()));
+builder.Services.AddSingleton<
+    ICameraMediaCredentialReader,
+    SqliteCameraMediaCredentialReader>();
+builder.Services.AddSingleton<ICameraSourceResolver, CameraSourceResolver>();
+builder.Services.AddSingleton<SourceBindingVerifier>();
 builder.Services.AddSingleton<CatalogApplicationService>();
 builder.Services.AddSingleton<IMediaSettingsProbe, MediaSettingsProbe>();
 builder.Services.AddSingleton<IMediaSettingsService, MediaSettingsService>();

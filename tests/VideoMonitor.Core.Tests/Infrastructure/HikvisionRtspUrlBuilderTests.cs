@@ -36,6 +36,25 @@ public sealed class HikvisionRtspUrlBuilderTests
         Assert.DoesNotContain(device.Password, redacted);
     }
 
+    [Theory]
+    [InlineData("@")]
+    [InlineData("%")]
+    [InlineData("#")]
+    [InlineData("&")]
+    [InlineData(":")]
+    public void SpecialCharactersRemainInUriComponents(string marker)
+    {
+        var (device, channel) = CreateDevice(StreamType.Main, 1);
+        device.Username = $"user{marker}name";
+        device.Password = $"pass{marker}word";
+
+        var uri = HikvisionRtspUrlBuilder.Build(device, channel);
+        var builder = new UriBuilder(uri);
+
+        Assert.Equal(device.Username, Uri.UnescapeDataString(builder.UserName));
+        Assert.Equal(device.Password, Uri.UnescapeDataString(builder.Password));
+    }
+
     private static (CameraDevice Device, CameraChannel Channel) CreateDevice(
         StreamType streamType,
         int channelNo)
