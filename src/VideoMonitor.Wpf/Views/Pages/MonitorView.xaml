@@ -49,17 +49,9 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBlueBrush}" Text="当前监控信息" />
-                    <StackPanel Grid.Column="1" Margin="24,0,0,0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}">
-                            <Run Text="当前溜井：" /><Run Text="{Binding CurrentChuteName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" />
-                        </TextBlock>
-                        <TextBlock Margin="20,0,0,0" VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}">
-                            <Run Text="当前巷道：" /><Run Text="{Binding CurrentTunnelName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" />
-                        </TextBlock>
-                    </StackPanel>
+                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBlueBrush}" Text="通道详情" />
                     <Button Grid.Column="2" AutomationProperties.AutomationId="ToggleDetailPanelButton"
-                            Command="{Binding ToggleDetailPanelCommand}" Style="{StaticResource IconButtonStyle}" ToolTip="折叠/展开当前监控信息">
+                            Command="{Binding ToggleDetailPanelCommand}" Style="{StaticResource IconButtonStyle}" ToolTip="折叠/展开通道详情">
                         <Path Width="12" Height="12" Data="{StaticResource IconChevron}"
                               Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                               StrokeThickness="1.5" Stretch="Uniform" RenderTransformOrigin=".5,.5">

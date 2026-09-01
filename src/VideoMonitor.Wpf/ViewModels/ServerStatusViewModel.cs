@@ -74,7 +74,7 @@ public sealed class ServerStatusViewModel : ObservableObject, IDisposable
         StateText = GetStateText(status.State);
         LastSuccessfulSyncText = status.LastSuccessfulSyncUtc is { } timestamp
             ? timestamp.ToLocalTime().ToString(
-                "yyyy-MM-dd HH:mm:ss",
+                "HH:mm:ss",
                 CultureInfo.InvariantCulture)
             : "--";
         IsStale = status.IsStale;

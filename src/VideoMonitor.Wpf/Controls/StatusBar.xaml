@@ -22,51 +22,43 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="ServerStateIndicatorStyle" TargetType="Ellipse">
+            <Setter Property="Fill" Value="{StaticResource MutedTextBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ServerStatus.State}"
+                             Value="{x:Static catalog:ServerConnectionState.Connected}">
+                    <Setter Property="Fill" Value="{StaticResource OnlineGreenBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding ServerStatus.State}"
+                             Value="{x:Static catalog:ServerConnectionState.Connecting}">
+                    <Setter Property="Fill" Value="{StaticResource PrimaryBlueBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding ServerStatus.State}"
+                             Value="{x:Static catalog:ServerConnectionState.Unavailable}">
+                    <Setter Property="Fill" Value="{StaticResource WarningOrangeBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
     <Border Background="{StaticResource SidebarBackgroundBrush}" BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
         <Grid Margin="16,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.45*" /><ColumnDefinition Width="1.05*" /><ColumnDefinition Width="1.05*" />
-                <ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="1.3*" />
-                <ColumnDefinition Width="1.1*" /><ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Style="{StaticResource StatusTextStyle}" Foreground="{StaticResource MutedTextBrush}" Text="系统时间：" />
-                <TextBlock x:Name="ClockText" Style="{StaticResource StatusTextStyle}" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Style="{StaticResource StatusTextStyle}" Text="CPU：23%" />
-                <Border Width="52" Height="7" Margin="8,0,0,0" Background="{StaticResource SeparatorBrush}" CornerRadius="3.5">
-                    <Border Width="20" HorizontalAlignment="Left" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="3.5" />
-                </Border>
-            </StackPanel>
-            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Style="{StaticResource StatusTextStyle}" Text="内存：42%" />
-                <Border Width="52" Height="7" Margin="8,0,0,0" Background="{StaticResource SeparatorBrush}" CornerRadius="3.5">
-                    <Border Width="24" HorizontalAlignment="Left" Background="{StaticResource PrimaryBlueBrush}" CornerRadius="3.5" />
-                </Border>
-            </StackPanel>
-            <TextBlock Grid.Column="3" Style="{StaticResource StatusTextStyle}" Text="上行：8.6 Mbps" />
-            <TextBlock Grid.Column="4" Style="{StaticResource StatusTextStyle}" Text="下行：32.4 Mbps" />
-            <TextBlock Grid.Column="5" Style="{StaticResource StatusTextStyle}" Text="ZLMediaKit：v2024.04.15" />
-            <TextBlock Grid.Column="6" Style="{StaticResource StatusTextStyle}" Text="运行时间：2天 06:12" />
-            <StackPanel Grid.Column="7" Orientation="Horizontal" VerticalAlignment="Center">
+            <Grid Visibility="{Binding IsCentralServerUiAvailable, Converter={StaticResource BoolToVisibilityConverter}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Path Width="17" Height="17" Data="{StaticResource IconShield}" Stroke="{StaticResource OnlineGreenBrush}" StrokeThickness="1.5" Stretch="Uniform" />
-                    <TextBlock Margin="8,0,12,0" Foreground="{StaticResource OnlineGreenBrush}" FontSize="{StaticResource FontSizeStatus}" Text="客户端运行中" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
-                            Visibility="{Binding IsCentralServerUiAvailable, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Ellipse Width="8" Height="8" Margin="0,0,7,0" Style="{StaticResource ServerStateIndicatorStyle}" />
                     <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="{StaticResource FontSizeStatus}" Text="服务器：" />
-                    <TextBlock Style="{StaticResource ServerStateTextStyle}" FontSize="{StaticResource FontSizeStatus}"
-                               Text="{Binding ServerStatus.StateText}" />
-                    <TextBlock Margin="10,0,0,0" Foreground="{StaticResource MutedTextBrush}"
-                               FontSize="{StaticResource FontSizeStatus}" Text="最近同步：" />
-                    <TextBlock Margin="4,0,0,0" Foreground="{StaticResource SecondaryTextBrush}"
-                               FontSize="{StaticResource FontSizeStatus}"
-                               Text="{Binding ServerStatus.LastSuccessfulSyncText}" />
+                    <TextBlock Margin="4,0,0,0" Style="{StaticResource ServerStateTextStyle}"
+                               FontSize="{StaticResource FontSizeStatus}" Text="{Binding ServerStatus.StateText}" />
                 </StackPanel>
-            </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Foreground="{StaticResource MutedTextBrush}" FontSize="{StaticResource FontSizeStatus}" Text="最近同步：" />
+                    <TextBlock Margin="4,0,0,0" Foreground="{StaticResource SecondaryTextBrush}"
+                               FontSize="{StaticResource FontSizeStatus}" Text="{Binding ServerStatus.LastSuccessfulSyncText}" />
+                </StackPanel>
+            </Grid>
         </Grid>
     </Border>
 </UserControl>

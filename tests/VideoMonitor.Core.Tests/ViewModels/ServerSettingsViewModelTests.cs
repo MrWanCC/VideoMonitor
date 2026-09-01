@@ -359,7 +359,7 @@ public sealed class ServerSettingsViewModelTests
     }
 
     [Fact]
-    public async Task LastSync_UsesLocalTimeFormat()
+    public async Task LastSync_UsesCompactLocalTimeFormat()
     {
         await using var fixture = await ConnectionFixture.CreateConnectedAsync();
         using var viewModel = new ServerStatusViewModel(fixture.Coordinator);
@@ -367,7 +367,7 @@ public sealed class ServerSettingsViewModelTests
         var expected = fixture.Coordinator.Status.LastSuccessfulSyncUtc!
             .Value
             .ToLocalTime()
-            .ToString("yyyy-MM-dd HH:mm:ss");
+            .ToString("HH:mm:ss");
 
         Assert.Equal(expected, viewModel.LastSuccessfulSyncText);
     }
