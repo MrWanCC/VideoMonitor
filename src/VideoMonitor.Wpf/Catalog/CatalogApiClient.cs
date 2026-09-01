@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using VideoMonitor.Core.Catalog;
+using VideoMonitor.Core.Media;
 
 namespace VideoMonitor.Wpf.Catalog;
 
@@ -49,6 +50,25 @@ public sealed class CatalogApiClient : ICatalogConnectionClient
             .ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         return await ReadSuccessAsync<CatalogSnapshotDto>(response, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<EnsurePlaybackStreamResponse> EnsurePlaybackStreamAsync(
+        Uri baseUri,
+        EnsurePlaybackStreamRequest requestModel,
+        CancellationToken cancellationToken = default)
+    {
+        using var request = CreateJsonRequest(
+            HttpMethod.Post,
+            new Uri(baseUri, "/api/v1/playback/streams/ensure"),
+            requestModel);
+        using var response = await SendAsync(request, cancellationToken)
+            .ConfigureAwait(false);
+        await EnsurePlaybackSuccessAsync(response, cancellationToken)
+            .ConfigureAwait(false);
+        return await ReadSuccessAsync<EnsurePlaybackStreamResponse>(
+                response,
+                cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -188,6 +208,50 @@ public sealed class CatalogApiClient : ICatalogConnectionClient
                     cancellationToken)
                 .ConfigureAwait(false);
         }
+    }
+
+    private static async Task EnsurePlaybackSuccessAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        try
+        {
+            var error = await response.Content
+                .ReadFromJsonAsync<CatalogErrorDto>(cancellationToken)
+                .ConfigureAwait(false);
+            if (error?.Code is "CATALOG_VALIDATION_FAILED"
+                or "PLAYBACK_DEVICE_NOT_FOUND"
+                or "PLAYBACK_CHANNEL_NOT_FOUND"
+                or "MEDIA_UNAVAILABLE"
+                or "MediaStreamIdentityConflict")
+            {
+                throw new CatalogApiException(error.Code, error.CurrentRevision);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (CatalogApiException)
+        {
+            throw;
+        }
+        catch (JsonException)
+        {
+        }
+        catch (NotSupportedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        throw new CatalogApiException("CATALOG_UNAVAILABLE");
     }
 
     private static async Task<T> ReadSuccessAsync<T>(

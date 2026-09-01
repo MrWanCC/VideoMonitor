@@ -19,6 +19,15 @@ public sealed class VideoTileViewModel : ObservableObject
     private PlaybackSession? playbackSession;
     private string playbackErrorTitle = string.Empty;
     private string playbackErrorDetail = string.Empty;
+    private Guid? deviceId;
+    private Guid? channelId;
+    private VideoMonitor.Core.Models.StreamType? streamTypeValue;
+
+    public Guid? CurrentDeviceId => deviceId;
+
+    public Guid? CurrentChannelId => channelId;
+
+    public VideoMonitor.Core.Models.StreamType? CurrentStreamType => streamTypeValue;
 
     public string IpAddress
     {
@@ -102,6 +111,9 @@ public sealed class VideoTileViewModel : ObservableObject
     {
         ArgumentNullException.ThrowIfNull(info);
         CameraName = info.Name;
+        deviceId = info.DeviceId;
+        channelId = info.ChannelId;
+        streamTypeValue = channel?.StreamType;
         GroupName = info.GroupName;
         ChannelNumber = info.ChannelNumber;
         Status = status;
@@ -119,6 +131,9 @@ public sealed class VideoTileViewModel : ObservableObject
     public void ResetUnconfigured()
     {
         CameraName = "未配置";
+        deviceId = null;
+        channelId = null;
+        streamTypeValue = null;
         GroupName = "--";
         ChannelNumber = 0;
         Status = CameraStatus.Unknown;

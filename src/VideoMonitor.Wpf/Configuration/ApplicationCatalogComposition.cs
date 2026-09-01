@@ -16,7 +16,12 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
     private readonly HttpClient? centralHttpClient;
     private readonly HttpClient? localHttpClient;
     private readonly CancellationTokenSource? centralCancellation;
+    private readonly IFormalPlaybackSourceProvider? formalPlaybackSourceProvider;
+    private readonly Func<IFormalPlaybackEngine>? formalPlaybackEngineFactory;
+    private readonly IUiDispatcher? formalPlaybackDispatcher;
+    private readonly List<FormalPlaybackCoordinator> formalPlaybackCoordinators = [];
     private readonly object lifecycleGate = new();
+    private IFormalPlaybackEngine? formalPlaybackEngine;
     private Task? coordinatorRunTask;
     private Task? disposalTask;
 
@@ -36,6 +41,9 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         HttpClient? centralHttpClient,
         HttpClient? localHttpClient,
         CancellationTokenSource? centralCancellation,
+        IFormalPlaybackSourceProvider? formalPlaybackSourceProvider,
+        Func<IFormalPlaybackEngine>? formalPlaybackEngineFactory,
+        IUiDispatcher? formalPlaybackDispatcher,
         string? catalogMigrationWarning,
         bool catalogRecoveryOccurred)
     {
@@ -54,6 +62,9 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         this.centralHttpClient = centralHttpClient;
         this.localHttpClient = localHttpClient;
         this.centralCancellation = centralCancellation;
+        this.formalPlaybackSourceProvider = formalPlaybackSourceProvider;
+        this.formalPlaybackEngineFactory = formalPlaybackEngineFactory;
+        this.formalPlaybackDispatcher = formalPlaybackDispatcher;
         CatalogMigrationWarning = catalogMigrationWarning;
         CatalogRecoveryOccurred = catalogRecoveryOccurred;
     }
@@ -86,6 +97,9 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
 
         public Func<IPlaybackEngine> CentralPlaybackEngineFactory { get; init; } =
             static () => new VlcPlaybackService();
+
+        public Func<IFormalPlaybackEngine> CentralFormalPlaybackEngineFactory { get; init; } =
+            static () => new VlcPlaybackService();
     }
 
     public bool IsFormalCentralMode { get; }
@@ -111,6 +125,37 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
     public TestStreamApiClient? TestStreamApiClient { get; }
 
     public TestPreviewViewModel? TestPreview { get; }
+
+    public FormalPlaybackCoordinator CreateFormalPlaybackCoordinator(
+        VideoTileViewModel tile)
+    {
+        ArgumentNullException.ThrowIfNull(tile);
+        if (!IsFormalCentralMode
+            || formalPlaybackSourceProvider is null
+            || formalPlaybackEngineFactory is null
+            || formalPlaybackDispatcher is null)
+        {
+            throw new InvalidOperationException(
+                "Formal playback is only available in central mode.");
+        }
+
+        lock (lifecycleGate)
+        {
+            ObjectDisposedException.ThrowIf(disposalTask is not null, this);
+            formalPlaybackEngine ??= formalPlaybackEngineFactory()
+                ?? throw new InvalidOperationException(
+                    "Formal playback engine factory returned null.");
+            var engine = formalPlaybackEngine;
+            var coordinator = new FormalPlaybackCoordinator(
+                formalPlaybackSourceProvider,
+                (source, eventSink) => engine.Start(source, eventSink),
+                engine.Stop,
+                tile,
+                formalPlaybackDispatcher);
+            formalPlaybackCoordinators.Add(coordinator);
+            return coordinator;
+        }
+    }
 
     public Task? CoordinatorRunTask => coordinatorRunTask;
 
@@ -209,6 +254,12 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             httpClient,
             null,
             new CancellationTokenSource(),
+            new RemotePlaybackSourceProvider(
+                apiClient,
+                () => coordinator.Status.BaseUri
+                    ?? throw new CatalogApiException("CATALOG_UNAVAILABLE")),
+            dependencies.CentralFormalPlaybackEngineFactory,
+            dispatcher,
             null,
             false);
     }
@@ -257,6 +308,9 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             null,
             localHttpClient,
             null,
+            null,
+            null,
+            null,
             bootstrapper.LastMigrationWarning,
             bootstrapper.RecoveryOccurred);
     }
@@ -289,6 +343,17 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
 
         try
         {
+            foreach (var coordinator in formalPlaybackCoordinators.ToArray())
+            {
+                await coordinator.DisposeAsync().ConfigureAwait(false);
+            }
+
+            formalPlaybackCoordinators.Clear();
+            if (formalPlaybackEngine is IDisposable formalEngineDisposable)
+            {
+                formalEngineDisposable.Dispose();
+            }
+
             if (TestPreview is not null)
             {
                 await TestPreview.DisposeAsync().ConfigureAwait(false);

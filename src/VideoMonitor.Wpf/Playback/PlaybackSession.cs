@@ -5,28 +5,39 @@ namespace VideoMonitor.Wpf.Playback;
 public sealed class PlaybackSession : IDisposable
 {
     private int disposed;
+    private readonly Action? detachRuntimeEvents;
 
     public PlaybackSession(
         PlaybackSource source,
         Media? media,
-        MediaPlayer? mediaPlayer)
+        MediaPlayer? mediaPlayer,
+        Action? detachRuntimeEvents = null)
     {
-        Source = source ?? throw new ArgumentNullException(nameof(source));
+        ArgumentNullException.ThrowIfNull(source);
+        CameraChannelId = source.CameraChannelId;
+        StreamId = source.StreamId;
         Media = media;
         MediaPlayer = mediaPlayer;
+        this.detachRuntimeEvents = detachRuntimeEvents;
     }
 
-    public PlaybackSource Source { get; }
+    public PlaybackSession(
+        Guid channelId,
+        string streamId,
+        Media? media,
+        MediaPlayer? mediaPlayer,
+        Action? detachRuntimeEvents = null)
+    {
+        CameraChannelId = channelId;
+        StreamId = streamId ?? throw new ArgumentNullException(nameof(streamId));
+        Media = media;
+        MediaPlayer = mediaPlayer;
+        this.detachRuntimeEvents = detachRuntimeEvents;
+    }
 
-    public Guid CameraChannelId => Source.CameraChannelId;
+    public Guid CameraChannelId { get; }
 
-    public string StreamId => Source.StreamId;
-
-    public Uri PlaybackUrl => Source.PlaybackUrl;
-
-    public string? ProxyKey => Source.ProxyKey;
-
-    public bool OwnsProxy => Source.OwnsProxy;
+    public string StreamId { get; }
 
     public Media? Media { get; }
 
@@ -39,6 +50,7 @@ public sealed class PlaybackSession : IDisposable
             return;
         }
 
+        detachRuntimeEvents?.Invoke();
         MediaPlayer?.Stop();
         MediaPlayer?.Dispose();
         Media?.Dispose();

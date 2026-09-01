@@ -64,7 +64,10 @@ public partial class App
         var switchService = new MonitorSwitchService(groups);
         var monitorViewModel = composition.LocalCatalog is { } localCatalogForView
             ? new MonitorViewModel(switchService, groups, localCatalogForView)
-            : new MonitorViewModel(switchService, composition.ReadModel);
+            : new MonitorViewModel(
+                switchService,
+                composition.ReadModel,
+                composition.CreateFormalPlaybackCoordinator);
         var deviceManagementViewModel = composition.LocalCatalog is { } localCatalogForManagement
             ? new DeviceManagementViewModel(localCatalogForManagement)
             : new DeviceManagementViewModel(
@@ -78,7 +81,8 @@ public partial class App
                 localCatalogForSecondary)
             : new SecondaryMonitorViewModel(
                 switchService,
-                composition.ReadModel);
+                composition.ReadModel,
+                composition.CreateFormalPlaybackCoordinator);
         var screenService = new ScreenService();
         var mainViewModel = composition.IsFormalCentralMode
             ? new MainViewModel(

@@ -5,6 +5,7 @@ using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Core.Services;
 using VideoMonitor.Wpf.Catalog;
+using VideoMonitor.Wpf.Playback;
 
 namespace VideoMonitor.Wpf.ViewModels;
 
@@ -16,15 +17,19 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
     private IReadOnlyList<MonitorGroup> groups = [];
     private Guid? selectedGroupId;
     private string currentGroupName = "未配置";
+    private readonly Func<VideoTileViewModel, FormalPlaybackCoordinator>? formalCoordinatorFactory;
+    private readonly Dictionary<VideoTileViewModel, FormalPlaybackCoordinator> formalCoordinators = [];
 
     public SecondaryMonitorViewModel(
         MonitorSwitchService switchService,
-        IDeviceCatalogReadModel catalog)
+        IDeviceCatalogReadModel catalog,
+        Func<VideoTileViewModel, FormalPlaybackCoordinator>? formalCoordinatorFactory = null)
     {
         this.switchService = switchService
             ?? throw new ArgumentNullException(nameof(switchService));
         this.catalog = catalog
             ?? throw new ArgumentNullException(nameof(catalog));
+        this.formalCoordinatorFactory = formalCoordinatorFactory;
         projectGroups = () => MonitorCatalogProjection.CreateGroups(this.catalog);
         var projectedGroups = projectGroups();
         this.switchService.ReplaceGroups(projectedGroups);
@@ -41,6 +46,7 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
             ?? throw new ArgumentNullException(nameof(switchService));
         ArgumentNullException.ThrowIfNull(groups);
         ArgumentNullException.ThrowIfNull(deviceCatalog);
+        formalCoordinatorFactory = null;
         catalog = new LegacyDeviceCatalogReadModel(deviceCatalog);
         projectGroups = () => MonitorCatalogProjection.CreateGroups(deviceCatalog);
         this.switchService.ReplaceGroups(groups);
@@ -78,6 +84,18 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
                 CurrentGroupName = GetSelectedGroupName();
             }
         }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        switchService.LayoutChanged -= OnLayoutChanged;
+        catalog.Changed -= OnCatalogChanged;
+        foreach (var coordinator in formalCoordinators.Values)
+        {
+            await coordinator.DisposeAsync().ConfigureAwait(false);
+        }
+
+        formalCoordinators.Clear();
     }
 
     public string CurrentGroupName
@@ -157,12 +175,25 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
             if (camera is null)
             {
                 Tiles[index].ResetUnconfigured();
+                _ = StopFormalPlaybackAsync(Tiles[index]);
                 continue;
             }
 
             var device = catalog.GetDevice(camera.DeviceId);
             var channel = device?.Channels.SingleOrDefault(item => item.Id == camera.ChannelId);
             Tiles[index].Update(camera, device, channel, camera.Status);
+            if (channel is not null)
+            {
+                _ = StartFormalPlaybackAsync(
+                    Tiles[index],
+                    camera.DeviceId,
+                    camera.ChannelId,
+                    channel.StreamType);
+            }
+            else
+            {
+                _ = StopFormalPlaybackAsync(Tiles[index]);
+            }
         }
 
         CurrentGroupName = GetSelectedGroupName();
@@ -175,4 +206,49 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
             && group.Type == MonitorGroupType.UnloadingStation) is { } group
             ? group.Name
             : "未配置";
+
+    private FormalPlaybackCoordinator GetFormalCoordinator(VideoTileViewModel tile)
+    {
+        if (!formalCoordinators.TryGetValue(tile, out var coordinator))
+        {
+            coordinator = formalCoordinatorFactory!(tile);
+            formalCoordinators.Add(tile, coordinator);
+        }
+
+        return coordinator;
+    }
+
+    private async Task StartFormalPlaybackAsync(
+        VideoTileViewModel tile,
+        Guid deviceId,
+        Guid channelId,
+        VideoMonitor.Core.Models.StreamType streamType)
+    {
+        if (formalCoordinatorFactory is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await GetFormalCoordinator(tile)
+                .StartAsync(deviceId, channelId, streamType)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            tile.ShowError("播放失败", "PLAYBACK_FAILED");
+        }
+    }
+
+    private async Task StopFormalPlaybackAsync(VideoTileViewModel tile)
+    {
+        if (formalCoordinators.TryGetValue(tile, out var coordinator))
+        {
+            await coordinator.StopAsync().ConfigureAwait(false);
+        }
+    }
 }
