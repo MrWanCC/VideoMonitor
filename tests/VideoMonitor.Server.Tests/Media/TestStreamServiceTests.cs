@@ -215,6 +215,27 @@ public sealed class TestStreamServiceTests
     }
 
     [Fact]
+    public async Task PlaybackPreparationCleanupFailureRetainsPendingHandle()
+    {
+        var fixture = new ServiceFixture
+        {
+            UrlBuilder = new FakeUrlBuilder { Failure = true },
+            Proxy = new FakeProxy { StopFailure = true }
+        };
+        fixture.RebuildService();
+
+        var result = await fixture.Service.StartAsync(Request(null, null, ""));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("PlaybackPreparationFailed", result.Error!.Code);
+        var pending = Assert.Single(fixture.Registry.GetPendingCleanup());
+        Assert.Equal("vhost", pending.Vhost);
+        Assert.Equal("videomonitor-test", pending.App);
+        Assert.Equal("test_0123456789abcdef0123456789abcdef", pending.StreamId);
+        Assert.Equal("proxy", pending.ProxyKey);
+    }
+
+    [Fact]
     public async Task InvalidExistingRelationDoesNotCreateFormalObservation()
     {
         var fixture = new ServiceFixture();

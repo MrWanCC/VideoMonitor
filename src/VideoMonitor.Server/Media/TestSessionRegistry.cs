@@ -13,6 +13,7 @@ public sealed class TestSessionRegistry
 
     private readonly object sync = new();
     private readonly Dictionary<Guid, TestSessionRegistration> sessions = [];
+    private readonly Dictionary<string, TestStreamProxyHandle> pendingCleanups = [];
     private readonly Func<DateTimeOffset> utcNow;
 
     public TestSessionRegistry(Func<DateTimeOffset>? utcNow = null)
@@ -88,6 +89,35 @@ public sealed class TestSessionRegistry
         }
     }
 
+    public void RegisterPendingCleanup(TestStreamProxyHandle handle)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        lock (sync)
+        {
+            pendingCleanups.TryAdd(handle.ProxyKey, handle);
+        }
+    }
+
+    public IReadOnlyList<TestStreamProxyHandle> GetPendingCleanup()
+    {
+        lock (sync)
+        {
+            return pendingCleanups.Values.ToArray();
+        }
+    }
+
+    public bool RemovePendingCleanupAfterSuccessfulCleanup(
+        TestStreamProxyHandle handle)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        lock (sync)
+        {
+            return pendingCleanups.TryGetValue(handle.ProxyKey, out var current)
+                && ReferenceEquals(current, handle)
+                && pendingCleanups.Remove(handle.ProxyKey);
+        }
+    }
+
     public bool ContainsHandle(TestStreamProxyHandle handle)
     {
         ArgumentNullException.ThrowIfNull(handle);
@@ -108,7 +138,11 @@ public sealed class TestSessionRegistry
             return sessions.Values.Any(item =>
                 string.Equals(item.Handle.Vhost, vhost, StringComparison.Ordinal)
                 && string.Equals(item.Handle.App, app, StringComparison.Ordinal)
-                && string.Equals(item.Handle.StreamId, stream, StringComparison.Ordinal));
+                && string.Equals(item.Handle.StreamId, stream, StringComparison.Ordinal))
+                || pendingCleanups.Values.Any(item =>
+                    string.Equals(item.Vhost, vhost, StringComparison.Ordinal)
+                    && string.Equals(item.App, app, StringComparison.Ordinal)
+                    && string.Equals(item.StreamId, stream, StringComparison.Ordinal));
         }
     }
 }

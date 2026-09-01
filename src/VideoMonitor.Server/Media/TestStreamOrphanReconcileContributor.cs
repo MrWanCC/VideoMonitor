@@ -5,6 +5,8 @@ namespace VideoMonitor.Server.Media;
 
 public sealed class TestStreamOrphanReconcileContributor : IMediaReconcileContributor
 {
+    private static readonly TimeSpan CleanupTimeout = TimeSpan.FromSeconds(5);
+
     private readonly IZlmMediaGateway gateway;
     private readonly IMediaRuntimeSettingsProvider settingsProvider;
     private readonly TestSessionRegistry sessionRegistry;
@@ -34,20 +36,28 @@ public sealed class TestStreamOrphanReconcileContributor : IMediaReconcileContri
             return;
         }
 
+        foreach (var pending in sessionRegistry.GetPendingCleanup())
+        {
+            if (await TryDeleteProxyAsync(
+                    pending.ProxyKey,
+                    cancellationToken)
+                .ConfigureAwait(false))
+            {
+                sessionRegistry.RemovePendingCleanupAfterSuccessfulCleanup(pending);
+            }
+        }
+
         foreach (var expired in sessionRegistry.GetExpired())
         {
-            var cleanup = await gateway.DeleteStreamProxyAsync(
+            if (await TryDeleteProxyAsync(
                     expired.Handle.ProxyKey,
                     cancellationToken)
-                .ConfigureAwait(false);
-            if (!cleanup.IsSuccess || cleanup.Data?.Flag != true)
+                .ConfigureAwait(false))
             {
-                throw new InvalidOperationException("测试视频会话清理失败。");
+                sessionRegistry.RemoveAfterSuccessfulCleanup(
+                    expired.Dto.SessionId,
+                    expired);
             }
-
-            sessionRegistry.RemoveAfterSuccessfulCleanup(
-                expired.Dto.SessionId,
-                expired);
         }
 
         var response = await gateway.GetMediaListAsync(
@@ -79,6 +89,31 @@ public sealed class TestStreamOrphanReconcileContributor : IMediaReconcileContri
                     evidence.Stream,
                     cancellationToken)
                 .ConfigureAwait(false);
+        }
+    }
+
+    private async Task<bool> TryDeleteProxyAsync(
+        string proxyKey,
+        CancellationToken cancellationToken)
+    {
+        using var cleanupCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        cleanupCancellation.CancelAfter(CleanupTimeout);
+        try
+        {
+            var cleanup = await gateway.DeleteStreamProxyAsync(
+                    proxyKey,
+                    cleanupCancellation.Token)
+                .ConfigureAwait(false);
+            return cleanup.IsSuccess && cleanup.Data?.Flag == true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
         }
     }
 

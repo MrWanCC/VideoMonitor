@@ -67,6 +67,31 @@ public sealed class TestSessionRegistryTests
         Assert.False(registry.TryGet(session.SessionId, out _));
     }
 
+    [Fact]
+    public void PendingCleanupRetainsExactHandleAndIdentityUntilSuccess()
+    {
+        var registry = new TestSessionRegistry(() => Now);
+        var handle = Handle("test_0123456789abcdef0123456789abcdef", "proxy-pending");
+
+        registry.RegisterPendingCleanup(handle);
+
+        var pending = Assert.Single(registry.GetPendingCleanup());
+        Assert.Equal(handle, pending);
+        Assert.True(registry.ContainsIdentity(
+            handle.Vhost,
+            handle.App,
+            handle.StreamId));
+        Assert.False(registry.RemovePendingCleanupAfterSuccessfulCleanup(
+            new TestStreamProxyHandle(
+                handle.Vhost,
+                handle.App,
+                handle.StreamId,
+                "other-proxy",
+                handle.CreatedAtUtc)));
+        Assert.True(registry.RemovePendingCleanupAfterSuccessfulCleanup(handle));
+        Assert.Empty(registry.GetPendingCleanup());
+    }
+
     private static TestStreamProxyHandle Handle(string stream, string proxyKey) => new(
         "configured-vhost",
         "videomonitor-test",

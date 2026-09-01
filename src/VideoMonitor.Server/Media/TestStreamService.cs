@@ -193,6 +193,7 @@ public sealed class TestStreamService : ITestStreamService
         }
         catch
         {
+            sessionRegistry.RegisterPendingCleanup(handle);
         }
     }
 

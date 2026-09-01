@@ -112,6 +112,7 @@ public sealed class TestStreamProxyControllerTests
 
         Assert.Equal(1, gateway.DeleteStreamProxyCalls);
         Assert.Equal("test-proxy-key", gateway.DeletedProxyKey);
+        Assert.False(gateway.DeletedCancellationTokens.Single().IsCancellationRequested);
     }
 
     [Fact]
@@ -137,6 +138,105 @@ public sealed class TestStreamProxyControllerTests
 
         Assert.Equal(1, gateway.DeleteStreamProxyCalls);
         Assert.Equal("test-proxy-key", gateway.DeletedProxyKey);
+    }
+
+    [Fact]
+    public async Task CancellationCleanupFailureRetainsExactHandleForReconcile()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var registry = new TestSessionRegistry();
+        var gateway = new RecordingGateway(registerOnAdd: false)
+        {
+            CancelAfterAdd = cancellation,
+            DeleteResults = new Queue<bool>(new[] { false }),
+            ProxyKey = "test-proxy-key"
+        };
+        var controller = new TestStreamProxyController(
+            gateway,
+            new FixedRuntimeSettingsProvider(),
+            sessionRegistry: registry,
+            maxAttempts: 1,
+            maxRegistrationPolls: 2,
+            delayAsync: static (_, _) => Task.CompletedTask,
+            streamIdFactory: () => "test_0123456789abcdef0123456789abcdef");
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => controller.StartAsync(Source, cancellation.Token));
+
+        var pending = Assert.Single(registry.GetPendingCleanup());
+        Assert.Equal("configured-vhost", pending.Vhost);
+        Assert.Equal("videomonitor-test", pending.App);
+        Assert.Equal("test_0123456789abcdef0123456789abcdef", pending.StreamId);
+        Assert.Equal("test-proxy-key", pending.ProxyKey);
+    }
+
+    [Fact]
+    public async Task RegistrationTimeoutCleanupFailureRetainsExactHandleForReconcile()
+    {
+        var registry = new TestSessionRegistry();
+        var gateway = new RecordingGateway(registerOnAdd: false)
+        {
+            DeleteResults = new Queue<bool>(new[] { false }),
+            ProxyKey = "test-proxy-key"
+        };
+        var controller = new TestStreamProxyController(
+            gateway,
+            new FixedRuntimeSettingsProvider(),
+            sessionRegistry: registry,
+            maxAttempts: 1,
+            maxRegistrationPolls: 1,
+            delayAsync: static (_, _) => Task.CompletedTask,
+            streamIdFactory: () => "test_0123456789abcdef0123456789abcdef");
+
+        var error = await Assert.ThrowsAsync<TestStreamOperationException>(
+            () => controller.StartAsync(Source));
+
+        Assert.Equal(TestStreamErrorCode.MediaRegistrationTimeout, error.Code);
+        var pending = Assert.Single(registry.GetPendingCleanup());
+        Assert.Equal("configured-vhost", pending.Vhost);
+        Assert.Equal("videomonitor-test", pending.App);
+        Assert.Equal("test_0123456789abcdef0123456789abcdef", pending.StreamId);
+        Assert.Equal("test-proxy-key", pending.ProxyKey);
+    }
+
+    [Fact]
+    public async Task InitialMediaListMinus100MapsAuthFailed()
+    {
+        var gateway = new RecordingGateway(registerOnAdd: false)
+        {
+            MediaListFailureCode = -100
+        };
+        var controller = new TestStreamProxyController(
+            gateway,
+            new FixedRuntimeSettingsProvider(),
+            sessionRegistry: new TestSessionRegistry(),
+            maxAttempts: 1,
+            streamIdFactory: () => "test_0123456789abcdef0123456789abcdef");
+
+        var error = await Assert.ThrowsAsync<TestStreamOperationException>(
+            () => controller.StartAsync(Source));
+
+        Assert.Equal(TestStreamErrorCode.AuthFailed, error.Code);
+    }
+
+    [Fact]
+    public async Task AddStreamProxyMinus100MapsAuthFailed()
+    {
+        var gateway = new RecordingGateway(registerOnAdd: false)
+        {
+            AddFailureCode = -100
+        };
+        var controller = new TestStreamProxyController(
+            gateway,
+            new FixedRuntimeSettingsProvider(),
+            sessionRegistry: new TestSessionRegistry(),
+            maxAttempts: 1,
+            streamIdFactory: () => "test_0123456789abcdef0123456789abcdef");
+
+        var error = await Assert.ThrowsAsync<TestStreamOperationException>(
+            () => controller.StartAsync(Source));
+
+        Assert.Equal(TestStreamErrorCode.AuthFailed, error.Code);
     }
 
     private sealed class FixedRuntimeSettingsProvider : IMediaRuntimeSettingsProvider
@@ -171,6 +271,14 @@ public sealed class TestStreamProxyControllerTests
 
         public string? DeletedProxyKey { get; private set; }
 
+        public List<CancellationToken> DeletedCancellationTokens { get; } = [];
+
+        public Queue<bool> DeleteResults { get; init; } = new();
+
+        public int? MediaListFailureCode { get; init; }
+
+        public int? AddFailureCode { get; init; }
+
         public string ProxyKey { get; init; } = "proxy-key";
 
         public CancellationTokenSource? CancelAfterAdd { get; init; }
@@ -190,6 +298,15 @@ public sealed class TestStreamProxyControllerTests
             CancellationToken cancellationToken = default)
         {
             mediaListCalls++;
+            if (MediaListFailureCode is { } failureCode)
+            {
+                return Task.FromResult(new ZlmApiResponse<IReadOnlyList<ZlmMediaEvidence>>(
+                    false,
+                    failureCode,
+                    string.Empty,
+                    null));
+            }
+
             if (mediaListCalls == ThrowCancellationOnMediaListCall)
             {
                 Cancellation?.Cancel();
@@ -219,6 +336,15 @@ public sealed class TestStreamProxyControllerTests
         {
             AddStreamProxyCalls++;
             AddedIdentity = (vhost, app, stream);
+            if (AddFailureCode is { } failureCode)
+            {
+                return Task.FromResult(new ZlmApiResponse<ZlmAddStreamProxyData>(
+                    false,
+                    failureCode,
+                    string.Empty,
+                    null));
+            }
+
             if (registerOnAdd)
             {
                 ExistingStreams.Add(stream);
@@ -239,11 +365,13 @@ public sealed class TestStreamProxyControllerTests
         {
             DeleteStreamProxyCalls++;
             DeletedProxyKey = proxyKey;
+            DeletedCancellationTokens.Add(cancellationToken);
+            var success = DeleteResults.Count == 0 || DeleteResults.Dequeue();
             return Task.FromResult(new ZlmApiResponse<ZlmDeleteStreamProxyData>(
                 true,
                 0,
                 string.Empty,
-                new ZlmDeleteStreamProxyData { Flag = true }));
+                new ZlmDeleteStreamProxyData { Flag = success }));
         }
 
         public Task<ZlmApiResponse<JsonElement>> CloseExactStreamAsync(

@@ -95,8 +95,7 @@ public sealed class TestStreamOrphanReconcileContributorTests
             registry,
             () => currentTime);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => contributor.ReconcileAsync());
+        await contributor.ReconcileAsync();
         Assert.True(registry.TryGet(session.SessionId, out _));
 
         await contributor.ReconcileAsync();
@@ -104,6 +103,126 @@ public sealed class TestStreamOrphanReconcileContributorTests
         Assert.Equal(2, gateway.DeleteCalls);
         Assert.Equal("test-proxy-key", gateway.DeletedProxyKey);
         Assert.False(registry.TryGet(session.SessionId, out _));
+    }
+
+    [Fact]
+    public async Task PendingCleanupRetriesExactProxyAndRemovesOnlyAfterSuccess()
+    {
+        var registry = new TestSessionRegistry(() => Now);
+        var handle = new TestStreamProxyHandle(
+            "configured-vhost",
+            "videomonitor-test",
+            "test_0123456789abcdef0123456789abcdef",
+            "pending-proxy-key",
+            Now);
+        registry.RegisterPendingCleanup(handle);
+        var gateway = new RecordingGateway
+        {
+            DeleteResults = new Queue<bool>(new[] { false, true })
+        };
+        var contributor = new TestStreamOrphanReconcileContributor(
+            gateway,
+            new FixedSettingsProvider(),
+            registry,
+            () => Now);
+
+        await contributor.ReconcileAsync();
+        Assert.Single(registry.GetPendingCleanup());
+
+        await contributor.ReconcileAsync();
+        Assert.Empty(registry.GetPendingCleanup());
+        Assert.Equal(new[] { "pending-proxy-key", "pending-proxy-key" }, gateway.DeletedProxyKeys);
+    }
+
+    [Fact]
+    public async Task OneExpiredCleanupFailureDoesNotBlockOtherExpiredSessions()
+    {
+        var currentTime = Now;
+        var registry = new TestSessionRegistry(() => currentTime);
+        var first = registry.Add(
+            new TestStreamProxyHandle(
+                "configured-vhost",
+                "videomonitor-test",
+                "test_0123456789abcdef0123456789abcdef",
+                "expired-a",
+                Now),
+            null,
+            null,
+            new Uri("rtsp://playback.example/a"));
+        var second = registry.Add(
+            new TestStreamProxyHandle(
+                "configured-vhost",
+                "videomonitor-test",
+                "test_fedcba9876543210fedcba9876543210",
+                "expired-b",
+                Now),
+            null,
+            null,
+            new Uri("rtsp://playback.example/b"));
+        currentTime = Now.AddMinutes(2).AddTicks(1);
+        var gateway = new RecordingGateway
+        {
+            DeleteResults = new Queue<bool>(new[] { false, true })
+        };
+        var contributor = new TestStreamOrphanReconcileContributor(
+            gateway,
+            new FixedSettingsProvider(),
+            registry,
+            () => currentTime);
+
+        await contributor.ReconcileAsync();
+
+        Assert.True(registry.TryGet(first.SessionId, out _));
+        Assert.False(registry.TryGet(second.SessionId, out _));
+        Assert.Equal(new[] { "expired-a", "expired-b" }, gateway.DeletedProxyKeys);
+    }
+
+    [Fact]
+    public async Task ExpiredCleanupFailureDoesNotBlockSafeRestartOrphanScan()
+    {
+        var currentTime = Now;
+        var registry = new TestSessionRegistry(() => currentTime);
+        var expired = registry.Add(
+            new TestStreamProxyHandle(
+                "configured-vhost",
+                "videomonitor-test",
+                "test_0123456789abcdef0123456789abcdef",
+                "expired-proxy-key",
+                Now),
+            null,
+            null,
+            new Uri("rtsp://playback.example/live"));
+        currentTime = Now.AddMinutes(2).AddTicks(1);
+        const string orphan = "test_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var gateway = new RecordingGateway
+        {
+            DeleteResults = new Queue<bool>(new[] { false }),
+            Evidence = new[]
+            {
+                new ZlmMediaEvidence(
+                    "rtsp",
+                    "configured-vhost",
+                    "videomonitor-test",
+                    orphan,
+                    4,
+                    "rtsp_pull",
+                    null,
+                    Now.AddMinutes(-3).ToUnixTimeSeconds(),
+                    null,
+                    0)
+            }
+        };
+        var contributor = new TestStreamOrphanReconcileContributor(
+            gateway,
+            new FixedSettingsProvider(),
+            registry,
+            () => currentTime);
+
+        await contributor.ReconcileAsync();
+
+        Assert.True(registry.TryGet(expired.SessionId, out _));
+        Assert.Equal(1, gateway.CloseCalls);
+        Assert.Equal(("rtsp", "configured-vhost", "videomonitor-test", orphan), gateway.ClosedIdentity);
     }
 
     private static ZlmMediaEvidence Evidence(
@@ -152,6 +271,8 @@ public sealed class TestStreamOrphanReconcileContributorTests
 
         public string? DeletedProxyKey { get; private set; }
 
+        public List<string> DeletedProxyKeys { get; } = [];
+
         public Task<ZlmApiResponse<IReadOnlyList<ZlmMediaEvidence>>> GetMediaListAsync(
             string vhost,
             string app,
@@ -174,6 +295,7 @@ public sealed class TestStreamOrphanReconcileContributorTests
         {
             DeleteCalls++;
             DeletedProxyKey = proxyKey;
+            DeletedProxyKeys.Add(proxyKey);
             var success = DeleteResults.Count == 0 || DeleteResults.Dequeue();
             return Task.FromResult(new ZlmApiResponse<ZlmDeleteStreamProxyData>(
                 true,

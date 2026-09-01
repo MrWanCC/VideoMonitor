@@ -14,6 +14,8 @@ public sealed class TestStreamProxyController : ITestStreamProxyController
     private readonly Func<TimeSpan, CancellationToken, Task> delayAsync;
     private readonly Func<string> streamIdFactory;
     private readonly Func<DateTimeOffset> utcNow;
+    private readonly TestSessionRegistry sessionRegistry;
+    private readonly TimeSpan cleanupTimeout;
 
     public TestStreamProxyController(
         IZlmMediaGateway gateway,
@@ -23,15 +25,44 @@ public sealed class TestStreamProxyController : ITestStreamProxyController
         Func<TimeSpan, CancellationToken, Task>? delayAsync = null,
         Func<string>? streamIdFactory = null,
         Func<DateTimeOffset>? utcNow = null)
+        : this(
+            gateway,
+            settingsProvider,
+            new TestSessionRegistry(),
+            maxAttempts,
+            maxRegistrationPolls,
+            delayAsync,
+            streamIdFactory,
+            utcNow)
+    {
+    }
+
+    public TestStreamProxyController(
+        IZlmMediaGateway gateway,
+        IMediaRuntimeSettingsProvider settingsProvider,
+        TestSessionRegistry sessionRegistry,
+        int maxAttempts = 5,
+        int maxRegistrationPolls = 10,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null,
+        Func<string>? streamIdFactory = null,
+        Func<DateTimeOffset>? utcNow = null,
+        TimeSpan? cleanupTimeout = null)
     {
         this.gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         this.settingsProvider = settingsProvider
             ?? throw new ArgumentNullException(nameof(settingsProvider));
+        this.sessionRegistry = sessionRegistry
+            ?? throw new ArgumentNullException(nameof(sessionRegistry));
         this.maxAttempts = Math.Max(1, maxAttempts);
         this.maxRegistrationPolls = Math.Max(1, maxRegistrationPolls);
         this.delayAsync = delayAsync ?? Task.Delay;
         this.streamIdFactory = streamIdFactory ?? NewStreamId;
         this.utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
+        this.cleanupTimeout = cleanupTimeout ?? TimeSpan.FromSeconds(5);
+        if (this.cleanupTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cleanupTimeout));
+        }
     }
 
     public async Task<TestStreamProxyHandle> StartAsync(
@@ -95,6 +126,12 @@ public sealed class TestStreamProxyController : ITestStreamProxyController
             }
 
             var proxyKey = added.Data.Key;
+            var handle = new TestStreamProxyHandle(
+                settings.Vhost,
+                settings.TestApp,
+                stream,
+                proxyKey,
+                utcNow());
             var ownershipTransferred = false;
             try
             {
@@ -110,12 +147,6 @@ public sealed class TestStreamProxyController : ITestStreamProxyController
                     if (observed.IsSuccess
                         && ContainsExact(observed.Data, settings.Vhost, settings.TestApp, stream))
                     {
-                        var handle = new TestStreamProxyHandle(
-                            settings.Vhost,
-                            settings.TestApp,
-                            stream,
-                            proxyKey,
-                            utcNow());
                         ownershipTransferred = true;
                         return handle;
                     }
@@ -135,7 +166,11 @@ public sealed class TestStreamProxyController : ITestStreamProxyController
             {
                 if (!ownershipTransferred)
                 {
-                    await TryCleanupProxyAsync(proxyKey).ConfigureAwait(false);
+                    var cleaned = await TryCleanupProxyAsync(proxyKey).ConfigureAwait(false);
+                    if (!cleaned)
+                    {
+                        sessionRegistry.RegisterPendingCleanup(handle);
+                    }
                 }
             }
         }
@@ -176,9 +211,10 @@ public sealed class TestStreamProxyController : ITestStreamProxyController
 
     private async Task<bool> TryCleanupProxyAsync(string proxyKey)
     {
+        using var cleanupCancellation = new CancellationTokenSource(cleanupTimeout);
         try
         {
-            await CleanupProxyAsync(proxyKey, CancellationToken.None)
+            await CleanupProxyAsync(proxyKey, cleanupCancellation.Token)
                 .ConfigureAwait(false);
             return true;
         }
@@ -221,7 +257,7 @@ public sealed class TestStreamProxyController : ITestStreamProxyController
             && string.Equals(item.Stream, stream, StringComparison.Ordinal)) == true;
 
     private static TestStreamErrorCode ClassifyApiFailure(int code) =>
-        code is 401 or 403 or -401 or -403
+        code is -100 or 401 or 403 or -401 or -403
             ? TestStreamErrorCode.AuthFailed
             : TestStreamErrorCode.MediaServerUnavailable;
 
