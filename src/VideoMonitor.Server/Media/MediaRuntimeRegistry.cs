@@ -157,6 +157,28 @@ public sealed class MediaRuntimeRegistry : IMediaRuntimeStore, IMediaObservation
         }
     }
 
+    internal void MarkNotOwnedFaulted(
+        MediaStreamKey key,
+        SourceObservation observation,
+        string safeErrorCode,
+        string safeErrorMessage,
+        DateTimeOffset observedAtUtc)
+    {
+        lock (sync)
+        {
+            var state = GetOrCreate(key);
+            state.RuntimeState = StreamRuntimeState.Faulted;
+            state.SourceObservation = observation;
+            state.Ownership = StreamOwnership.NotOwned;
+            state.ProxyKey = null;
+            state.ObservedAtUtc = observedAtUtc;
+            state.SafeLastErrorCode = safeErrorCode;
+            state.SafeLastErrorMessage = safeErrorMessage;
+            state.NoReaderSinceUtc = null;
+            state.IsStale = false;
+        }
+    }
+
     internal DateTimeOffset MarkNoReaderSince(
         MediaStreamKey key,
         DateTimeOffset observedAtUtc)

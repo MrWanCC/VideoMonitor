@@ -90,6 +90,27 @@ public sealed class MediaOwnershipClassifierTests
     }
 
     [Fact]
+    public void ConflictingOriginEvidenceIsNotOwned()
+    {
+        var classifier = new MediaOwnershipClassifier(
+            "configured-vhost",
+            "videomonitor",
+            requestedKey => requestedKey == Key);
+
+        var result = classifier.Classify(
+            Evidence() with
+            {
+                OriginType = 1,
+                OriginTypeStr = "rtsp_pull"
+            },
+            Key,
+            SourceBindingResult.Matched,
+            currentProcessOwnsProxy: true);
+
+        Assert.Equal(StreamOwnership.NotOwned, result);
+    }
+
+    [Fact]
     public void CurrentProcessOwnershipStillRequiresCatalogIdentity()
     {
         var classifier = new MediaOwnershipClassifier(

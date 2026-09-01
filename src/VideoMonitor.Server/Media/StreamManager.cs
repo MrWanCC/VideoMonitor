@@ -91,10 +91,11 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
         if (!string.Equals(request.Vhost, settings.Vhost, StringComparison.Ordinal)
             || !string.Equals(request.App, settings.FormalApp, StringComparison.Ordinal))
         {
-            return Fail(key, MediaServerHealth.Healthy, SourceObservation.Unknown, ScopeInvalidCode);
+            return FailWithoutChangingServerHealth(
+                key,
+                SourceObservation.Unknown,
+                ScopeInvalidCode);
         }
-
-        SetServerHealth(MediaServerHealth.Healthy);
 
         ResolvedCameraSource resolvedSource;
         try
@@ -109,7 +110,10 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
         }
         catch (Exception)
         {
-            return Fail(key, MediaServerHealth.Healthy, SourceObservation.ConnectFailed, SourceResolutionCode);
+            return FailWithoutChangingServerHealth(
+                key,
+                SourceObservation.ConnectFailed,
+                SourceResolutionCode);
         }
 
         var initialQuery = await gateway.GetMediaListAsync(
@@ -122,6 +126,8 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
         {
             return Fail(key, MediaServerHealth.Unavailable, SourceObservation.ConnectFailed, ServerUnavailableCode);
         }
+
+        SetServerHealth(MediaServerHealth.Healthy);
 
         var existing = FindExact(initialQuery.Data, request);
         if (existing is not null)
@@ -417,6 +423,15 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
                         evidence.TotalReaderCount,
                         observedAtUtc);
                 }
+                else
+                {
+                    runtimeRegistry.MarkNotOwnedFaulted(
+                        key,
+                        SourceObservation.Unknown,
+                        IdentityConflictCode,
+                        "目标媒体身份无法通过完整证据证明属于当前目录。",
+                        observedAtUtc);
+                }
 
                 if (ownership is StreamOwnership.OwnedAdopted or StreamOwnership.OwnedCurrentProcess)
                 {
@@ -442,7 +457,12 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
             }
             catch
             {
-                // An unprovable stream remains outside the managed runtime state.
+                runtimeRegistry.MarkNotOwnedFaulted(
+                    key,
+                    SourceObservation.Unknown,
+                    IdentityConflictCode,
+                    "目标媒体身份无法通过完整证据证明属于当前目录。",
+                    observedAtUtc);
             }
         }
 
@@ -585,6 +605,20 @@ public sealed class StreamManager : IStreamManager, IMediaReconcileContributor
         string failureCode)
     {
         SetServerHealth(health);
+        runtimeRegistry.MarkFaulted(
+            key,
+            observation,
+            failureCode,
+            failureCode,
+            utcNow());
+        return Failure(failureCode);
+    }
+
+    private StreamEnsureResult FailWithoutChangingServerHealth(
+        MediaStreamKey key,
+        SourceObservation observation,
+        string failureCode)
+    {
         runtimeRegistry.MarkFaulted(
             key,
             observation,

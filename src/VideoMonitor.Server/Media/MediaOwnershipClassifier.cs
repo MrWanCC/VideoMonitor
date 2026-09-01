@@ -68,9 +68,9 @@ public sealed class MediaOwnershipClassifier
 
     private static bool IsPullOrProxyCompatible(ZlmMediaEvidence evidence)
     {
-        if (evidence.OriginType is 4 or 7)
+        if (evidence.OriginType.HasValue)
         {
-            return true;
+            return evidence.OriginType is 4 or 7;
         }
 
         var originType = evidence.OriginTypeStr;

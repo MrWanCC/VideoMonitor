@@ -109,6 +109,48 @@ public sealed class StreamManagerTests
     }
 
     [Fact]
+    public async Task FormalScopeFailureDoesNotClaimMediaServerHealthy()
+    {
+        var fixture = new StreamManagerFixture();
+        fixture.ReconcilerHealthState.MarkUnavailable();
+
+        var result = await fixture.Manager.EnsureStreamAsync(
+            fixture.Request with { Vhost = "other-vhost" });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("MEDIA_STREAM_SCOPE_INVALID", result.FailureCode);
+        Assert.Equal(MediaServerHealth.Unavailable, fixture.ReconcilerHealthState.Health);
+        Assert.Equal(0, fixture.Gateway.GetMediaListCalls);
+    }
+
+    [Fact]
+    public async Task SourceResolutionFailureDoesNotClaimMediaServerHealthy()
+    {
+        var fixture = new StreamManagerFixture(sourceResolutionFails: true);
+        fixture.ReconcilerHealthState.MarkUnavailable();
+
+        var result = await fixture.Manager.EnsureStreamAsync(fixture.Request);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("MEDIA_SOURCE_RESOLUTION_FAILED", result.FailureCode);
+        Assert.Equal(MediaServerHealth.Unavailable, fixture.ReconcilerHealthState.Health);
+        Assert.Equal(0, fixture.Gateway.GetMediaListCalls);
+    }
+
+    [Fact]
+    public async Task SuccessfulZlmQueryMarksMediaServerHealthy()
+    {
+        var fixture = new StreamManagerFixture();
+        fixture.ReconcilerHealthState.MarkUnavailable();
+
+        var result = await fixture.Manager.EnsureStreamAsync(fixture.Request);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(MediaServerHealth.Healthy, fixture.ReconcilerHealthState.Health);
+        Assert.True(fixture.Gateway.GetMediaListCalls > 0);
+    }
+
+    [Fact]
     public async Task CleanupCurrentProcessFailureRetainsOwnershipForRetry()
     {
         var fixture = new StreamManagerFixture();
@@ -200,6 +242,49 @@ public sealed class StreamManagerTests
         Assert.Equal(StreamOwnership.NotOwned, runtime.Ownership);
         Assert.Equal(new ViewerCount(0), runtime.ViewerCount);
         Assert.NotNull(runtime.ObservedAtUtc);
+    }
+
+    [Fact]
+    public async Task ReconcileDowngradesPreviouslyOwnedStreamWhenSourceBindingBecomesInvalid()
+    {
+        var fixture = new StreamManagerFixture();
+        var ensured = await fixture.Manager.EnsureStreamAsync(fixture.Request);
+        Assert.True(ensured.IsSuccess);
+
+        fixture.Gateway.CurrentEvidence = fixture.CreateEvidence() with
+        {
+            OriginUrl = "rtsp://another-camera.example/live"
+        };
+
+        await fixture.Manager.ReconcileAsync();
+
+        var runtime = Assert.Single(fixture.Manager.GetSnapshot().Streams);
+        Assert.Equal(StreamRuntimeState.Faulted, runtime.RuntimeState);
+        Assert.Equal(StreamOwnership.NotOwned, runtime.Ownership);
+        Assert.Equal("MediaStreamIdentityConflict", runtime.SafeLastErrorCode);
+        Assert.Equal(0, fixture.Gateway.DeleteStreamProxyCalls);
+        Assert.Equal(0, fixture.Gateway.CloseCalls);
+        Assert.Equal(1, fixture.Gateway.AddStreamProxyCalls);
+    }
+
+    [Fact]
+    public async Task ReconcileDowngradesPreviouslyOwnedStreamWhenCatalogIdentityCanNoLongerBeResolved()
+    {
+        var fixture = new StreamManagerFixture();
+        var ensured = await fixture.Manager.EnsureStreamAsync(fixture.Request);
+        Assert.True(ensured.IsSuccess);
+
+        fixture.CatalogIdentityExists = false;
+
+        await fixture.Manager.ReconcileAsync();
+
+        var runtime = Assert.Single(fixture.Manager.GetSnapshot().Streams);
+        Assert.Equal(StreamRuntimeState.Faulted, runtime.RuntimeState);
+        Assert.Equal(StreamOwnership.NotOwned, runtime.Ownership);
+        Assert.Equal("MediaStreamIdentityConflict", runtime.SafeLastErrorCode);
+        Assert.Equal(0, fixture.Gateway.DeleteStreamProxyCalls);
+        Assert.Equal(0, fixture.Gateway.CloseCalls);
+        Assert.Equal(1, fixture.Gateway.AddStreamProxyCalls);
     }
 
     [Fact]
@@ -371,12 +456,15 @@ public sealed class StreamManagerTests
             Guid.Parse("72000000-0000-0000-0000-000000000001"),
             StreamType.Main);
 
-        public StreamManagerFixture(bool registerAfterAdd = true)
+        public StreamManagerFixture(
+            bool registerAfterAdd = true,
+            bool sourceResolutionFails = false)
         {
             SourceUri = new Uri("rtsp://camera.example/live");
             Gateway = new FakeGateway(this, registerAfterAdd);
             var resolver = new FakeSourceResolver(
-                new ResolvedCameraSource(key, SourceUri, Fingerprint(SourceUri)));
+                new ResolvedCameraSource(key, SourceUri, Fingerprint(SourceUri)),
+                sourceResolutionFails);
             Manager = new StreamManager(
                 Gateway,
                 resolver,
@@ -386,7 +474,7 @@ public sealed class StreamManagerTests
                 new MediaOwnershipClassifier(
                     "configured-vhost",
                     "videomonitor",
-                    requestedKey => requestedKey == key),
+                    requestedKey => requestedKey == key && CatalogIdentityExists),
                 new SourceBindingVerifier(),
                 (_, _) => Task.CompletedTask,
                 maxRegistrationPolls: 2,
@@ -395,6 +483,8 @@ public sealed class StreamManagerTests
         }
 
         public Uri SourceUri { get; }
+
+        public bool CatalogIdentityExists { get; set; } = true;
 
         public DateTimeOffset Now { get; set; } = new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -463,10 +553,14 @@ public sealed class StreamManagerTests
     private sealed class FakeSourceResolver : ICameraSourceResolver
     {
         private readonly ResolvedCameraSource source;
+        private readonly bool shouldFail;
 
-        public FakeSourceResolver(ResolvedCameraSource source)
+        public FakeSourceResolver(
+            ResolvedCameraSource source,
+            bool shouldFail = false)
         {
             this.source = source;
+            this.shouldFail = shouldFail;
         }
 
         public Task<ResolvedCameraSource> ResolveAsync(
@@ -474,6 +568,11 @@ public sealed class StreamManagerTests
             CancellationToken cancellationToken = default)
         {
             Assert.Equal(source.Key, key);
+            if (shouldFail)
+            {
+                throw new InvalidOperationException("source-resolution-test-failure");
+            }
+
             return Task.FromResult(source);
         }
     }
