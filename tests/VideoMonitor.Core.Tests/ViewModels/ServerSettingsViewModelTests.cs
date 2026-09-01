@@ -19,6 +19,20 @@ public sealed class ServerSettingsViewModelTests
     }
 
     [Fact]
+    public async Task ConnectionStatusText_ReportsUntestedThenSuccess()
+    {
+        await using var fixture = ConnectionFixture.Create();
+        var viewModel = fixture.CreateSettingsViewModel();
+
+        Assert.Equal("尚未测试连接", viewModel.ConnectionStatusText);
+
+        viewModel.BaseUrl = "https://server-b";
+        await viewModel.TestConnectionCommand.ExecuteAsync(null);
+
+        Assert.Equal("连接测试成功。", viewModel.ConnectionStatusText);
+    }
+
+    [Fact]
     public async Task InvalidUri_DoesNotProbe()
     {
         await using var fixture = await ConnectionFixture.CreateConnectedAsync();
