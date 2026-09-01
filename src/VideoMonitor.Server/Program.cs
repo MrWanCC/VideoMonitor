@@ -49,6 +49,26 @@ builder.Services.AddSingleton<
     SqliteCameraMediaCredentialReader>();
 builder.Services.AddSingleton<ICameraSourceResolver, CameraSourceResolver>();
 builder.Services.AddSingleton<SourceBindingVerifier>();
+builder.Services.AddSingleton<MediaRuntimeRegistry>();
+builder.Services.AddSingleton<IMediaRuntimeStore>(serviceProvider =>
+    serviceProvider.GetRequiredService<MediaRuntimeRegistry>());
+builder.Services.AddSingleton<IMediaObservationRecorder>(serviceProvider =>
+    serviceProvider.GetRequiredService<MediaRuntimeRegistry>());
+builder.Services.AddSingleton<MediaServerHealthState>();
+builder.Services.AddSingleton<MediaStreamGate>();
+builder.Services.AddSingleton<MediaOwnershipClassifier>();
+builder.Services.AddSingleton<StreamManager>();
+builder.Services.AddSingleton<IStreamManager>(serviceProvider =>
+    serviceProvider.GetRequiredService<StreamManager>());
+builder.Services.AddSingleton<IMediaReconcileContributor>(serviceProvider =>
+    serviceProvider.GetRequiredService<StreamManager>());
+builder.Services.AddSingleton<IZlmHookTrustPolicy, LoopbackZlmHookTrustPolicy>();
+builder.Services.AddSingleton<MediaEventProcessor>();
+builder.Services.AddHostedService(serviceProvider =>
+    serviceProvider.GetRequiredService<MediaEventProcessor>());
+builder.Services.AddSingleton<MediaReconcilerHostedService>();
+builder.Services.AddHostedService(serviceProvider =>
+    serviceProvider.GetRequiredService<MediaReconcilerHostedService>());
 builder.Services.AddSingleton<CatalogApplicationService>();
 builder.Services.AddSingleton<IMediaSettingsProbe, MediaSettingsProbe>();
 builder.Services.AddSingleton<IMediaSettingsService, MediaSettingsService>();
@@ -79,6 +99,7 @@ app.MapGet("/health/ready", (ServerReadinessState readiness) =>
 
 app.MapCatalogEndpoints();
 app.MapMediaSettingsEndpoints();
+app.MapMediaHookEndpoints();
 
 app.Run();
 
