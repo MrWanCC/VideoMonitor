@@ -306,7 +306,7 @@ public sealed class DeviceManagementGroupTests
         Assert.True(fixture.ViewModel.IsRootEditorOpen);
         Assert.True(fixture.ViewModel.HasUnsavedDraft);
         Assert.Equal("Unsubmitted", fixture.ViewModel.RootEditName);
-        Assert.Equal("GROUP_REVISION_CONFLICT", fixture.ViewModel.RootEditError);
+        Assert.Equal("配置已被更新，请刷新后重试。", fixture.ViewModel.RootEditError);
         Assert.False(fixture.ViewModel.LastOperationSucceeded);
     }
 
@@ -326,7 +326,7 @@ public sealed class DeviceManagementGroupTests
         Assert.True(fixture.ViewModel.IsRootEditorOpen);
         Assert.True(fixture.ViewModel.HasUnsavedDraft);
         Assert.Equal("Unsubmitted", fixture.ViewModel.RootEditName);
-        Assert.Equal("CATALOG_MUTATION_UNCERTAIN", fixture.ViewModel.RootEditError);
+        Assert.Equal("操作结果暂无法确认，请刷新后检查。", fixture.ViewModel.RootEditError);
         Assert.False(fixture.ViewModel.LastOperationSucceeded);
     }
 
@@ -353,7 +353,7 @@ public sealed class DeviceManagementGroupTests
         await fixture.ViewModel.DeleteRootCommand.ExecuteAsync(root.Id);
 
         Assert.Contains(fixture.ViewModel.CatalogGroups, group => group.Id == root.Id);
-        Assert.Equal("GROUP_NOT_EMPTY", fixture.ViewModel.RootEditError);
+        Assert.Equal("分组仍有设备或子项，无法删除。", fixture.ViewModel.RootEditError);
         Assert.False(fixture.ViewModel.LastOperationSucceeded);
     }
 
@@ -369,7 +369,7 @@ public sealed class DeviceManagementGroupTests
         await fixture.ViewModel.DeleteRootCommand.ExecuteAsync(root.Id);
 
         Assert.Contains(fixture.ViewModel.CatalogGroups, group => group.Id == root.Id);
-        Assert.Equal("CATALOG_MUTATION_UNCERTAIN", fixture.ViewModel.RootEditError);
+        Assert.Equal("操作结果暂无法确认，请刷新后检查。", fixture.ViewModel.RootEditError);
         Assert.False(fixture.ViewModel.LastOperationSucceeded);
     }
 
@@ -385,7 +385,7 @@ public sealed class DeviceManagementGroupTests
         await fixture.ViewModel.DeleteRootCommand.ExecuteAsync(root.Id);
 
         Assert.False(fixture.ViewModel.IsRootEditorOpen);
-        Assert.Equal("GROUP_NOT_EMPTY", fixture.ViewModel.RootEditError);
+        Assert.Equal("分组仍有设备或子项，无法删除。", fixture.ViewModel.RootEditError);
         Assert.False(fixture.ViewModel.LastOperationSucceeded);
         Assert.Contains(fixture.ViewModel.CatalogGroups, group => group.Id == root.Id);
     }
@@ -472,6 +472,80 @@ public sealed class DeviceManagementGroupTests
         Assert.Equal(root.Id, fixture.Commands.LastCreateGroup.ParentId);
         Assert.Null(fixture.Commands.LastCreateGroup.Kind);
         Assert.False(fixture.ViewModel.HasUnsavedDraft);
+    }
+
+    [Fact]
+    public async Task DuplicateGroupCommitForSameEditingGroupId_PerformsOneMutation()
+    {
+        var root = Root("Root");
+        var commands = new RecordingCatalogCommandService(true)
+        {
+            CreateGroupRelease = new TaskCompletionSource<object?>(
+                TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        var fixture = RootFixture.WithGroups(root, commands);
+
+        fixture.ViewModel.BeginAddGroupCommand.Execute(root);
+        fixture.ViewModel.EditingGroupName = "401";
+
+        var firstCommit = fixture.ViewModel.CommitGroupEditCommand.ExecuteAsync(null);
+        await commands.CreateGroupEntered.Task;
+
+        var duplicateCommit = fixture.ViewModel.CommitGroupEditCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, commands.WriteCount);
+        commands.CreateGroupRelease.SetResult(null);
+        await Task.WhenAll(firstCommit, duplicateCommit);
+
+        Assert.Equal(1, commands.WriteCount);
+    }
+
+    [Fact]
+    public async Task DuplicateRenameCommitForSameEditingGroupId_PerformsOneMutation()
+    {
+        var root = Root("Root");
+        var child = Group("Child", root.Id, null);
+        var commands = new RecordingCatalogCommandService(true)
+        {
+            UpdateGroupRelease = new TaskCompletionSource<object?>(
+                TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        var fixture = new RootFixture(
+            new DeviceManagementReadModelStub([root, child], []),
+            commands);
+
+        fixture.ViewModel.BeginRenameGroupCommand.Execute(child);
+        fixture.ViewModel.EditingGroupName = "Renamed";
+
+        var firstCommit = fixture.ViewModel.CommitGroupEditCommand.ExecuteAsync(null);
+        await commands.UpdateGroupEntered.Task;
+
+        var duplicateCommit = fixture.ViewModel.CommitGroupEditCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, commands.WriteCount);
+        commands.UpdateGroupRelease.SetResult(null);
+        await Task.WhenAll(firstCommit, duplicateCommit);
+
+        Assert.Equal(1, commands.WriteCount);
+    }
+
+    [Fact]
+    public async Task GroupWriteFailure_UsesSafeChineseMessage()
+    {
+        var root = Root("Root");
+        var commands = new RecordingCatalogCommandService(true)
+        {
+            NextFailure = new CatalogApiException("CATALOG_WRITE_FAILED")
+        };
+        var fixture = RootFixture.WithGroups(root, commands);
+
+        fixture.ViewModel.BeginAddGroupCommand.Execute(root);
+        fixture.ViewModel.EditingGroupName = "401";
+        await fixture.ViewModel.CommitGroupEditCommand.ExecuteAsync(null);
+
+        Assert.Equal("设备配置保存失败，请重试。", fixture.ViewModel.GroupEditError);
+        Assert.DoesNotContain("CATALOG_WRITE_FAILED", fixture.ViewModel.GroupEditError);
+        Assert.DoesNotContain("Catalog write failed", fixture.ViewModel.GroupEditError);
     }
 
     [Fact]
@@ -656,7 +730,7 @@ public sealed class DeviceManagementGroupTests
 
     private sealed class RootFixture
     {
-        private RootFixture(
+        public RootFixture(
             DeviceManagementReadModelStub readModel,
             RecordingCatalogCommandService commands)
         {
@@ -675,6 +749,13 @@ public sealed class DeviceManagementGroupTests
         public static RootFixture WithGroups(
             params DeviceGroupDto[] groups) =>
             Create(groups, [], true);
+
+        public static RootFixture WithGroups(
+            DeviceGroupDto root,
+            RecordingCatalogCommandService commands) =>
+            new(
+                new DeviceManagementReadModelStub([root], []),
+                commands);
 
         public static RootFixture WithGroups(
             DeviceGroupDto root,
@@ -736,31 +817,46 @@ public sealed class DeviceManagementGroupTests
         public Guid? LastDeleteGroupId { get; private set; }
         public long? LastDeleteGroupRevision { get; private set; }
         public Exception? NextFailure { get; set; }
+        public TaskCompletionSource<object?> CreateGroupEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<object?>? CreateGroupRelease { get; set; }
+        public TaskCompletionSource<object?> UpdateGroupEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<object?>? UpdateGroupRelease { get; set; }
 
         public event EventHandler? AvailabilityChanged;
 
         public void RaiseAvailabilityChanged() =>
             AvailabilityChanged?.Invoke(this, EventArgs.Empty);
 
-        public Task<DeviceGroupDto> CreateGroupAsync(
+        public async Task<DeviceGroupDto> CreateGroupAsync(
             CreateGroupRequest request,
             CancellationToken cancellationToken = default)
         {
             WriteCount++;
             LastCreateGroup = request;
-            return NextFailure is not null
-                ? Task.FromException<DeviceGroupDto>(NextFailure)
-                : Task.FromResult(new DeviceGroupDto(
-                    request.Id,
-                    request.Name,
-                    request.ParentId,
-                    request.Sort,
-                    request.Enabled,
-                    request.Kind,
-                    1));
+            CreateGroupEntered.TrySetResult(null);
+            if (CreateGroupRelease is not null)
+            {
+                await CreateGroupRelease.Task;
+            }
+
+            if (NextFailure is not null)
+            {
+                throw NextFailure;
+            }
+
+            return new DeviceGroupDto(
+                request.Id,
+                request.Name,
+                request.ParentId,
+                request.Sort,
+                request.Enabled,
+                request.Kind,
+                1);
         }
 
-        public Task<DeviceGroupDto> UpdateGroupAsync(
+        public async Task<DeviceGroupDto> UpdateGroupAsync(
             Guid id,
             UpdateGroupRequest request,
             CancellationToken cancellationToken = default)
@@ -768,16 +864,25 @@ public sealed class DeviceManagementGroupTests
             WriteCount++;
             LastUpdateId = id;
             LastUpdateGroup = request;
-            return NextFailure is not null
-                ? Task.FromException<DeviceGroupDto>(NextFailure)
-                : Task.FromResult(new DeviceGroupDto(
-                    id,
-                    request.Name,
-                    request.ParentId,
-                    request.Sort,
-                    request.Enabled,
-                    request.Kind,
-                    request.ExpectedRevision + 1));
+            UpdateGroupEntered.TrySetResult(null);
+            if (UpdateGroupRelease is not null)
+            {
+                await UpdateGroupRelease.Task;
+            }
+
+            if (NextFailure is not null)
+            {
+                throw NextFailure;
+            }
+
+            return new DeviceGroupDto(
+                id,
+                request.Name,
+                request.ParentId,
+                request.Sort,
+                request.Enabled,
+                request.Kind,
+                request.ExpectedRevision + 1);
         }
 
         public Task DeleteGroupAsync(

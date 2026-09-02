@@ -151,7 +151,7 @@ public sealed class DeviceManagementDraftTests
 
         Assert.True(viewModel.HasUnsavedDraft);
         Assert.Equal("Changed", viewModel.EditingGroupName);
-        Assert.Equal("GROUP_REVISION_CONFLICT", viewModel.GroupEditError);
+        Assert.Equal("配置已被更新，请刷新后重试。", viewModel.GroupEditError);
         Assert.False(viewModel.LastOperationSucceeded);
     }
 
@@ -176,7 +176,7 @@ public sealed class DeviceManagementDraftTests
 
         Assert.True(viewModel.HasUnsavedDraft);
         Assert.Equal("Changed", viewModel.EditingGroupName);
-        Assert.Equal("CATALOG_MUTATION_UNCERTAIN", viewModel.GroupEditError);
+        Assert.Equal("操作结果暂无法确认，请刷新后检查。", viewModel.GroupEditError);
         Assert.False(viewModel.LastOperationSucceeded);
     }
 
@@ -198,7 +198,7 @@ public sealed class DeviceManagementDraftTests
         viewModel.DeleteGroupCommand.Execute(child);
         await viewModel.ConfirmDialogCommand.ExecuteAsync(null);
 
-        Assert.Equal("CATALOG_MUTATION_UNCERTAIN", viewModel.GroupEditError);
+        Assert.Equal("操作结果暂无法确认，请刷新后检查。", viewModel.GroupEditError);
         Assert.Contains(viewModel.CatalogGroups, group => group.Id == child.Id);
         Assert.False(viewModel.HasUnsavedDraft);
         Assert.False(viewModel.LastOperationSucceeded);
@@ -460,6 +460,34 @@ public sealed class DeviceManagementDraftTests
         Assert.False(viewModel.LastOperationSucceeded);
         Assert.Equal("CATALOG_MUTATION_UNCERTAIN", viewModel.OperationErrorCode);
         Assert.DoesNotContain("new-secret", viewModel.OperationError ?? string.Empty);
+    }
+
+    [Theory]
+    [InlineData("CATALOG_WRITE_FAILED", "设备配置保存失败，请重试。")]
+    [InlineData("CATALOG_UNAVAILABLE", "中央服务器暂不可用。")]
+    [InlineData("CATALOG_VALIDATION_FAILED", "设备配置不完整或格式不正确。")]
+    [InlineData("DEVICE_REVISION_CONFLICT", "配置已被更新，请刷新后重试。")]
+    [InlineData("UNKNOWN_CATALOG_ERROR", "操作失败，请重试。")]
+    public async Task CatalogApiError_UsesSafeChineseOperationMessage(
+        string code,
+        string expectedMessage)
+    {
+        var device = ExistingDevice();
+        var commands = new FakeCatalogCommandService
+        {
+            NextFailure = new CatalogApiException(code)
+        };
+        var viewModel = new DeviceManagementViewModel(
+            new DeviceReadModelStub(device),
+            commands);
+        viewModel.EditDeviceCommand.Execute(device);
+
+        await viewModel.SaveDeviceCommand.ExecuteAsync(null);
+
+        Assert.Equal(code, viewModel.OperationErrorCode);
+        Assert.Equal(expectedMessage, viewModel.OperationError);
+        Assert.DoesNotContain(code, viewModel.OperationError, StringComparison.Ordinal);
+        Assert.DoesNotContain("Catalog", viewModel.OperationError, StringComparison.Ordinal);
     }
 
     private static DeviceGroupDto Group(

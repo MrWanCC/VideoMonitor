@@ -1,9 +1,11 @@
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
 using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Infrastructure.Persistence;
+using VideoMonitor.Server.Catalog;
 
 namespace VideoMonitor.Server.Tests;
 
@@ -44,6 +46,27 @@ public sealed class CatalogApplicationServiceTests
         AssertError(failure, "CATALOG_READ_FAILED", 500);
         Assert.DoesNotContain("TOP-SECRET-PASSWORD", GetErrorMessage(failure));
         Assert.DoesNotContain("catalog.db", GetErrorMessage(failure));
+    }
+
+    [Fact]
+    public async Task ReadFailure_LogsOperationAndExceptionTypeWithoutExceptionDetails()
+    {
+        var fake = new FakeCentralCatalogRepository
+        {
+            GetCatalogException = new InvalidOperationException(
+                "TOP-SECRET-PASSWORD C:\\secret\\catalog.db")
+        };
+        var logger = new RecordingLogger();
+        var service = CreateService(fake, logger);
+
+        await InvokeAsync(service, "GetCatalogAsync", CancellationToken.None);
+
+        var message = Assert.Single(logger.Messages);
+        Assert.Contains("Catalog operation failed safely", message);
+        Assert.Contains("GetCatalogAsync", message);
+        Assert.Contains(nameof(InvalidOperationException), message);
+        Assert.DoesNotContain("TOP-SECRET-PASSWORD", message);
+        Assert.DoesNotContain("catalog.db", message);
     }
 
     [Fact]
@@ -1123,12 +1146,17 @@ public sealed class CatalogApplicationServiceTests
             cancellation.Token));
     }
 
-    private static object CreateService(FakeCentralCatalogRepository repository)
+    private static object CreateService(
+        FakeCentralCatalogRepository repository,
+        ILogger<CatalogApplicationService>? logger = null)
     {
         var serviceType = typeof(Program).Assembly.GetType(
             "VideoMonitor.Server.Catalog.CatalogApplicationService");
         Assert.NotNull(serviceType);
-        var service = Activator.CreateInstance(serviceType!, repository);
+        var service = Activator.CreateInstance(
+            serviceType!,
+            repository,
+            logger ?? new RecordingLogger());
         Assert.NotNull(service);
         return service!;
     }
@@ -1277,6 +1305,25 @@ public sealed class CatalogApplicationServiceTests
         var property = source!.GetType().GetProperty(propertyName);
         Assert.NotNull(property);
         return property!.GetValue(source);
+    }
+
+    private sealed class RecordingLogger : ILogger<CatalogApplicationService>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull =>
+            null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
     }
 
     private sealed class FakeCentralCatalogRepository : ICentralCatalogRepository

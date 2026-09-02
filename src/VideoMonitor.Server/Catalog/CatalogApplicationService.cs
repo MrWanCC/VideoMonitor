@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Logging;
 using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Infrastructure.Persistence;
@@ -18,11 +19,16 @@ public sealed class CatalogApplicationService
     private const string WriteFailedCode = "CATALOG_WRITE_FAILED";
 
     private readonly ICentralCatalogRepository repository;
+    private readonly ILogger<CatalogApplicationService> logger;
 
-    public CatalogApplicationService(ICentralCatalogRepository repository)
+    public CatalogApplicationService(
+        ICentralCatalogRepository repository,
+        ILogger<CatalogApplicationService> logger)
     {
         this.repository = repository ??
             throw new ArgumentNullException(nameof(repository));
+        this.logger = logger ??
+            throw new ArgumentNullException(nameof(logger));
     }
 
     public async Task<CatalogOperationResult<CatalogSnapshotDto>> GetCatalogAsync(
@@ -38,8 +44,9 @@ public sealed class CatalogApplicationService
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogFailure(nameof(GetCatalogAsync), exception);
             return ReadFailure<CatalogSnapshotDto>();
         }
     }
@@ -57,8 +64,9 @@ public sealed class CatalogApplicationService
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogFailure(nameof(GetGroupsAsync), exception);
             return ReadFailure<IReadOnlyList<DeviceGroupDto>>();
         }
     }
@@ -87,8 +95,9 @@ public sealed class CatalogApplicationService
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogFailure(nameof(GetDevicesAsync), exception);
             return ReadFailure<IReadOnlyList<CameraDeviceDto>>();
         }
     }
@@ -117,8 +126,9 @@ public sealed class CatalogApplicationService
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogFailure(nameof(GetDeviceAsync), exception);
             return ReadFailure<CameraDeviceDto>();
         }
     }
@@ -161,8 +171,9 @@ public sealed class CatalogApplicationService
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogFailure(nameof(CreateGroupAsync), exception);
             return WriteFailure<DeviceGroupDto>();
         }
     }
@@ -217,8 +228,9 @@ public sealed class CatalogApplicationService
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogFailure(nameof(UpdateGroupAsync), exception);
             return WriteFailure<DeviceGroupDto>();
         }
     }
@@ -246,8 +258,9 @@ public sealed class CatalogApplicationService
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogFailure(nameof(DeleteGroupAsync), exception);
             return WriteFailure<object?>();
         }
     }
@@ -281,8 +294,9 @@ public sealed class CatalogApplicationService
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogFailure(nameof(CreateDeviceAsync), exception);
             return WriteFailure<CameraDeviceDto>();
         }
     }
@@ -321,8 +335,9 @@ public sealed class CatalogApplicationService
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogFailure(nameof(UpdateDeviceAsync), exception);
             return WriteFailure<CameraDeviceDto>();
         }
     }
@@ -350,11 +365,18 @@ public sealed class CatalogApplicationService
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogFailure(nameof(DeleteDeviceAsync), exception);
             return WriteFailure<object?>();
         }
     }
+
+    private void LogFailure(string operation, Exception exception) =>
+        logger.LogError(
+            "Catalog operation failed safely. Operation={Operation} ExceptionType={ExceptionType}",
+            operation,
+            exception.GetType().Name);
 
     private static bool TryValidateCreateGroup(
         CreateGroupRequest? request,

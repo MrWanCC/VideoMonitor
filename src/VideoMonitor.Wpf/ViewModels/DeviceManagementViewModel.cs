@@ -31,6 +31,8 @@ public sealed class DeviceManagementViewModel : ObservableObject
     private readonly IDeviceCatalogReadModel? readModel;
     private readonly IDeviceCatalogCommandService? commandService;
     private readonly bool centralMode;
+    private readonly object groupCommitFlightGate = new();
+    private readonly Dictionary<Guid, Task> groupCommitFlights = [];
     private DeviceGroupDto? selectedCatalogGroup;
     private Guid? editingCatalogParentId;
     private bool editingCatalogGroupIsNew;
@@ -625,7 +627,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
         if (!IsServerAvailable)
         {
-            RootEditError = "Catalog API is unavailable.";
+            RootEditError = MapCatalogErrorMessage("CATALOG_UNAVAILABLE");
             return;
         }
 
@@ -671,12 +673,12 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
         catch (CatalogMutationUncertainException)
         {
-            RootEditError = "CATALOG_MUTATION_UNCERTAIN";
+            RootEditError = MapCatalogErrorMessage("CATALOG_MUTATION_UNCERTAIN");
             LastOperationSucceeded = false;
         }
         catch (CatalogApiException exception)
         {
-            RootEditError = exception.Code;
+            RootEditError = MapCatalogErrorMessage(exception.Code);
             LastOperationSucceeded = false;
         }
         catch (OperationCanceledException)
@@ -685,7 +687,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
         catch
         {
-            RootEditError = "Catalog write failed.";
+            RootEditError = MapCatalogErrorMessage("CATALOG_WRITE_FAILED");
             LastOperationSucceeded = false;
         }
         finally
@@ -720,7 +722,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
         LastOperationSucceeded = false;
         if (!IsServerAvailable)
         {
-            RootEditError = "Catalog API is unavailable.";
+            RootEditError = MapCatalogErrorMessage("CATALOG_UNAVAILABLE");
             return;
         }
 
@@ -741,12 +743,12 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
         catch (CatalogMutationUncertainException)
         {
-            RootEditError = "CATALOG_MUTATION_UNCERTAIN";
+            RootEditError = MapCatalogErrorMessage("CATALOG_MUTATION_UNCERTAIN");
             LastOperationSucceeded = false;
         }
         catch (CatalogApiException exception)
         {
-            RootEditError = exception.Code;
+            RootEditError = MapCatalogErrorMessage(exception.Code);
             LastOperationSucceeded = false;
         }
         catch (OperationCanceledException)
@@ -755,7 +757,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
         catch
         {
-            RootEditError = "Catalog write failed.";
+            RootEditError = MapCatalogErrorMessage("CATALOG_WRITE_FAILED");
             LastOperationSucceeded = false;
         }
         finally
@@ -899,15 +901,42 @@ public sealed class DeviceManagementViewModel : ObservableObject
         RebuildGroupSections();
     }
 
-    private async Task CommitGroupEditAsync()
+    private Task CommitGroupEditAsync()
     {
         if (!centralMode)
         {
             CommitGroupEditLegacy();
-            return;
+            return Task.CompletedTask;
         }
 
-        if (EditingGroupId is not { } groupId
+        if (EditingGroupId is not { } groupId)
+        {
+            SetGroupDraftPending(false);
+            ClearGroupEditState();
+            return Task.CompletedTask;
+        }
+
+        lock (groupCommitFlightGate)
+        {
+            if (groupCommitFlights.TryGetValue(groupId, out var existing))
+            {
+                return existing;
+            }
+
+            var task = CommitGroupEditCoreAsync(groupId);
+            groupCommitFlights[groupId] = task;
+            _ = task.ContinueWith(
+                _ => RemoveGroupCommitFlight(groupId),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            return task;
+        }
+    }
+
+    private async Task CommitGroupEditCoreAsync(Guid groupId)
+    {
+        if (EditingGroupId != groupId
             || editingCatalogParentId is not { } parentId
             || commandService is null)
         {
@@ -925,7 +954,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
 
         if (!IsServerAvailable)
         {
-            GroupEditError = "Catalog API is unavailable.";
+            GroupEditError = MapCatalogErrorMessage("CATALOG_UNAVAILABLE");
             return;
         }
 
@@ -982,12 +1011,12 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
         catch (CatalogMutationUncertainException)
         {
-            GroupEditError = "CATALOG_MUTATION_UNCERTAIN";
+            GroupEditError = MapCatalogErrorMessage("CATALOG_MUTATION_UNCERTAIN");
             LastOperationSucceeded = false;
         }
         catch (CatalogApiException exception)
         {
-            GroupEditError = exception.Code;
+            GroupEditError = MapCatalogErrorMessage(exception.Code);
             LastOperationSucceeded = false;
         }
         catch (OperationCanceledException)
@@ -996,8 +1025,16 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
         catch
         {
-            GroupEditError = "Catalog write failed.";
+            GroupEditError = MapCatalogErrorMessage("CATALOG_WRITE_FAILED");
             LastOperationSucceeded = false;
+        }
+    }
+
+    private void RemoveGroupCommitFlight(Guid groupId)
+    {
+        lock (groupCommitFlightGate)
+        {
+            groupCommitFlights.Remove(groupId);
         }
     }
 
@@ -1084,7 +1121,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
             {
                 if (commandService is null || !IsServerAvailable)
                 {
-                    GroupEditError = "Catalog API is unavailable.";
+                    GroupEditError = MapCatalogErrorMessage("CATALOG_UNAVAILABLE");
                     return;
                 }
 
@@ -1101,12 +1138,12 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 }
                 catch (CatalogApiException exception)
                 {
-                    GroupEditError = exception.Code;
+                    GroupEditError = MapCatalogErrorMessage(exception.Code);
                     LastOperationSucceeded = false;
                 }
                 catch (CatalogMutationUncertainException)
                 {
-                    GroupEditError = "CATALOG_MUTATION_UNCERTAIN";
+                    GroupEditError = MapCatalogErrorMessage("CATALOG_MUTATION_UNCERTAIN");
                     LastOperationSucceeded = false;
                 }
                 catch (OperationCanceledException)
@@ -1115,7 +1152,7 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 }
                 catch
                 {
-                    GroupEditError = "Catalog write failed.";
+                    GroupEditError = MapCatalogErrorMessage("CATALOG_WRITE_FAILED");
                     LastOperationSucceeded = false;
                 }
             });
@@ -1380,7 +1417,9 @@ public sealed class DeviceManagementViewModel : ObservableObject
         if (!IsServerAvailable || commandService is null)
         {
             SetDeviceDraftPending(true);
-            SetOperationError("CATALOG_UNAVAILABLE", "Catalog API is unavailable.");
+            SetOperationError(
+                "CATALOG_UNAVAILABLE",
+                MapCatalogErrorMessage("CATALOG_UNAVAILABLE"));
             return;
         }
 
@@ -1421,13 +1460,15 @@ public sealed class DeviceManagementViewModel : ObservableObject
             await StopTestPreviewAsync().ConfigureAwait(true);
             CloseCentralEditor();
         }
-        catch (CatalogMutationUncertainException exception)
+        catch (CatalogMutationUncertainException)
         {
-            SetOperationError("CATALOG_MUTATION_UNCERTAIN", exception.Message);
+            SetOperationError(
+                "CATALOG_MUTATION_UNCERTAIN",
+                MapCatalogErrorMessage("CATALOG_MUTATION_UNCERTAIN"));
         }
         catch (CatalogApiException exception)
         {
-            SetOperationError(exception.Code, exception.Code);
+            SetOperationError(exception.Code, MapCatalogErrorMessage(exception.Code));
         }
         catch (OperationCanceledException)
         {
@@ -1435,7 +1476,9 @@ public sealed class DeviceManagementViewModel : ObservableObject
         }
         catch
         {
-            SetOperationError("CATALOG_WRITE_FAILED", "Catalog write failed.");
+            SetOperationError(
+                "CATALOG_WRITE_FAILED",
+                MapCatalogErrorMessage("CATALOG_WRITE_FAILED"));
         }
         finally
         {
@@ -1582,6 +1625,22 @@ public sealed class DeviceManagementViewModel : ObservableObject
         string.IsNullOrWhiteSpace(EditDraft.ChannelName)
             ? $"通道{channelNo}"
             : EditDraft.ChannelName.Trim();
+
+    private static string MapCatalogErrorMessage(string code) =>
+        code switch
+        {
+            "CATALOG_WRITE_FAILED" => "设备配置保存失败，请重试。",
+            "CATALOG_UNAVAILABLE" => "中央服务器暂不可用。",
+            "CATALOG_VALIDATION_FAILED" => "设备配置不完整或格式不正确。",
+            "CATALOG_MUTATION_UNCERTAIN" => "操作结果暂无法确认，请刷新后检查。",
+            "DEVICE_REVISION_CONFLICT" or "GROUP_REVISION_CONFLICT" =>
+                "配置已被更新，请刷新后重试。",
+            "GROUP_NOT_EMPTY" => "分组仍有设备或子项，无法删除。",
+            "CHANNEL_CONFLICT" => "通道配置存在冲突。",
+            "GROUP_NOT_FOUND" => "分组不存在。",
+            "DEVICE_NOT_FOUND" => "设备不存在。",
+            _ => "操作失败，请重试。"
+        };
 
     private void SetOperationError(string code, string message)
     {
@@ -1947,7 +2006,9 @@ public sealed class DeviceManagementViewModel : ObservableObject
             {
                 if (commandService is null || !IsServerAvailable)
                 {
-                    SetOperationError("CATALOG_UNAVAILABLE", "Catalog API is unavailable.");
+                    SetOperationError(
+                        "CATALOG_UNAVAILABLE",
+                        MapCatalogErrorMessage("CATALOG_UNAVAILABLE"));
                     return;
                 }
 
@@ -1966,11 +2027,11 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 {
                     SetOperationError(
                         "CATALOG_MUTATION_UNCERTAIN",
-                        "Catalog mutation result could not be confirmed.");
+                        MapCatalogErrorMessage("CATALOG_MUTATION_UNCERTAIN"));
                 }
                 catch (CatalogApiException exception)
                 {
-                    SetOperationError(exception.Code, exception.Code);
+                    SetOperationError(exception.Code, MapCatalogErrorMessage(exception.Code));
                 }
                 catch (OperationCanceledException)
                 {
@@ -1978,7 +2039,9 @@ public sealed class DeviceManagementViewModel : ObservableObject
                 }
                 catch
                 {
-                    SetOperationError("CATALOG_WRITE_FAILED", "Catalog write failed.");
+                    SetOperationError(
+                        "CATALOG_WRITE_FAILED",
+                        MapCatalogErrorMessage("CATALOG_WRITE_FAILED"));
                 }
             });
     }

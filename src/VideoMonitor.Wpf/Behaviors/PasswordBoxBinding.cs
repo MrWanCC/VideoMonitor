@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 
 namespace VideoMonitor.Wpf.Behaviors;
 
@@ -15,15 +16,15 @@ public static class PasswordBoxBinding
         typeof(string),
         typeof(PasswordBoxBinding),
         new FrameworkPropertyMetadata(
-            string.Empty,
+            null,
             FrameworkPropertyMetadataOptions.BindsTwoWayByDefault,
             OnBoundPasswordChanged));
 
     public static string GetBoundPassword(DependencyObject target) =>
-        (string)target.GetValue(BoundPasswordProperty);
+        target.GetValue(BoundPasswordProperty) as string ?? string.Empty;
 
     public static void SetBoundPassword(DependencyObject target, string value) =>
-        target.SetValue(BoundPasswordProperty, value);
+        target.SetCurrentValue(BoundPasswordProperty, value);
 
     private static void OnBoundPasswordChanged(
         DependencyObject dependencyObject,
@@ -47,7 +48,15 @@ public static class PasswordBoxBinding
     {
         var passwordBox = (PasswordBox)sender;
         passwordBox.SetValue(IsUpdatingProperty, true);
-        SetBoundPassword(passwordBox, passwordBox.Password);
-        passwordBox.SetValue(IsUpdatingProperty, false);
+
+        try
+        {
+            passwordBox.SetCurrentValue(BoundPasswordProperty, passwordBox.Password);
+            passwordBox.GetBindingExpression(BoundPasswordProperty)?.UpdateSource();
+        }
+        finally
+        {
+            passwordBox.SetValue(IsUpdatingProperty, false);
+        }
     }
 }
