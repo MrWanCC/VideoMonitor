@@ -39,6 +39,9 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
     private PlaybackSession? currentSession;
     private FormalPlaybackSource? currentSource;
     private PlaybackKey? currentKey;
+    private SessionPlaybackRuntimeEventSink? currentRuntimeSink;
+    private long currentGeneration;
+    private int runtimeRecoveryIndex;
     private bool disposed;
 
     public FormalPlaybackCoordinator(
@@ -89,20 +92,59 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
         StreamType streamType,
         CancellationToken cancellationToken = default)
     {
-        var key = new PlaybackKey(deviceId, channelId, streamType);
+        await StartAsyncCore(
+                new PlaybackKey(deviceId, channelId, streamType),
+                cancellationToken,
+                resetRuntimeRecovery: true,
+                cancelRuntimeRecovery: true,
+                expectedGeneration: null)
+            .ConfigureAwait(false);
+    }
+
+    private async Task StartAsyncCore(
+        PlaybackKey key,
+        CancellationToken cancellationToken,
+        bool resetRuntimeRecovery,
+        bool cancelRuntimeRecovery,
+        long? expectedGeneration)
+    {
         Task? previousTask;
         var sameKey = false;
+        long generation;
         lock (stateGate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            if (currentKey == key && operationTask is not null)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (expectedGeneration is { } requiredGeneration
+                && requiredGeneration != currentGeneration)
+            {
+                return;
+            }
+
+            if (currentKey == key
+                && (currentSession is not null
+                    || operationTask is { IsCompleted: false }))
             {
                 previousTask = operationTask;
                 sameKey = true;
+                generation = currentGeneration;
             }
             else
             {
+                generation = ++currentGeneration;
                 operationCancellation?.Cancel();
+                if (cancelRuntimeRecovery)
+                {
+                    runtimeRecoveryCancellation?.Cancel();
+                }
+
+                if (resetRuntimeRecovery)
+                {
+                    runtimeRecoveryIndex = 0;
+                }
+
+                currentRuntimeSink = null;
+                currentKey = key;
                 previousTask = operationTask;
             }
         }
@@ -117,22 +159,35 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
             return;
         }
 
+        if (!IsCurrentRequest(generation, key))
+        {
+            return;
+        }
+
         if (previousTask is not null)
         {
             await IgnoreCancellationAsync(previousTask).ConfigureAwait(false);
             await StopCurrentSessionAsync(previousTask).ConfigureAwait(false);
         }
 
+        if (!IsCurrentRequest(generation, key))
+        {
+            return;
+        }
+
         Task task;
         lock (stateGate)
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
-            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsCurrentRequestNoLock(generation, key))
+            {
+                return;
+            }
+
             operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken);
-            currentKey = key;
             task = operationTask = RunAsync(
                 key,
+                generation,
                 operationCancellation,
                 previousTask: null);
         }
@@ -145,10 +200,13 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
         Task? task;
         lock (stateGate)
         {
+            currentGeneration++;
             operationCancellation?.Cancel();
             runtimeRecoveryCancellation?.Cancel();
             task = operationTask;
             currentKey = null;
+            currentRuntimeSink = null;
+            runtimeRecoveryIndex = 0;
         }
 
         if (task is not null)
@@ -162,7 +220,16 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
     public void Publish(PlaybackRuntimeEvent runtimeEvent)
     {
         ArgumentNullException.ThrowIfNull(runtimeEvent);
-        _ = PublishAsync(runtimeEvent);
+        SessionPlaybackRuntimeEventSink? sink;
+        lock (stateGate)
+        {
+            sink = currentRuntimeSink;
+        }
+
+        if (sink is not null)
+        {
+            PublishFromAttempt(sink, runtimeEvent);
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -176,10 +243,13 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
             }
 
             disposed = true;
+            currentGeneration++;
             operationCancellation?.Cancel();
             runtimeRecoveryCancellation?.Cancel();
             task = operationTask;
             currentKey = null;
+            currentRuntimeSink = null;
+            runtimeRecoveryIndex = 0;
         }
 
         if (task is not null)
@@ -199,6 +269,7 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
 
     private async Task RunAsync(
         PlaybackKey key,
+        long generation,
         CancellationTokenSource cancellation,
         Task? previousTask)
     {
@@ -213,11 +284,20 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
         {
             FormalPlaybackSource? source = null;
             PlaybackSession? session = null;
+            SessionPlaybackRuntimeEventSink? runtimeSink = null;
             try
             {
-                await dispatcher
-                    .InvokeAsync(tile.ShowLoading, cancellationToken)
-                    .ConfigureAwait(false);
+                if (!await InvokeIfCurrentAsync(
+                        generation,
+                        key,
+                        cancellation,
+                        tile.ShowLoading,
+                        cancellationToken)
+                    .ConfigureAwait(false))
+                {
+                    return;
+                }
+
                 source = await sourceProvider
                     .PrepareAsync(
                         key.DeviceId,
@@ -225,48 +305,46 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
                         key.StreamType,
                         cancellationToken)
                     .ConfigureAwait(false);
-                cancellationToken.ThrowIfCancellationRequested();
-                session = startPlayback(source, this);
-                lock (stateGate)
+                if (!IsCurrentRequest(generation, key, cancellation))
                 {
-                    currentSource = source;
-                    currentSession = session;
+                    await ReleaseSafelyAsync(source).ConfigureAwait(false);
+                    return;
                 }
 
-                await dispatcher
-                    .InvokeAsync(() => tile.ShowPlaying(session), cancellationToken)
-                    .ConfigureAwait(false);
+                runtimeSink = new SessionPlaybackRuntimeEventSink(this, generation, key);
+                session = startPlayback(source, runtimeSink);
+                if (!TryCommitAttempt(generation, key, cancellation, source, session, runtimeSink))
+                {
+                    await CleanupAttemptAsync(session, source, runtimeSink)
+                        .ConfigureAwait(false);
+                    return;
+                }
+
+                var committedSession = session;
+                if (!await InvokeIfCurrentAsync(
+                        generation,
+                        key,
+                        cancellation,
+                        () => tile.ShowPlaying(committedSession),
+                        CancellationToken.None)
+                    .ConfigureAwait(false))
+                {
+                    await CleanupAttemptAsync(session, source, runtimeSink)
+                        .ConfigureAwait(false);
+                }
+
                 return;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                if (session is not null)
-                {
-                    stopPlayback(session);
-                }
-
-                if (source is not null)
-                {
-                    await ReleaseSafelyAsync(source).ConfigureAwait(false);
-                }
-
-                ClearCurrentIf(session, source);
-
+                await CleanupAttemptAsync(session, source, runtimeSink)
+                    .ConfigureAwait(false);
                 return;
             }
             catch (Exception exception) when (IsTransient(exception))
             {
-                if (session is not null)
-                {
-                    stopPlayback(session);
-                }
-
-                if (source is not null)
-                {
-                    await ReleaseSafelyAsync(source).ConfigureAwait(false);
-                }
-
-                ClearCurrentIf(session, source);
+                await CleanupAttemptAsync(session, source, runtimeSink)
+                    .ConfigureAwait(false);
 
                 var recoveryDelay = RecoveryDelays[Math.Min(retryIndex, RecoveryDelays.Length - 1)];
                 retryIndex++;
@@ -281,21 +359,14 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
             }
             catch (Exception exception)
             {
-                if (session is not null)
-                {
-                    stopPlayback(session);
-                }
-
-                if (source is not null)
-                {
-                    await ReleaseSafelyAsync(source).ConfigureAwait(false);
-                }
-
-                ClearCurrentIf(session, source);
+                await CleanupAttemptAsync(session, source, runtimeSink)
+                    .ConfigureAwait(false);
 
                 var safeCode = GetSafeFailureCode(exception);
-                await dispatcher
-                    .InvokeAsync(
+                await InvokeIfCurrentAsync(
+                        generation,
+                        key,
+                        cancellation,
                         () => tile.ShowError("播放失败", safeCode),
                         CancellationToken.None)
                     .ConfigureAwait(false);
@@ -304,13 +375,31 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
         }
     }
 
-    private async Task PublishAsync(PlaybackRuntimeEvent runtimeEvent)
+    private void PublishFromAttempt(
+        SessionPlaybackRuntimeEventSink runtimeSink,
+        PlaybackRuntimeEvent runtimeEvent)
+    {
+        ArgumentNullException.ThrowIfNull(runtimeEvent);
+        lock (stateGate)
+        {
+            if (!IsCurrentAttemptNoLock(runtimeSink, runtimeEvent))
+            {
+                return;
+            }
+        }
+
+        _ = PublishAsync(runtimeSink, runtimeEvent);
+    }
+
+    private async Task PublishAsync(
+        SessionPlaybackRuntimeEventSink runtimeSink,
+        PlaybackRuntimeEvent runtimeEvent)
     {
         try
         {
             lock (stateGate)
             {
-                if (disposed || currentKey?.ChannelId != runtimeEvent.ChannelId)
+                if (!IsCurrentAttemptNoLock(runtimeSink, runtimeEvent))
                 {
                     return;
                 }
@@ -319,26 +408,36 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
             switch (runtimeEvent.Kind)
             {
                 case PlaybackRuntimeEventKind.Playing:
-                    await dispatcher
-                        .InvokeAsync(
+                    lock (stateGate)
+                    {
+                        if (IsCurrentAttemptNoLock(runtimeSink, runtimeEvent))
+                        {
+                            runtimeRecoveryIndex = 0;
+                        }
+                    }
+
+                    await InvokeIfAttemptAsync(
+                            runtimeSink,
                             () =>
                             {
-                                if (CurrentSession is not null)
+                                if (currentSession is not null)
                                 {
-                                    tile.ShowPlaying(CurrentSession);
+                                    tile.ShowPlaying(currentSession);
                                 }
-                            },
-                            CancellationToken.None)
+                            })
                         .ConfigureAwait(false);
                     break;
                 case PlaybackRuntimeEventKind.Stopped:
-                    await dispatcher
-                        .InvokeAsync(tile.ShowPlaceholder, CancellationToken.None)
+                    await InvokeIfAttemptAsync(
+                            runtimeSink,
+                            tile.ShowPlaceholder)
                         .ConfigureAwait(false);
-                    await RecoverFromRuntimeEventAsync(runtimeEvent).ConfigureAwait(false);
+                    await RecoverFromRuntimeEventAsync(runtimeSink)
+                        .ConfigureAwait(false);
                     break;
                 case PlaybackRuntimeEventKind.Failed:
-                    await RecoverFromRuntimeEventAsync(runtimeEvent).ConfigureAwait(false);
+                    await RecoverFromRuntimeEventAsync(runtimeSink)
+                        .ConfigureAwait(false);
                     break;
             }
         }
@@ -348,44 +447,44 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
     }
 
     private async Task RecoverFromRuntimeEventAsync(
-        PlaybackRuntimeEvent runtimeEvent)
+        SessionPlaybackRuntimeEventSink runtimeSink)
     {
         await runtimeRecoveryGate.WaitAsync().ConfigureAwait(false);
+        CancellationTokenSource? recoveryCancellation = null;
         try
         {
             PlaybackKey key;
             Task? task;
-            CancellationTokenSource recoveryCancellation;
+            long generation;
+            TimeSpan recoveryDelay;
             lock (stateGate)
             {
-                if (disposed
-                    || currentKey is not { } current
-                    || current.ChannelId != runtimeEvent.ChannelId
-                    || currentSession is null)
+                if (!IsCurrentAttemptNoLock(runtimeSink, null))
                 {
                     return;
                 }
 
-                key = current;
+                key = runtimeSink.Key;
+                generation = runtimeSink.Generation;
                 task = operationTask;
+                recoveryDelay = RecoveryDelays[
+                    Math.Min(runtimeRecoveryIndex, RecoveryDelays.Length - 1)];
+                runtimeRecoveryIndex++;
                 runtimeRecoveryCancellation?.Cancel();
-                runtimeRecoveryCancellation = new CancellationTokenSource();
-                recoveryCancellation = runtimeRecoveryCancellation;
+                recoveryCancellation = new CancellationTokenSource();
+                runtimeRecoveryCancellation = recoveryCancellation;
             }
 
             await StopCurrentSessionAsync(task).ConfigureAwait(false);
-            lock (stateGate)
+            if (!IsCurrentRecoveryRequest(generation, key, recoveryCancellation))
             {
-                if (disposed || currentKey != key)
-                {
-                    return;
-                }
+                return;
             }
 
             try
             {
                 await delay(
-                        RecoveryDelays[0],
+                        recoveryDelay,
                         recoveryCancellation.Token)
                     .ConfigureAwait(false);
             }
@@ -395,7 +494,17 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
                 return;
             }
 
-            await StartAsync(key.DeviceId, key.ChannelId, key.StreamType)
+            if (!IsCurrentRecoveryRequest(generation, key, recoveryCancellation))
+            {
+                return;
+            }
+
+            await StartAsyncCore(
+                    key,
+                    recoveryCancellation.Token,
+                    resetRuntimeRecovery: false,
+                    cancelRuntimeRecovery: false,
+                    expectedGeneration: generation)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -408,8 +517,11 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
         {
             lock (stateGate)
             {
-                runtimeRecoveryCancellation?.Dispose();
-                runtimeRecoveryCancellation = null;
+                if (ReferenceEquals(runtimeRecoveryCancellation, recoveryCancellation))
+                {
+                    runtimeRecoveryCancellation?.Dispose();
+                    runtimeRecoveryCancellation = null;
+                }
             }
 
             runtimeRecoveryGate.Release();
@@ -425,6 +537,154 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
         catch
         {
         }
+    }
+
+    private async Task CleanupAttemptAsync(
+        PlaybackSession? session,
+        FormalPlaybackSource? source,
+        SessionPlaybackRuntimeEventSink? runtimeSink)
+    {
+        if (session is not null)
+        {
+            stopPlayback(session);
+        }
+
+        if (source is not null)
+        {
+            await ReleaseSafelyAsync(source).ConfigureAwait(false);
+        }
+
+        ClearCurrentIf(session, source, runtimeSink);
+    }
+
+    private async Task<bool> InvokeIfCurrentAsync(
+        long generation,
+        PlaybackKey key,
+        CancellationTokenSource cancellation,
+        Action action,
+        CancellationToken cancellationToken)
+    {
+        var committed = false;
+        await dispatcher
+            .InvokeAsync(
+                () =>
+                {
+                    lock (stateGate)
+                    {
+                        if (IsCurrentRequestNoLock(generation, key, cancellation))
+                        {
+                            action();
+                            committed = true;
+                        }
+                    }
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+        return committed;
+    }
+
+    private async Task<bool> InvokeIfAttemptAsync(
+        SessionPlaybackRuntimeEventSink runtimeSink,
+        Action action)
+    {
+        var committed = false;
+        await dispatcher
+            .InvokeAsync(
+                () =>
+                {
+                    lock (stateGate)
+                    {
+                        if (IsCurrentAttemptNoLock(runtimeSink, null))
+                        {
+                            action();
+                            committed = true;
+                        }
+                    }
+                },
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        return committed;
+    }
+
+    private bool TryCommitAttempt(
+        long generation,
+        PlaybackKey key,
+        CancellationTokenSource cancellation,
+        FormalPlaybackSource source,
+        PlaybackSession session,
+        SessionPlaybackRuntimeEventSink runtimeSink)
+    {
+        lock (stateGate)
+        {
+            if (!IsCurrentRequestNoLock(generation, key, cancellation))
+            {
+                return false;
+            }
+
+            currentSource = source;
+            currentSession = session;
+            currentRuntimeSink = runtimeSink;
+            return true;
+        }
+    }
+
+    private bool IsCurrentRequest(long generation, PlaybackKey key)
+    {
+        lock (stateGate)
+        {
+            return IsCurrentRequestNoLock(generation, key);
+        }
+    }
+
+    private bool IsCurrentRequest(
+        long generation,
+        PlaybackKey key,
+        CancellationTokenSource cancellation)
+    {
+        lock (stateGate)
+        {
+            return IsCurrentRequestNoLock(generation, key, cancellation);
+        }
+    }
+
+    private bool IsCurrentRecoveryRequest(
+        long generation,
+        PlaybackKey key,
+        CancellationTokenSource cancellation)
+    {
+        lock (stateGate)
+        {
+            return !disposed
+                && currentGeneration == generation
+                && currentKey == key
+                && ReferenceEquals(runtimeRecoveryCancellation, cancellation)
+                && !cancellation.IsCancellationRequested;
+        }
+    }
+
+    private bool IsCurrentRequestNoLock(long generation, PlaybackKey key) =>
+        !disposed
+        && currentGeneration == generation
+        && currentKey == key;
+
+    private bool IsCurrentRequestNoLock(
+        long generation,
+        PlaybackKey key,
+        CancellationTokenSource cancellation) =>
+        IsCurrentRequestNoLock(generation, key)
+        && ReferenceEquals(operationCancellation, cancellation)
+        && !cancellation.IsCancellationRequested;
+
+    private bool IsCurrentAttemptNoLock(
+        SessionPlaybackRuntimeEventSink runtimeSink,
+        PlaybackRuntimeEvent? runtimeEvent)
+    {
+        return !disposed
+            && currentGeneration == runtimeSink.Generation
+            && currentKey == runtimeSink.Key
+            && ReferenceEquals(currentRuntimeSink, runtimeSink)
+            && currentSession is not null
+            && (runtimeEvent is null || runtimeEvent.ChannelId == runtimeSink.Key.ChannelId);
     }
 
     private async Task StopCurrentSessionAsync(Task? expectedTask)
@@ -443,6 +703,7 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
             source = currentSource;
             currentSession = null;
             currentSource = null;
+            currentRuntimeSink = null;
             operationTask = null;
             operationCancellation?.Dispose();
             operationCancellation = null;
@@ -461,7 +722,8 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
 
     private void ClearCurrentIf(
         PlaybackSession? session,
-        FormalPlaybackSource? source)
+        FormalPlaybackSource? source,
+        SessionPlaybackRuntimeEventSink? runtimeSink)
     {
         lock (stateGate)
         {
@@ -473,6 +735,11 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
             if (ReferenceEquals(currentSource, source))
             {
                 currentSource = null;
+            }
+
+            if (ReferenceEquals(currentRuntimeSink, runtimeSink))
+            {
+                currentRuntimeSink = null;
             }
         }
     }
@@ -496,6 +763,28 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
         catch (OperationCanceledException)
         {
         }
+    }
+
+    private sealed class SessionPlaybackRuntimeEventSink : IPlaybackRuntimeEventSink
+    {
+        private readonly FormalPlaybackCoordinator owner;
+
+        public SessionPlaybackRuntimeEventSink(
+            FormalPlaybackCoordinator owner,
+            long generation,
+            PlaybackKey key)
+        {
+            this.owner = owner;
+            Generation = generation;
+            Key = key;
+        }
+
+        public long Generation { get; }
+
+        public PlaybackKey Key { get; }
+
+        public void Publish(PlaybackRuntimeEvent runtimeEvent) =>
+            owner.PublishFromAttempt(this, runtimeEvent);
     }
 
     private readonly record struct PlaybackKey(

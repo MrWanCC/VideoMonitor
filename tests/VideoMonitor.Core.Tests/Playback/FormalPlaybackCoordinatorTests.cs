@@ -256,10 +256,385 @@ public sealed class FormalPlaybackCoordinatorTests
         await coordinator.DisposeAsync();
     }
 
+    [Fact]
+    public async Task RapidSwitchesOnlyLatestRequestCanCommitSession()
+    {
+        var deviceA = Guid.NewGuid();
+        var deviceB = Guid.NewGuid();
+        var deviceC = Guid.NewGuid();
+        var provider = new ControlledProvider(
+            [deviceA, deviceB, deviceC],
+            blockAll: true);
+        var createdStreams = new List<string>();
+        var stoppedStreams = new List<string>();
+        await using var coordinator = CreateCoordinator(
+            provider,
+            (source, _) =>
+            {
+                lock (createdStreams)
+                {
+                    createdStreams.Add(source.StreamId);
+                }
+                return new PlaybackSession(
+                    new PlaybackSource(
+                        source.ChannelId,
+                        source.StreamId,
+                        source.PlaybackUrl,
+                        null,
+                        false),
+                    null,
+                    null);
+            },
+            stop: session =>
+            {
+                lock (stoppedStreams)
+                {
+                    stoppedStreams.Add(session.StreamId);
+                }
+
+                session.Dispose();
+            });
+
+        var startA = coordinator.StartAsync(deviceA, provider.ChannelId, StreamType.Main);
+        await provider.WaitForPrepareAsync(deviceA);
+        var startB = coordinator.StartAsync(deviceB, provider.ChannelId, StreamType.Main);
+        var startC = coordinator.StartAsync(deviceC, provider.ChannelId, StreamType.Main);
+
+        provider.Release(deviceA);
+        await provider.WaitForPrepareAsync(deviceC);
+        provider.Release(deviceC);
+        await startC;
+
+        var bPrepare = provider.WaitForPrepareAsync(deviceB);
+        var bStarted = await Task.WhenAny(
+            bPrepare,
+            Task.Delay(TimeSpan.FromMilliseconds(500)));
+        if (ReferenceEquals(bStarted, bPrepare))
+        {
+            provider.Release(deviceB);
+        }
+
+        await Task.WhenAll(startA, startB, startC);
+
+        Assert.Equal("stream-" + deviceC.ToString("N"), coordinator.CurrentSource?.StreamId);
+        lock (createdStreams)
+        {
+            Assert.DoesNotContain("stream-" + deviceB.ToString("N"), createdStreams);
+        }
+
+        if (provider.PreparedDeviceIds.Contains(deviceB))
+        {
+            Assert.Contains(
+                provider.ReleasedSources,
+                source => source.DeviceId == deviceB);
+            lock (stoppedStreams)
+            {
+                Assert.Contains(
+                    "stream-" + deviceB.ToString("N"),
+                    stoppedStreams);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task StopInvalidatesQueuedStartBeforePreviousAttemptCompletes()
+    {
+        var deviceA = Guid.NewGuid();
+        var deviceB = Guid.NewGuid();
+        var provider = new ControlledProvider(
+            [deviceA, deviceB],
+            blockAll: false,
+            blockedDevices: [deviceA]);
+        await using var coordinator = CreateCoordinator(
+            provider,
+            (source, _) => new PlaybackSession(
+                new PlaybackSource(
+                    source.ChannelId,
+                    source.StreamId,
+                    source.PlaybackUrl,
+                    null,
+                    false),
+                null,
+                null),
+            stop: session => session.Dispose());
+
+        var startA = coordinator.StartAsync(deviceA, provider.ChannelId, StreamType.Main);
+        await provider.WaitForPrepareAsync(deviceA);
+        var startB = coordinator.StartAsync(deviceB, provider.ChannelId, StreamType.Main);
+        var stop = coordinator.StopAsync();
+
+        provider.Release(deviceA);
+        await Task.WhenAll(startA, startB, stop);
+
+        Assert.DoesNotContain(deviceB, provider.PreparedDeviceIds);
+        Assert.Null(coordinator.CurrentSession);
+    }
+
+    [Fact]
+    public async Task StaleRuntimeEventFromPreviousSessionCannotRestartCurrentSession()
+    {
+        var provider = new FakeProvider(Source(1), Source(2));
+        var sinks = new List<IPlaybackRuntimeEventSink>();
+        var startCount = 0;
+        await using var coordinator = CreateCoordinator(
+            provider,
+            (source, sink) =>
+            {
+                sinks.Add(sink);
+                startCount++;
+                return new PlaybackSession(
+                    new PlaybackSource(
+                        source.ChannelId,
+                        source.StreamId,
+                        source.PlaybackUrl,
+                        null,
+                        false),
+                    null,
+                    null);
+            });
+
+        await coordinator.StartAsync(Guid.NewGuid(), provider.ChannelId, StreamType.Main);
+        coordinator.Publish(PlaybackRuntimeEvent.ForFailed(provider.ChannelId));
+        await WaitForConditionAsync(() => startCount == 2);
+
+        sinks[0].Publish(PlaybackRuntimeEvent.ForStopped(provider.ChannelId));
+        await Task.Delay(50);
+
+        Assert.Equal(2, provider.PrepareCount);
+        Assert.Equal("stream-2", coordinator.CurrentSource?.StreamId);
+        Assert.NotNull(coordinator.CurrentSession);
+    }
+
+    [Fact]
+    public async Task DuplicateOldRuntimeEventsDoNotKillFreshSession()
+    {
+        var provider = new FakeProvider(Source(1), Source(2));
+        var sinks = new List<IPlaybackRuntimeEventSink>();
+        var startCount = 0;
+        await using var coordinator = CreateCoordinator(
+            provider,
+            (source, sink) =>
+            {
+                sinks.Add(sink);
+                startCount++;
+                return new PlaybackSession(
+                    new PlaybackSource(
+                        source.ChannelId,
+                        source.StreamId,
+                        source.PlaybackUrl,
+                        null,
+                        false),
+                    null,
+                    null);
+            });
+
+        await coordinator.StartAsync(Guid.NewGuid(), provider.ChannelId, StreamType.Main);
+        sinks[0].Publish(PlaybackRuntimeEvent.ForFailed(provider.ChannelId));
+        sinks[0].Publish(PlaybackRuntimeEvent.ForStopped(provider.ChannelId));
+
+        await WaitForConditionAsync(() => startCount == 2);
+        await Task.Delay(50);
+
+        Assert.Equal(2, provider.PrepareCount);
+        Assert.Equal("stream-2", coordinator.CurrentSource?.StreamId);
+        Assert.NotNull(coordinator.CurrentSession);
+    }
+
+    [Fact]
+    public async Task RepeatedRuntimeFailuresUseBoundedRecoveryDelays()
+    {
+        var provider = new FakeProvider(
+            Enumerable.Range(1, 8).Select(Source).ToArray());
+        var sinks = new List<IPlaybackRuntimeEventSink>();
+        var sources = new List<FormalPlaybackSource>();
+        var delays = new List<TimeSpan>();
+        var startCount = 0;
+        await using var coordinator = CreateCoordinator(
+            provider,
+            (source, sink) =>
+            {
+                sinks.Add(sink);
+                sources.Add(source);
+                startCount++;
+                return new PlaybackSession(
+                    new PlaybackSource(
+                        source.ChannelId,
+                        source.StreamId,
+                        source.PlaybackUrl,
+                        null,
+                        false),
+                    null,
+                    null);
+            },
+            (duration, _) =>
+            {
+                delays.Add(duration);
+                return Task.CompletedTask;
+            });
+
+        await coordinator.StartAsync(Guid.NewGuid(), provider.ChannelId, StreamType.Main);
+        for (var failure = 0; failure < 7; failure++)
+        {
+            sinks[^1].Publish(PlaybackRuntimeEvent.ForFailed(provider.ChannelId));
+            await WaitForConditionAsync(() => startCount == failure + 2);
+        }
+
+        Assert.Equal(
+            [
+                TimeSpan.FromSeconds(1),
+                TimeSpan.FromSeconds(2),
+                TimeSpan.FromSeconds(5),
+                TimeSpan.FromSeconds(10),
+                TimeSpan.FromSeconds(15),
+                TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(30)
+            ],
+            delays);
+        Assert.Equal(8, provider.PrepareCount);
+        Assert.Equal(8, sources.Select(source => source.StreamId).Distinct().Count());
+        Assert.Equal(8, sources.Select(source => source.TicketExpiresUtc).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task PlayingEventResetsRuntimeRecoveryBackoff()
+    {
+        var provider = new FakeProvider(Source(1), Source(2), Source(3));
+        var sinks = new List<IPlaybackRuntimeEventSink>();
+        var delays = new List<TimeSpan>();
+        var startCount = 0;
+        await using var coordinator = CreateCoordinator(
+            provider,
+            (source, sink) =>
+            {
+                sinks.Add(sink);
+                startCount++;
+                return new PlaybackSession(
+                    new PlaybackSource(
+                        source.ChannelId,
+                        source.StreamId,
+                        source.PlaybackUrl,
+                        null,
+                        false),
+                    null,
+                    null);
+            },
+            (duration, _) =>
+            {
+                delays.Add(duration);
+                return Task.CompletedTask;
+            });
+
+        await coordinator.StartAsync(Guid.NewGuid(), provider.ChannelId, StreamType.Main);
+        sinks[0].Publish(PlaybackRuntimeEvent.ForFailed(provider.ChannelId));
+        await WaitForConditionAsync(() => startCount == 2);
+
+        sinks[1].Publish(PlaybackRuntimeEvent.ForPlaying(provider.ChannelId));
+        await Task.Delay(20);
+        sinks[1].Publish(PlaybackRuntimeEvent.ForFailed(provider.ChannelId));
+        await WaitForConditionAsync(() => startCount == 3);
+
+        Assert.Equal(
+            [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1)],
+            delays);
+    }
+
+    [Fact]
+    public async Task RuntimeRecoveryCannotRestartAfterUserStop()
+    {
+        var provider = new FakeProvider(Source(1), Source(2));
+        var delayStarted = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDelay = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var sinks = new List<IPlaybackRuntimeEventSink>();
+        var starts = 0;
+        await using var coordinator = CreateCoordinator(
+            provider,
+            (source, sink) =>
+            {
+                sinks.Add(sink);
+                starts++;
+                return new PlaybackSession(
+                    new PlaybackSource(
+                        source.ChannelId,
+                        source.StreamId,
+                        source.PlaybackUrl,
+                        null,
+                        false),
+                    null,
+                    null);
+            },
+            async (_, _) =>
+            {
+                delayStarted.TrySetResult(true);
+                await releaseDelay.Task;
+            });
+
+        await coordinator.StartAsync(Guid.NewGuid(), provider.ChannelId, StreamType.Main);
+        sinks[0].Publish(PlaybackRuntimeEvent.ForFailed(provider.ChannelId));
+        await delayStarted.Task;
+
+        await coordinator.StopAsync();
+        releaseDelay.TrySetResult(true);
+        await Task.Delay(50);
+
+        Assert.Equal(1, starts);
+        Assert.Equal(1, provider.PrepareCount);
+        Assert.Null(coordinator.CurrentSession);
+    }
+
+    [Fact]
+    public async Task SameKeyCanRetryAfterPermanentFailureWhenStartedAgain()
+    {
+        var deviceId = Guid.NewGuid();
+        var provider = new FakeProvider(
+            new CatalogApiException("CATALOG_VALIDATION_FAILED"),
+            Source(1));
+        var starts = 0;
+        await using var coordinator = CreateCoordinator(
+            provider,
+            (source, _) =>
+            {
+                starts++;
+                return new PlaybackSession(
+                    new PlaybackSource(
+                        source.ChannelId,
+                        source.StreamId,
+                        source.PlaybackUrl,
+                        null,
+                        false),
+                    null,
+                    null);
+            });
+
+        await coordinator.StartAsync(deviceId, provider.ChannelId, StreamType.Main);
+        await coordinator.StartAsync(deviceId, provider.ChannelId, StreamType.Main);
+
+        Assert.Equal(2, provider.PrepareCount);
+        Assert.Equal(1, starts);
+        Assert.NotNull(coordinator.CurrentSession);
+    }
+
+    private static async Task WaitForConditionAsync(
+        Func<bool> condition)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            if (condition())
+            {
+                return;
+            }
+
+            await Task.Delay(10);
+        }
+
+        Assert.True(condition());
+    }
+
     private static FormalPlaybackCoordinator CreateCoordinator(
-        FakeProvider provider,
+        IFormalPlaybackSourceProvider provider,
         Func<FormalPlaybackSource, IPlaybackRuntimeEventSink, PlaybackSession> start,
-        Func<TimeSpan, CancellationToken, Task> delay,
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
         Action<PlaybackSession>? stop = null)
     {
         stop ??= session => session.Dispose();
@@ -269,7 +644,10 @@ public sealed class FormalPlaybackCoordinatorTests
             stop,
             new VideoTileViewModel(),
             new ImmediateDispatcher(),
-            (duration, cancellationToken) => delay(duration, cancellationToken));
+            (duration, cancellationToken) =>
+                (delay ?? ((_, _) => Task.CompletedTask))(
+                    duration,
+                    cancellationToken));
     }
 
     private static FormalPlaybackSource Source(int offset) => new(
@@ -315,6 +693,109 @@ public sealed class FormalPlaybackCoordinatorTests
             FormalPlaybackSource source,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+    }
+
+    private sealed class ControlledProvider : IFormalPlaybackSourceProvider
+    {
+        private readonly Dictionary<Guid, TaskCompletionSource<FormalPlaybackSource>> completions;
+        private readonly HashSet<Guid> blockedDevices;
+        private readonly Dictionary<Guid, TaskCompletionSource<bool>> started = [];
+        private readonly object startedGate = new();
+
+        public ControlledProvider(
+            IEnumerable<Guid> devices,
+            bool blockAll,
+            IEnumerable<Guid>? blockedDevices = null)
+        {
+            var requestedBlockedDevices = blockedDevices?.ToHashSet() ?? [];
+            this.blockedDevices = blockAll
+                ? devices.ToHashSet()
+                : requestedBlockedDevices;
+            completions = devices.ToDictionary(
+                deviceId => deviceId,
+                _ => new TaskCompletionSource<FormalPlaybackSource>(
+                    TaskCreationOptions.RunContinuationsAsynchronously));
+        }
+
+        public Guid ChannelId { get; } = Guid.NewGuid();
+
+        public List<Guid> PreparedDeviceIds { get; } = [];
+
+        public List<FormalPlaybackSource> ReleasedSources { get; } = [];
+
+        public Task<FormalPlaybackSource> PrepareAsync(
+            Guid deviceId,
+            Guid channelId,
+            StreamType streamType,
+            CancellationToken cancellationToken = default)
+        {
+            lock (PreparedDeviceIds)
+            {
+                PreparedDeviceIds.Add(deviceId);
+            }
+
+            GetStarted(deviceId).TrySetResult(true);
+
+            if (blockedDevices.Contains(deviceId))
+            {
+                return AwaitBlockedPrepareAsync(deviceId, deviceId, channelId);
+            }
+
+            return Task.FromResult(Source(deviceId, channelId));
+        }
+
+        public Task ReleaseAsync(
+            FormalPlaybackSource source,
+            CancellationToken cancellationToken = default)
+        {
+            lock (ReleasedSources)
+            {
+                ReleasedSources.Add(source);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task WaitForPrepareAsync(Guid deviceId) =>
+            GetStarted(deviceId).Task;
+
+        public void Release(Guid deviceId) =>
+            completions[deviceId].TrySetResult(Source(deviceId, ChannelId));
+
+        private TaskCompletionSource<bool> GetStarted(Guid deviceId)
+        {
+            lock (startedGate)
+            {
+                if (!started.TryGetValue(deviceId, out var completion))
+                {
+                    completion = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    started.Add(deviceId, completion);
+                }
+
+                return completion;
+            }
+        }
+
+        private async Task<FormalPlaybackSource> AwaitBlockedPrepareAsync(
+            Guid completionDeviceId,
+            Guid sourceDeviceId,
+            Guid channelId)
+        {
+            var source = await completions[completionDeviceId].Task.ConfigureAwait(false);
+            return source with
+            {
+                DeviceId = sourceDeviceId,
+                ChannelId = channelId
+            };
+        }
+
+        private static FormalPlaybackSource Source(Guid deviceId, Guid channelId) => new(
+            deviceId,
+            channelId,
+            "stream-" + deviceId.ToString("N"),
+            new Uri("https://server-b/live/" + deviceId.ToString("N")),
+            DateTimeOffset.UtcNow.AddMinutes(1));
     }
 
     private sealed class ImmediateDispatcher : IUiDispatcher

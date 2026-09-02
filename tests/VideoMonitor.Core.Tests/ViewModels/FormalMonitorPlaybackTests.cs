@@ -49,6 +49,67 @@ public sealed class FormalMonitorPlaybackTests
         Assert.Equal(channelId, provider.LastChannelId);
     }
 
+    [Fact]
+    public async Task ChangedIdentityCannotBeOverwrittenByOlderCompletion()
+    {
+        var rootId = Guid.NewGuid();
+        var oldGroupId = Guid.NewGuid();
+        var newGroupId = Guid.NewGuid();
+        var oldDeviceId = Guid.NewGuid();
+        var newDeviceId = Guid.NewGuid();
+        var oldChannelId = Guid.NewGuid();
+        var newChannelId = Guid.NewGuid();
+        var provider = new SwitchingProvider(oldDeviceId, newDeviceId);
+        var readModel = new CatalogReadModel(
+            [
+                new DeviceGroupDto(
+                    rootId,
+                    "Chute Root",
+                    null,
+                    0,
+                    true,
+                    MonitorGroupType.Chute,
+                    1),
+                new DeviceGroupDto(oldGroupId, "Old", rootId, 0, true, null, 1),
+                new DeviceGroupDto(newGroupId, "New", rootId, 1, true, null, 1)
+            ],
+            [
+                Device(oldDeviceId, oldGroupId, oldChannelId),
+                Device(newDeviceId, newGroupId, newChannelId)
+            ]);
+        var switchService = new MonitorSwitchService(Array.Empty<MonitorGroup>());
+        await using var viewModel = new MonitorViewModel(
+            switchService,
+            readModel,
+            tile => new FormalPlaybackCoordinator(
+                provider,
+                (source, _) => new PlaybackSession(
+                    new PlaybackSource(
+                        source.ChannelId,
+                        source.StreamId,
+                        source.PlaybackUrl,
+                        null,
+                        false),
+                    null,
+                    null),
+                session => session.Dispose(),
+                tile,
+                new ImmediateDispatcher()));
+
+        await provider.OldPrepareStarted.Task;
+        switchService.SwitchChuteGroup(newGroupId);
+        var tile = viewModel.MainTiles[0];
+        Assert.Equal(newDeviceId, tile.CurrentDeviceId);
+        Assert.Equal(newChannelId, tile.CurrentChannelId);
+        provider.ReleaseOldPrepare();
+        await provider.NewPrepareStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await Task.Delay(20);
+
+        Assert.Equal(newDeviceId, tile.CurrentDeviceId);
+        Assert.Equal(newChannelId, tile.CurrentChannelId);
+        Assert.Equal(StreamType.Main, tile.CurrentStreamType);
+    }
+
     private static CameraDeviceDto Device(Guid deviceId, Guid groupId, Guid channelId) =>
         new(
             deviceId,
@@ -102,6 +163,64 @@ public sealed class FormalMonitorPlaybackTests
             FormalPlaybackSource source,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+    }
+
+    private sealed class SwitchingProvider : IFormalPlaybackSourceProvider
+    {
+        private readonly Guid oldDeviceId;
+        private readonly Guid newDeviceId;
+        private readonly TaskCompletionSource<FormalPlaybackSource> oldPrepare =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public SwitchingProvider(Guid oldDeviceId, Guid newDeviceId)
+        {
+            this.oldDeviceId = oldDeviceId;
+            this.newDeviceId = newDeviceId;
+        }
+
+        public TaskCompletionSource<bool> OldPrepareStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> NewPrepareStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<FormalPlaybackSource> PrepareAsync(
+            Guid deviceId,
+            Guid channelId,
+            StreamType streamType,
+            CancellationToken cancellationToken = default)
+        {
+            if (deviceId == oldDeviceId)
+            {
+                OldPrepareStarted.TrySetResult(true);
+                return CompleteOldPrepareAsync(channelId);
+            }
+
+            Assert.Equal(newDeviceId, deviceId);
+            NewPrepareStarted.TrySetResult(true);
+            return Task.FromResult(Source(deviceId, channelId));
+        }
+
+        public Task ReleaseAsync(
+            FormalPlaybackSource source,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public void ReleaseOldPrepare() =>
+            oldPrepare.TrySetResult(Source(oldDeviceId, Guid.Empty));
+
+        private async Task<FormalPlaybackSource> CompleteOldPrepareAsync(Guid channelId)
+        {
+            var source = await oldPrepare.Task.ConfigureAwait(false);
+            return source with { ChannelId = channelId };
+        }
+
+        private static FormalPlaybackSource Source(Guid deviceId, Guid channelId) => new(
+            deviceId,
+            channelId,
+            "stream-" + deviceId.ToString("N"),
+            new Uri("https://server-b/live/" + deviceId.ToString("N")),
+            DateTimeOffset.UtcNow.AddMinutes(1));
     }
 
     private sealed class ImmediateDispatcher : IUiDispatcher
