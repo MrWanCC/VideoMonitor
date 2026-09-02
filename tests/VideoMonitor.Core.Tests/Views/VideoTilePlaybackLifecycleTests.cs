@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -249,6 +250,121 @@ public sealed class VideoTilePlaybackLifecycleTests
     }
 
     [Fact]
+    public async Task VideoOverlayReceivesTileViewModelWithoutVisualAncestorLookup()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var viewModel = CreateTileViewModel(channelNumber: 7);
+            var tile = new VideoTile { DataContext = viewModel };
+            var host = CreateHiddenHost(tile);
+
+            host.Show();
+            viewModel.AttachPreparedSession(CreateSession());
+            host.UpdateLayout();
+            await Dispatcher.Yield(DispatcherPriority.Loaded);
+            host.UpdateLayout();
+
+            var videoView = FindVisualChild<VideoView>(tile);
+            Assert.NotNull(videoView);
+            var overlay = FindForegroundOverlay();
+            Assert.NotNull(overlay);
+            Assert.Equal("VideoViewContent", overlay!.Name);
+            Assert.Same(viewModel, overlay!.DataContext);
+
+            var bindingDataItems = FindVisualChildren<TextBlock>(overlay)
+                .Select(textBlock => textBlock.GetBindingExpression(TextBlock.TextProperty))
+                .Where(binding => binding is not null)
+                .Select(binding => binding!.DataItem)
+                .ToArray();
+            Assert.Contains(viewModel, bindingDataItems);
+            Assert.Contains(
+                FindVisualChildren<TextBlock>(overlay),
+                textBlock => textBlock.Inlines
+                    .OfType<Run>()
+                    .Any(run => run.GetBindingExpression(Run.TextProperty)
+                        ?.ParentBinding.Path.Path == nameof(VideoTileViewModel.ChannelNumber)
+                        && run.GetBindingExpression(Run.TextProperty)?.DataItem
+                            is VideoTileViewModel));
+            Assert.Contains(
+                FindVisualChildren<TextBlock>(overlay),
+                textBlock => textBlock.GetBindingExpression(TextBlock.TextProperty)
+                    ?.ParentBinding.Path.Path == nameof(VideoTileViewModel.PlaybackErrorTitle));
+            Assert.Contains(
+                FindVisualChildren<TextBlock>(overlay),
+                textBlock => textBlock.GetBindingExpression(TextBlock.TextProperty)
+                    ?.ParentBinding.Path.Path == nameof(VideoTileViewModel.PlaybackErrorDetail));
+            Assert.NotNull(FindVisualChildByName(overlay, "VideoInteractionSurface"));
+
+            host.Close();
+        });
+    }
+
+    [Fact]
+    public async Task VideoOverlayTracksChangedTileDataContext()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var firstViewModel = CreateTileViewModel(channelNumber: 1);
+            var secondViewModel = CreateTileViewModel(channelNumber: 2);
+            var tile = new VideoTile { DataContext = firstViewModel };
+            var host = CreateHiddenHost(tile);
+
+            host.Show();
+            firstViewModel.AttachPreparedSession(CreateSession());
+            host.UpdateLayout();
+            await Dispatcher.Yield(DispatcherPriority.Loaded);
+            host.UpdateLayout();
+
+            secondViewModel.AttachPreparedSession(CreateSession());
+            tile.DataContext = secondViewModel;
+            host.UpdateLayout();
+            await Dispatcher.Yield(DispatcherPriority.Loaded);
+            host.UpdateLayout();
+
+            var videoView = FindVisualChild<VideoView>(tile);
+            Assert.NotNull(videoView);
+            var overlay = FindForegroundOverlay();
+            Assert.NotNull(overlay);
+            Assert.Equal("VideoViewContent", overlay!.Name);
+            Assert.Same(secondViewModel, overlay!.DataContext);
+            Assert.Contains(
+                FindVisualChildren<TextBlock>(overlay),
+                textBlock => textBlock.Inlines
+                    .OfType<Run>()
+                    .Any(run => run.GetBindingExpression(Run.TextProperty)
+                        ?.ParentBinding.Path.Path == nameof(VideoTileViewModel.ChannelNumber)
+                        && ReferenceEquals(
+                            run.GetBindingExpression(Run.TextProperty)?.DataItem,
+                            secondViewModel)));
+
+            host.Close();
+        });
+    }
+
+    [Fact]
+    public async Task VideoInteractionSurfaceRemainsAvailable()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var viewModel = CreateTileViewModel(channelNumber: 3);
+            var tile = new VideoTile { DataContext = viewModel };
+            var host = CreateHiddenHost(tile);
+
+            host.Show();
+            viewModel.AttachPreparedSession(CreateSession());
+            host.UpdateLayout();
+            await Dispatcher.Yield(DispatcherPriority.Loaded);
+            host.UpdateLayout();
+
+            var overlay = FindForegroundOverlay();
+            Assert.NotNull(overlay);
+            Assert.NotNull(FindVisualChildByName(overlay!, "VideoInteractionSurface"));
+
+            host.Close();
+        });
+    }
+
+    [Fact]
     public async Task PageReentryDoesNotExposeNativeHostForEmptyTiles()
     {
         await RunOnStaAsync(async () =>
@@ -350,6 +466,17 @@ public sealed class VideoTilePlaybackLifecycleTests
         "test-stream",
         media: null,
         mediaPlayer: null);
+
+    private static VideoTileViewModel CreateTileViewModel(int channelNumber)
+    {
+        var viewModel = new VideoTileViewModel();
+        viewModel.Update(
+            new CameraInfo("Camera", "Group", channelNumber),
+            device: null,
+            channel: null,
+            CameraStatus.Unknown);
+        return viewModel;
+    }
 
     private static void AssertEmptyTilesDoNotExposeNativeHost(
         IEnumerable<VideoTile> tiles)
@@ -460,6 +587,37 @@ public sealed class VideoTilePlaybackLifecycleTests
         }
 
         return null;
+    }
+
+    private static FrameworkElement? FindVisualChildByName(
+        DependencyObject root,
+        string name)
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is FrameworkElement element
+                && element.Name == name)
+            {
+                return element;
+            }
+
+            var descendant = FindVisualChildByName(child, name);
+            if (descendant is not null)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
+    }
+
+    private static FrameworkElement? FindForegroundOverlay()
+    {
+        return Application.Current.Windows
+            .Cast<Window>()
+            .Select(window => FindVisualChildByName(window, "VideoViewContent"))
+            .FirstOrDefault(element => element is not null);
     }
 
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root)

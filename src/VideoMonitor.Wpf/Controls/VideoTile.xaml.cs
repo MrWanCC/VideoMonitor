@@ -6,6 +6,7 @@ public partial class VideoTile
 {
     private System.Windows.Window? foregroundOverlayWindow;
     private VideoView? videoHost;
+    private System.Windows.FrameworkElement? videoOverlayContent;
 
     public VideoTile()
     {
@@ -31,6 +32,8 @@ public partial class VideoTile
         {
             viewModel.RegisterVideoHostReadiness();
         }
+
+        SynchronizeVideoOverlayDataContext();
     }
 
     private void OnVideoHostLoaded(object sender, System.Windows.RoutedEventArgs e)
@@ -56,6 +59,8 @@ public partial class VideoTile
             viewModel.MarkVideoHostReady();
         }
 
+        SynchronizeVideoOverlayDataContext();
+
         Dispatcher.BeginInvoke(
             SynchronizeVideoOverlayWindow,
             System.Windows.Threading.DispatcherPriority.Loaded);
@@ -68,11 +73,37 @@ public partial class VideoTile
             host.IsVisibleChanged -= OnVideoHostIsVisibleChanged;
         }
 
+        videoOverlayContent = null;
         foregroundOverlayWindow?.Hide();
         foregroundOverlayWindow = null;
         if (ReferenceEquals(videoHost, sender))
         {
-            videoHost = null;
+        videoHost = null;
+        }
+    }
+
+    private void OnVideoOverlayLoaded(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (sender is System.Windows.FrameworkElement overlay)
+        {
+            videoOverlayContent = overlay;
+            SynchronizeVideoOverlayDataContext();
+        }
+    }
+
+    private void OnVideoOverlayUnloaded(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (ReferenceEquals(videoOverlayContent, sender))
+        {
+            videoOverlayContent = null;
+        }
+    }
+
+    private void SynchronizeVideoOverlayDataContext()
+    {
+        if (videoOverlayContent is not null)
+        {
+            videoOverlayContent.DataContext = DataContext;
         }
     }
 

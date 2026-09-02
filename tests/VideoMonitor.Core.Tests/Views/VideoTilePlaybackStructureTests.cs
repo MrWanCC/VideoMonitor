@@ -34,6 +34,8 @@ public sealed class VideoTilePlaybackStructureTests
         var codeBehind = File.ReadAllText(codeBehindPath);
         Assert.Contains("IsVisibleChanged += OnVideoTileIsVisibleChanged", codeBehind);
         Assert.Contains("DataContextChanged += OnDataContextChanged", codeBehind);
+        Assert.Contains("SynchronizeVideoOverlayDataContext", codeBehind);
+        Assert.Contains("videoOverlayContent.DataContext = DataContext", codeBehind);
         Assert.Contains("FindVisualChildByName(videoHost, \"VideoInteractionSurface\")", codeBehind);
         Assert.Contains("videoHost?.IsVisible == true", codeBehind);
         Assert.Contains("MarkVideoHostReady", codeBehind);
@@ -48,6 +50,9 @@ public sealed class VideoTilePlaybackStructureTests
         Assert.Contains("Loaded=\"OnVideoHostLoaded\"", videoViewContent);
         Assert.Contains("Unloaded=\"OnVideoHostUnloaded\"", videoViewContent);
         Assert.Contains("x:Name=\"VideoViewContent\"", videoViewContent);
+        Assert.DoesNotContain("RelativeSource AncestorType={x:Type UserControl}", videoViewContent);
+        Assert.Contains("Loaded=\"OnVideoOverlayLoaded\"", videoViewContent);
+        Assert.Contains("Unloaded=\"OnVideoOverlayUnloaded\"", videoViewContent);
         Assert.Contains("PlaybackState.Placeholder", videoViewContent);
         Assert.Contains("PlaybackState.Loading", videoViewContent);
         Assert.Contains("PlaybackState.Error", videoViewContent);

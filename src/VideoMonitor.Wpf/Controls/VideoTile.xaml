@@ -73,7 +73,8 @@
                                                Loaded="OnVideoHostLoaded"
                                                Unloaded="OnVideoHostUnloaded">
                         <Grid x:Name="VideoViewContent"
-                              DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}">
+                              Loaded="OnVideoOverlayLoaded"
+                              Unloaded="OnVideoOverlayUnloaded">
                             <Grid x:Name="VideoInteractionSurface" Background="#02000000"
                                   MouseLeftButtonDown="OnVideoSurfaceMouseLeftButtonDown" />
 
