@@ -54,14 +54,26 @@
             <Border Grid.Row="1" Background="{StaticResource VideoBackgroundBrush}"
                     BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
                 <Grid>
-                    <vlc:VideoView MediaPlayer="{Binding PlaybackSession.MediaPlayer}"
-                                   Visibility="Visible">
-                        <vlc:VideoView.Style>
-                            <Style TargetType="vlc:VideoView">
-                                <Setter Property="Visibility" Value="Visible" />
+                    <ContentControl x:Name="VideoHostContainer"
+                                    Content="{Binding PlaybackSession}">
+                        <ContentControl.Style>
+                            <Style TargetType="ContentControl">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasPreparedPlaybackSession}"
+                                                 Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
                             </Style>
-                        </vlc:VideoView.Style>
-                        <Grid x:Name="VideoViewContent">
+                        </ContentControl.Style>
+                        <ContentControl.Resources>
+                            <DataTemplate DataType="{x:Type playback:PlaybackSession}">
+                                <vlc:VideoView MediaPlayer="{Binding MediaPlayer}"
+                                               Loaded="OnVideoHostLoaded"
+                                               Unloaded="OnVideoHostUnloaded">
+                        <Grid x:Name="VideoViewContent"
+                              DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}">
                             <Grid x:Name="VideoInteractionSurface" Background="#02000000"
                                   MouseLeftButtonDown="OnVideoSurfaceMouseLeftButtonDown" />
 
@@ -134,7 +146,96 @@
                                    Text="{Binding PlaybackErrorDetail}" TextWrapping="Wrap" />
                     </StackPanel>
                         </Grid>
-                    </vlc:VideoView>
+                                </vlc:VideoView>
+                            </DataTemplate>
+                        </ContentControl.Resources>
+                    </ContentControl>
+
+                    <Grid x:Name="InactiveVideoSurface"
+                          Panel.ZIndex="1"
+                          Background="{StaticResource VideoBackgroundBrush}"
+                          IsHitTestVisible="False">
+                        <Grid.Style>
+                            <Style TargetType="Grid">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasPreparedPlaybackSession}"
+                                                 Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Grid.Style>
+
+                        <Grid>
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding PlaybackState}"
+                                                     Value="{x:Static playback:PlaybackState.Placeholder}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.82">
+                                <Path Width="50" Height="42" Data="{StaticResource IconCamera}"
+                                      Stroke="{StaticResource MutedTextBrush}" StrokeThickness="1.2" Stretch="Uniform" />
+                                <TextBlock Margin="0,12,0,0" HorizontalAlignment="Center"
+                                           Foreground="{StaticResource SecondaryTextBrush}" FontSize="{StaticResource FontSizeBody}"
+                                           FontWeight="SemiBold" Text="模拟视频画面" />
+                                <TextBlock Margin="0,5,0,0" HorizontalAlignment="Center" Style="{StaticResource MutedTextStyle}">
+                                    <Run Text="CH " /><Run Text="{Binding ChannelNumber, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding PlaybackState}"
+                                                     Value="{x:Static playback:PlaybackState.Loading}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <Path Width="44" Height="36" Data="{StaticResource IconCamera}"
+                                  Stroke="{StaticResource PrimaryBlueBrush}" StrokeThickness="1.4" Stretch="Uniform" />
+                            <TextBlock Margin="0,12,0,0" HorizontalAlignment="Center"
+                                       FontSize="{StaticResource FontSizeBody}" FontWeight="SemiBold"
+                                       Text="正在连接视频..." />
+                            <TextBlock Margin="0,5,0,0" HorizontalAlignment="Center"
+                                       Style="{StaticResource MutedTextStyle}" Text="等待媒体流就绪" />
+                        </StackPanel>
+
+                        <StackPanel MaxWidth="360" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding PlaybackState}"
+                                                     Value="{x:Static playback:PlaybackState.Error}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <Path Width="44" Height="38" Data="{StaticResource IconAlarm}"
+                                  Stroke="{StaticResource WarningOrangeBrush}" StrokeThickness="1.5" Stretch="Uniform" />
+                            <TextBlock Margin="0,12,0,0" HorizontalAlignment="Center"
+                                       Foreground="{StaticResource WarningOrangeBrush}"
+                                       FontSize="{StaticResource FontSizeBody}" FontWeight="SemiBold"
+                                       Text="{Binding PlaybackErrorTitle, TargetNullValue=拉流失败}" />
+                            <TextBlock Margin="0,6,0,0" HorizontalAlignment="Center" TextAlignment="Center"
+                                       Foreground="{StaticResource SecondaryTextBrush}"
+                                       FontSize="{StaticResource FontSizeAuxiliary}"
+                                       Text="{Binding PlaybackErrorDetail}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>

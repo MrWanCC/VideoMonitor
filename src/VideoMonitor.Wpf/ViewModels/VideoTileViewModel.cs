@@ -22,6 +22,9 @@ public sealed class VideoTileViewModel : ObservableObject
     private Guid? deviceId;
     private Guid? channelId;
     private VideoMonitor.Core.Models.StreamType? streamTypeValue;
+    private TaskCompletionSource<bool>? videoHostReady;
+    private bool videoHostReadinessRegistered;
+    private int videoHostReadyState;
 
     public Guid? CurrentDeviceId => deviceId;
 
@@ -88,7 +91,46 @@ public sealed class VideoTileViewModel : ObservableObject
     public PlaybackSession? PlaybackSession
     {
         get => playbackSession;
-        private set => SetProperty(ref playbackSession, value);
+        private set
+        {
+            if (SetProperty(ref playbackSession, value))
+            {
+                videoHostReady = value is null || !videoHostReadinessRegistered
+                    ? null
+                    : CreateVideoHostReadySource();
+                Volatile.Write(ref videoHostReadyState, 0);
+                OnPropertyChanged(nameof(HasPreparedPlaybackSession));
+            }
+        }
+    }
+
+    public bool HasPreparedPlaybackSession => PlaybackSession is not null;
+
+    public void RegisterVideoHostReadiness()
+    {
+        videoHostReadinessRegistered = true;
+        if (PlaybackSession is not null && videoHostReady is null)
+        {
+            videoHostReady = CreateVideoHostReadySource();
+        }
+    }
+
+    public bool IsVideoHostReady => Volatile.Read(ref videoHostReadyState) == 1;
+
+    public void MarkVideoHostReady()
+    {
+        Volatile.Write(ref videoHostReadyState, 1);
+        videoHostReady?.TrySetResult(true);
+    }
+
+    public Task WaitForVideoHostReadyAsync(CancellationToken cancellationToken = default)
+    {
+        if (!videoHostReadinessRegistered || videoHostReady is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return videoHostReady.Task.WaitAsync(cancellationToken);
     }
 
     public string PlaybackErrorTitle
@@ -186,4 +228,7 @@ public sealed class VideoTileViewModel : ObservableObject
         PlaybackErrorDetail = string.Empty;
         PlaybackState = PlaybackState.Placeholder;
     }
+
+    private static TaskCompletionSource<bool> CreateVideoHostReadySource() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

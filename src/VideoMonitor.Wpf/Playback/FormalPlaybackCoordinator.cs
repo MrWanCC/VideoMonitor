@@ -339,6 +339,16 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
                     return;
                 }
 
+                await tile
+                    .WaitForVideoHostReadyAsync(cancellation.Token)
+                    .ConfigureAwait(false);
+                if (!IsCurrentRequest(generation, key, cancellation))
+                {
+                    await CleanupAttemptAsync(session, source, runtimeSink)
+                        .ConfigureAwait(false);
+                    return;
+                }
+
                 if (!TryPlayCurrentAttempt(
                         generation,
                         key,

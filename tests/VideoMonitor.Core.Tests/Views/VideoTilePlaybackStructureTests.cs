@@ -3,7 +3,7 @@ namespace VideoMonitor.Core.Tests.Views;
 public sealed class VideoTilePlaybackStructureTests
 {
     [Fact]
-    public void VideoTile_ContainsOnePersistentVideoViewAndFourPlaybackStates()
+    public void VideoTile_UsesLazyVideoViewAndFourPlaybackStates()
     {
         var repositoryRoot = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
@@ -17,7 +17,7 @@ public sealed class VideoTilePlaybackStructureTests
         var xaml = File.ReadAllText(xamlPath);
 
         Assert.Equal(1, CountOccurrences(xaml, "<vlc:VideoView "));
-        Assert.Contains("PlaybackSession.MediaPlayer", xaml);
+        Assert.Contains("MediaPlayer=\"{Binding MediaPlayer}\"", xaml);
         Assert.Contains("PlaybackState.Placeholder", xaml);
         Assert.Contains("PlaybackState.Loading", xaml);
         Assert.Contains("PlaybackState.Error", xaml);
@@ -33,7 +33,10 @@ public sealed class VideoTilePlaybackStructureTests
         var codeBehindPath = Path.ChangeExtension(xamlPath, ".xaml.cs");
         var codeBehind = File.ReadAllText(codeBehindPath);
         Assert.Contains("IsVisibleChanged += OnVideoTileIsVisibleChanged", codeBehind);
-        Assert.Contains("Window.GetWindow(VideoInteractionSurface)", codeBehind);
+        Assert.Contains("DataContextChanged += OnDataContextChanged", codeBehind);
+        Assert.Contains("FindVisualChildByName(videoHost, \"VideoInteractionSurface\")", codeBehind);
+        Assert.Contains("videoHost?.IsVisible == true", codeBehind);
+        Assert.Contains("MarkVideoHostReady", codeBehind);
         Assert.Contains("overlayWindow.Hide()", codeBehind);
         Assert.Contains("overlayWindow.Show()", codeBehind);
 
@@ -41,13 +44,19 @@ public sealed class VideoTilePlaybackStructureTests
         var videoViewEnd = xaml.IndexOf("</vlc:VideoView>", videoViewStart, StringComparison.Ordinal);
         Assert.True(videoViewStart >= 0 && videoViewEnd > videoViewStart);
         var videoViewContent = xaml[videoViewStart..videoViewEnd];
-        Assert.Contains("Visibility=\"Visible\"", videoViewContent);
+        Assert.Contains("MediaPlayer=\"{Binding MediaPlayer}\"", videoViewContent);
+        Assert.Contains("Loaded=\"OnVideoHostLoaded\"", videoViewContent);
+        Assert.Contains("Unloaded=\"OnVideoHostUnloaded\"", videoViewContent);
         Assert.Contains("x:Name=\"VideoViewContent\"", videoViewContent);
         Assert.Contains("PlaybackState.Placeholder", videoViewContent);
         Assert.Contains("PlaybackState.Loading", videoViewContent);
         Assert.Contains("PlaybackState.Error", videoViewContent);
         Assert.Contains("Background=\"#02000000\"", videoViewContent);
         Assert.DoesNotContain("Background=\"Transparent\"", videoViewContent);
+        Assert.Contains("x:Name=\"InactiveVideoSurface\"", xaml);
+        Assert.Contains("Background=\"{StaticResource VideoBackgroundBrush}\"", xaml);
+        Assert.Contains("Content=\"{Binding PlaybackSession}\"", xaml);
+        Assert.Contains("HasPreparedPlaybackSession", xaml);
     }
 
     private static int CountOccurrences(string source, string value)
