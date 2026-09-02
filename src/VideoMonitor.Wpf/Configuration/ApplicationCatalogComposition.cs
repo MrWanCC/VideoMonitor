@@ -142,14 +142,11 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         lock (lifecycleGate)
         {
             ObjectDisposedException.ThrowIf(disposalTask is not null, this);
-            formalPlaybackEngine ??= formalPlaybackEngineFactory()
-                ?? throw new InvalidOperationException(
-                    "Formal playback engine factory returned null.");
-            var engine = formalPlaybackEngine;
             var coordinator = new FormalPlaybackCoordinator(
                 formalPlaybackSourceProvider,
-                (source, eventSink) => engine.Start(source, eventSink),
-                engine.Stop,
+                (source, eventSink) =>
+                    GetOrCreateFormalPlaybackEngine().Start(source, eventSink),
+                StopFormalPlaybackSession,
                 tile,
                 formalPlaybackDispatcher);
             formalPlaybackCoordinators.Add(coordinator);
@@ -162,6 +159,35 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
     public string? CatalogMigrationWarning { get; }
 
     public bool CatalogRecoveryOccurred { get; }
+
+    private IFormalPlaybackEngine GetOrCreateFormalPlaybackEngine()
+    {
+        lock (lifecycleGate)
+        {
+            ObjectDisposedException.ThrowIf(disposalTask is not null, this);
+            return formalPlaybackEngine ??= formalPlaybackEngineFactory!()
+                ?? throw new InvalidOperationException(
+                    "Formal playback engine factory returned null.");
+        }
+    }
+
+    private void StopFormalPlaybackSession(PlaybackSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        IFormalPlaybackEngine? engine;
+        lock (lifecycleGate)
+        {
+            engine = formalPlaybackEngine;
+        }
+
+        if (engine is null)
+        {
+            session.Dispose();
+            return;
+        }
+
+        engine.Stop(session);
+    }
 
     public static async Task<ApplicationCatalogComposition> CreateAsync(
         LocalPlaybackConfiguration configuration,
