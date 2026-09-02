@@ -20,7 +20,6 @@ public sealed class VideoTilePlaybackStructureTests
         Assert.Contains("PlaybackSession.MediaPlayer", xaml);
         Assert.Contains("PlaybackState.Placeholder", xaml);
         Assert.Contains("PlaybackState.Loading", xaml);
-        Assert.Contains("PlaybackState.Playing", xaml);
         Assert.Contains("PlaybackState.Error", xaml);
         Assert.Contains("正在连接视频", xaml);
         Assert.Contains("PlaybackErrorTitle", xaml);
@@ -42,6 +41,11 @@ public sealed class VideoTilePlaybackStructureTests
         var videoViewEnd = xaml.IndexOf("</vlc:VideoView>", videoViewStart, StringComparison.Ordinal);
         Assert.True(videoViewStart >= 0 && videoViewEnd > videoViewStart);
         var videoViewContent = xaml[videoViewStart..videoViewEnd];
+        Assert.Contains("Visibility=\"Visible\"", videoViewContent);
+        Assert.Contains("x:Name=\"VideoViewContent\"", videoViewContent);
+        Assert.Contains("PlaybackState.Placeholder", videoViewContent);
+        Assert.Contains("PlaybackState.Loading", videoViewContent);
+        Assert.Contains("PlaybackState.Error", videoViewContent);
         Assert.Contains("Background=\"#02000000\"", videoViewContent);
         Assert.DoesNotContain("Background=\"Transparent\"", videoViewContent);
     }

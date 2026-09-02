@@ -54,21 +54,16 @@
             <Border Grid.Row="1" Background="{StaticResource VideoBackgroundBrush}"
                     BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
                 <Grid>
-                    <vlc:VideoView MediaPlayer="{Binding PlaybackSession.MediaPlayer}">
+                    <vlc:VideoView MediaPlayer="{Binding PlaybackSession.MediaPlayer}"
+                                   Visibility="Visible">
                         <vlc:VideoView.Style>
                             <Style TargetType="vlc:VideoView">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding PlaybackState}"
-                                                 Value="{x:Static playback:PlaybackState.Playing}">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
+                                <Setter Property="Visibility" Value="Visible" />
                             </Style>
                         </vlc:VideoView.Style>
-                        <Grid x:Name="VideoInteractionSurface" Background="#02000000"
-                              MouseLeftButtonDown="OnVideoSurfaceMouseLeftButtonDown" />
-                    </vlc:VideoView>
+                        <Grid x:Name="VideoViewContent">
+                            <Grid x:Name="VideoInteractionSurface" Background="#02000000"
+                                  MouseLeftButtonDown="OnVideoSurfaceMouseLeftButtonDown" />
 
                     <Grid>
                         <Grid.Style>
@@ -138,6 +133,8 @@
                                    FontSize="{StaticResource FontSizeAuxiliary}"
                                    Text="{Binding PlaybackErrorDetail}" TextWrapping="Wrap" />
                     </StackPanel>
+                        </Grid>
+                    </vlc:VideoView>
                 </Grid>
             </Border>
         </Grid>

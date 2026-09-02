@@ -145,10 +145,11 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             var coordinator = new FormalPlaybackCoordinator(
                 formalPlaybackSourceProvider,
                 (source, eventSink) =>
-                    GetOrCreateFormalPlaybackEngine().Start(source, eventSink),
+                    GetOrCreateFormalPlaybackEngine().Prepare(source, eventSink),
                 StopFormalPlaybackSession,
                 tile,
-                formalPlaybackDispatcher);
+                formalPlaybackDispatcher,
+                playPlayback: session => GetOrCreateFormalPlaybackEngine().Play(session));
             formalPlaybackCoordinators.Add(coordinator);
             return coordinator;
         }

@@ -8,6 +8,82 @@ namespace VideoMonitor.Core.Tests.Playback;
 public sealed class FormalPlaybackCoordinatorTests
 {
     [Fact]
+    public async Task PlayHappensAfterSessionIsAttachedWhileTileIsLoading()
+    {
+        var provider = new FakeProvider(Source(1));
+        var tile = new VideoTileViewModel();
+        PlaybackSession? preparedSession = null;
+        var playObserved = false;
+        await using var coordinator = new FormalPlaybackCoordinator(
+            provider,
+            (source, _) =>
+            {
+                var session = new PlaybackSession(
+                    new PlaybackSource(
+                        source.ChannelId,
+                        source.StreamId,
+                        source.PlaybackUrl,
+                        null,
+                        false),
+                    null,
+                    null);
+                preparedSession = session;
+                return session;
+            },
+            session => session.Dispose(),
+            tile,
+            new ImmediateDispatcher(),
+            playPlayback: session =>
+            {
+                playObserved = true;
+                Assert.Same(preparedSession, session);
+                Assert.Same(session, tile.PlaybackSession);
+                Assert.Equal(PlaybackState.Loading, tile.PlaybackState);
+            });
+
+        await coordinator.StartAsync(Guid.NewGuid(), provider.ChannelId, StreamType.Main);
+
+        Assert.True(playObserved);
+        Assert.Same(preparedSession, tile.PlaybackSession);
+        Assert.Equal(PlaybackState.Loading, tile.PlaybackState);
+    }
+
+    [Fact]
+    public async Task StopDuringAttachDoesNotPlayInactiveSession()
+    {
+        var provider = new FakeProvider(Source(1));
+        var dispatcher = new BlockingDispatcher();
+        var playCalls = 0;
+        await using var coordinator = new FormalPlaybackCoordinator(
+            provider,
+            (source, _) => new PlaybackSession(
+                new PlaybackSource(
+                    source.ChannelId,
+                    source.StreamId,
+                    source.PlaybackUrl,
+                    null,
+                    false),
+                null,
+                null),
+            session => session.Dispose(),
+            new VideoTileViewModel(),
+            dispatcher,
+            playPlayback: _ => playCalls++);
+
+        var startTask = coordinator.StartAsync(
+            Guid.NewGuid(),
+            provider.ChannelId,
+            StreamType.Main);
+        await dispatcher.AttachStarted.Task;
+
+        var stopTask = coordinator.StopAsync();
+        dispatcher.ReleaseAttach();
+        await Task.WhenAll(startTask, stopTask);
+
+        Assert.Equal(0, playCalls);
+    }
+
+    [Fact]
     public async Task TransientFailureUsesBoundedRecoveryDelays()
     {
         var provider = new FakeProvider(
@@ -808,5 +884,32 @@ public sealed class FormalPlaybackCoordinatorTests
             action();
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class BlockingDispatcher : IUiDispatcher
+    {
+        private int invocationCount;
+        private readonly TaskCompletionSource<bool> release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> AttachStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task InvokeAsync(
+            Action action,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            action();
+            if (Interlocked.Increment(ref invocationCount) != 2)
+            {
+                return Task.CompletedTask;
+            }
+
+            AttachStarted.TrySetResult(true);
+            return release.Task;
+        }
+
+        public void ReleaseAttach() => release.TrySetResult(true);
     }
 }

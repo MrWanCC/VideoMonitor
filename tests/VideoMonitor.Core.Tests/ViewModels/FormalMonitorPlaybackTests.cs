@@ -19,7 +19,7 @@ public sealed class FormalMonitorPlaybackTests
     }
 
     [Fact]
-    public void ProjectionUsesCatalogDtoIdsOnly()
+    public async Task MonitorViewModelDoesNotStartFormalPlaybackBeforeViewActivation()
     {
         var rootId = Guid.NewGuid();
         var childId = Guid.NewGuid();
@@ -33,7 +33,45 @@ public sealed class FormalMonitorPlaybackTests
             ],
             [Device(deviceId, childId, channelId)]);
 
-        var viewModel = new MonitorViewModel(
+        var viewModel = CreateFormalViewModel(readModel, provider);
+
+        Assert.Equal(0, provider.PrepareCount);
+
+        await viewModel.ActivatePlaybackAsync();
+
+        Assert.Equal(1, provider.PrepareCount);
+    }
+
+    [Fact]
+    public async Task ProjectionUsesCatalogDtoIdsOnly()
+    {
+        var rootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+        var channelId = Guid.NewGuid();
+        var provider = new CapturingProvider(deviceId, channelId);
+        var readModel = new CatalogReadModel(
+            [
+                new DeviceGroupDto(rootId, "Chute", null, 0, true, MonitorGroupType.Chute, 1),
+                new DeviceGroupDto(childId, "Child", rootId, 0, true, null, 1)
+            ],
+            [Device(deviceId, childId, channelId)]);
+
+        var viewModel = CreateFormalViewModel(readModel, provider);
+
+        await viewModel.ActivatePlaybackAsync();
+
+        var tile = Assert.Single(viewModel.MainTiles.Where(item => item.CurrentDeviceId == deviceId));
+        Assert.Equal(deviceId, tile.CurrentDeviceId);
+        Assert.Equal(channelId, tile.CurrentChannelId);
+        Assert.Equal(deviceId, provider.LastDeviceId);
+        Assert.Equal(channelId, provider.LastChannelId);
+    }
+
+    private static MonitorViewModel CreateFormalViewModel(
+        IDeviceCatalogReadModel readModel,
+        IFormalPlaybackSourceProvider provider) =>
+        new(
             new MonitorSwitchService(Array.Empty<MonitorGroup>()),
             readModel,
             tile => new FormalPlaybackCoordinator(
@@ -50,13 +88,6 @@ public sealed class FormalMonitorPlaybackTests
                 session => session.Dispose(),
                 tile,
                 new ImmediateDispatcher()));
-
-        var tile = Assert.Single(viewModel.MainTiles.Where(item => item.CurrentDeviceId == deviceId));
-        Assert.Equal(deviceId, tile.CurrentDeviceId);
-        Assert.Equal(channelId, tile.CurrentChannelId);
-        Assert.Equal(deviceId, provider.LastDeviceId);
-        Assert.Equal(channelId, provider.LastChannelId);
-    }
 
     [Fact]
     public async Task ChangedIdentityCannotBeOverwrittenByOlderCompletion()
@@ -105,6 +136,8 @@ public sealed class FormalMonitorPlaybackTests
                 tile,
                 new ImmediateDispatcher()));
 
+        var activation = viewModel.ActivatePlaybackAsync();
+
         await provider.OldPrepareStarted.Task;
         switchService.SwitchChuteGroup(newGroupId);
         var tile = viewModel.MainTiles[0];
@@ -112,11 +145,63 @@ public sealed class FormalMonitorPlaybackTests
         Assert.Equal(newChannelId, tile.CurrentChannelId);
         provider.ReleaseOldPrepare();
         await provider.NewPrepareStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await activation;
         await Task.Delay(20);
 
         Assert.Equal(newDeviceId, tile.CurrentDeviceId);
         Assert.Equal(newChannelId, tile.CurrentChannelId);
         Assert.Equal(StreamType.Main, tile.CurrentStreamType);
+    }
+
+    [Fact]
+    public async Task DeactivationStopsFormalPlaybackAndReactivationStartsOnce()
+    {
+        var rootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+        var channelId = Guid.NewGuid();
+        var provider = new CapturingProvider(deviceId, channelId);
+        var readModel = new CatalogReadModel(
+            [
+                new DeviceGroupDto(rootId, "Chute", null, 0, true, MonitorGroupType.Chute, 1),
+                new DeviceGroupDto(childId, "Child", rootId, 0, true, null, 1)
+            ],
+            [Device(deviceId, childId, channelId)]);
+        await using var viewModel = CreateFormalViewModel(readModel, provider);
+
+        await viewModel.ActivatePlaybackAsync();
+        Assert.Equal(1, provider.PrepareCount);
+
+        await viewModel.DeactivatePlaybackAsync();
+
+        Assert.All(
+            viewModel.MainTiles,
+            tile => Assert.Equal(PlaybackState.Placeholder, tile.PlaybackState));
+
+        await viewModel.ActivatePlaybackAsync();
+
+        Assert.Equal(2, provider.PrepareCount);
+    }
+
+    [Fact]
+    public async Task CatalogChangeWhileInactiveDoesNotStartFormalPlayback()
+    {
+        var rootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+        var channelId = Guid.NewGuid();
+        var provider = new CapturingProvider(deviceId, channelId);
+        var readModel = new CatalogReadModel(
+            [
+                new DeviceGroupDto(rootId, "Chute", null, 0, true, MonitorGroupType.Chute, 1),
+                new DeviceGroupDto(childId, "Child", rootId, 0, true, null, 1)
+            ],
+            [Device(deviceId, childId, channelId)]);
+        await using var viewModel = CreateFormalViewModel(readModel, provider);
+
+        readModel.RaiseChanged();
+
+        Assert.Equal(0, provider.PrepareCount);
     }
 
     private static CameraDeviceDto Device(Guid deviceId, Guid groupId, Guid channelId) =>
@@ -170,12 +255,15 @@ public sealed class FormalMonitorPlaybackTests
 
         public Guid? LastChannelId { get; private set; }
 
+        public int PrepareCount { get; private set; }
+
         public Task<FormalPlaybackSource> PrepareAsync(
             Guid deviceId,
             Guid channelId,
             StreamType streamType,
             CancellationToken cancellationToken = default)
         {
+            PrepareCount++;
             LastDeviceId = deviceId;
             LastChannelId = channelId;
             return Task.FromResult(new FormalPlaybackSource(

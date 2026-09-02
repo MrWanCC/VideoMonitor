@@ -33,4 +33,26 @@ public sealed class MonitorViewStructureTests
         Assert.Contains("Text=\"通道\"", xaml);
         Assert.Contains("Text=\"更新时间\"", xaml);
     }
+
+    [Fact]
+    public void MonitorView_ActivatesFormalPlaybackWithViewLifecycle()
+    {
+        var repositoryRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var codePath = Path.Combine(
+            repositoryRoot,
+            "src",
+            "VideoMonitor.Wpf",
+            "Views",
+            "Pages",
+            "MonitorView.xaml.cs");
+        var code = File.ReadAllText(codePath);
+
+        Assert.Contains("Loaded += OnLoaded", code);
+        Assert.Contains("Unloaded += OnUnloaded", code);
+        Assert.Contains("IsVisibleChanged += OnIsVisibleChanged", code);
+        Assert.Contains("ActivatePlaybackAsync", code);
+        Assert.Contains("DeactivatePlaybackAsync", code);
+    }
 }

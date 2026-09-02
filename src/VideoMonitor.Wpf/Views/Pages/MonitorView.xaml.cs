@@ -17,6 +17,9 @@ public partial class MonitorView
         InitializeComponent();
         tileControls = [MainTile1, MainTile2, MainTile3, MainTile4];
         DataContextChanged += OnDataContextChanged;
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
+        IsVisibleChanged += OnIsVisibleChanged;
     }
 
     public void SetFullscreen(bool fullscreen)
@@ -47,6 +50,45 @@ public partial class MonitorView
 
         ApplySingleTileLayout();
         ApplyDetailPanelState();
+    }
+
+    private async void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        await Dispatcher.InvokeAsync(
+            static () => { },
+            System.Windows.Threading.DispatcherPriority.Loaded);
+        await ActivatePlaybackIfVisibleAsync();
+    }
+
+    private async void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MonitorViewModel viewModel)
+        {
+            await viewModel.DeactivatePlaybackAsync();
+        }
+    }
+
+    private async void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is true)
+        {
+            await Dispatcher.InvokeAsync(
+                static () => { },
+                System.Windows.Threading.DispatcherPriority.Loaded);
+            await ActivatePlaybackIfVisibleAsync();
+        }
+        else if (DataContext is MonitorViewModel viewModel)
+        {
+            await viewModel.DeactivatePlaybackAsync();
+        }
+    }
+
+    private async Task ActivatePlaybackIfVisibleAsync()
+    {
+        if (IsLoaded && IsVisible && DataContext is MonitorViewModel viewModel)
+        {
+            await viewModel.ActivatePlaybackAsync();
+        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

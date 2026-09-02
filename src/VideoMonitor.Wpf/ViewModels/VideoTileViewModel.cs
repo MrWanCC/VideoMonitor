@@ -149,6 +149,15 @@ public sealed class VideoTileViewModel : ObservableObject
 
     public void ShowLoading()
     {
+        PlaybackSession = null;
+        PlaybackErrorTitle = string.Empty;
+        PlaybackErrorDetail = string.Empty;
+        PlaybackState = PlaybackState.Loading;
+    }
+
+    public void AttachPreparedSession(PlaybackSession session)
+    {
+        PlaybackSession = session ?? throw new ArgumentNullException(nameof(session));
         PlaybackErrorTitle = string.Empty;
         PlaybackErrorDetail = string.Empty;
         PlaybackState = PlaybackState.Loading;

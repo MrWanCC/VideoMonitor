@@ -17,11 +17,55 @@ public partial class SecondaryMonitorWindow
     {
         InitializeComponent();
         DataContext = viewModel;
+        Loaded += OnLoaded;
+        IsVisibleChanged += OnIsVisibleChanged;
         var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         timer.Tick += (_, _) => ClockText.Text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         ClockText.Text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         timer.Start();
-        Closed += (_, _) => timer.Stop();
+        Closed += async (_, _) =>
+        {
+            timer.Stop();
+            if (DataContext is SecondaryMonitorViewModel secondaryViewModel)
+            {
+                await secondaryViewModel.DeactivatePlaybackAsync();
+            }
+        };
+    }
+
+    private async void OnLoaded(object sender, System.Windows.RoutedEventArgs e)
+    {
+        await Dispatcher.InvokeAsync(
+            static () => { },
+            System.Windows.Threading.DispatcherPriority.Loaded);
+        await ActivatePlaybackIfVisibleAsync();
+    }
+
+    private async void OnIsVisibleChanged(
+        object sender,
+        System.Windows.DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is true)
+        {
+            await Dispatcher.InvokeAsync(
+                static () => { },
+                System.Windows.Threading.DispatcherPriority.Loaded);
+            await ActivatePlaybackIfVisibleAsync();
+        }
+        else if (DataContext is SecondaryMonitorViewModel viewModel)
+        {
+            await viewModel.DeactivatePlaybackAsync();
+        }
+    }
+
+    private async Task ActivatePlaybackIfVisibleAsync()
+    {
+        if (IsLoaded
+            && IsVisible
+            && DataContext is SecondaryMonitorViewModel viewModel)
+        {
+            await viewModel.ActivatePlaybackAsync();
+        }
     }
 
     private void MinimizeWindow(object sender, System.Windows.RoutedEventArgs e) => WindowState = System.Windows.WindowState.Minimized;

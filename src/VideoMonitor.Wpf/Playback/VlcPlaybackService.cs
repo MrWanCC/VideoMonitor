@@ -50,7 +50,7 @@ public sealed class VlcPlaybackService : IPlaybackEngine, IFormalPlaybackEngine,
         return new PlaybackSession(source, media, mediaPlayer);
     }
 
-    public PlaybackSession Start(
+    public PlaybackSession Prepare(
         FormalPlaybackSource source,
         IPlaybackRuntimeEventSink eventSink)
     {
@@ -73,16 +73,6 @@ public sealed class VlcPlaybackService : IPlaybackEngine, IFormalPlaybackEngine,
         mediaPlayer.Stopped += stopped;
         mediaPlayer.EncounteredError += failed;
 
-        if (!mediaPlayer.Play())
-        {
-            mediaPlayer.Playing -= playing;
-            mediaPlayer.Stopped -= stopped;
-            mediaPlayer.EncounteredError -= failed;
-            mediaPlayer.Dispose();
-            media.Dispose();
-            throw new PlaybackEngineException("LibVLC拒绝启动播放。");
-        }
-
         mediaPlayer.AspectRatio = "19:10";
         return new PlaybackSession(
             source.ChannelId,
@@ -95,6 +85,16 @@ public sealed class VlcPlaybackService : IPlaybackEngine, IFormalPlaybackEngine,
                 mediaPlayer.Stopped -= stopped;
                 mediaPlayer.EncounteredError -= failed;
             });
+    }
+
+    public void Play(PlaybackSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ObjectDisposedException.ThrowIf(disposed != 0, this);
+        if (session.MediaPlayer is null || !session.MediaPlayer.Play())
+        {
+            throw new PlaybackEngineException("LibVLC拒绝启动播放。");
+        }
     }
 
     public void Stop(PlaybackSession session)

@@ -6,9 +6,11 @@ namespace VideoMonitor.Wpf.Playback;
 
 public interface IFormalPlaybackEngine
 {
-    PlaybackSession Start(
+    PlaybackSession Prepare(
         FormalPlaybackSource source,
         IPlaybackRuntimeEventSink eventSink);
+
+    void Play(PlaybackSession session);
 
     void Stop(PlaybackSession session);
 }
@@ -26,7 +28,8 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
     ];
 
     private readonly IFormalPlaybackSourceProvider sourceProvider;
-    private readonly Func<FormalPlaybackSource, IPlaybackRuntimeEventSink, PlaybackSession> startPlayback;
+    private readonly Func<FormalPlaybackSource, IPlaybackRuntimeEventSink, PlaybackSession> preparePlayback;
+    private readonly Action<PlaybackSession> playPlayback;
     private readonly Action<PlaybackSession> stopPlayback;
     private readonly VideoTileViewModel tile;
     private readonly IUiDispatcher dispatcher;
@@ -46,22 +49,24 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
 
     public FormalPlaybackCoordinator(
         IFormalPlaybackSourceProvider sourceProvider,
-        Func<FormalPlaybackSource, IPlaybackRuntimeEventSink, PlaybackSession> startPlayback,
+        Func<FormalPlaybackSource, IPlaybackRuntimeEventSink, PlaybackSession> preparePlayback,
         Action<PlaybackSession> stopPlayback,
         VideoTileViewModel tile,
         IUiDispatcher dispatcher,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        Action<PlaybackSession>? playPlayback = null)
     {
         this.sourceProvider = sourceProvider
             ?? throw new ArgumentNullException(nameof(sourceProvider));
-        this.startPlayback = startPlayback
-            ?? throw new ArgumentNullException(nameof(startPlayback));
+        this.preparePlayback = preparePlayback
+            ?? throw new ArgumentNullException(nameof(preparePlayback));
         this.stopPlayback = stopPlayback
             ?? throw new ArgumentNullException(nameof(stopPlayback));
         this.tile = tile ?? throw new ArgumentNullException(nameof(tile));
         this.dispatcher = dispatcher
             ?? throw new ArgumentNullException(nameof(dispatcher));
         this.delay = delay ?? Task.Delay;
+        this.playPlayback = playPlayback ?? (_ => { });
     }
 
     public PlaybackSession? CurrentSession
@@ -312,7 +317,7 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
                 }
 
                 runtimeSink = new SessionPlaybackRuntimeEventSink(this, generation, key);
-                session = startPlayback(source, runtimeSink);
+                session = preparePlayback(source, runtimeSink);
                 if (!TryCommitAttempt(generation, key, cancellation, source, session, runtimeSink))
                 {
                     await CleanupAttemptAsync(session, source, runtimeSink)
@@ -325,9 +330,20 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
                         generation,
                         key,
                         cancellation,
-                        () => tile.ShowPlaying(committedSession),
+                        () => tile.AttachPreparedSession(committedSession),
                         CancellationToken.None)
                     .ConfigureAwait(false))
+                {
+                    await CleanupAttemptAsync(session, source, runtimeSink)
+                        .ConfigureAwait(false);
+                    return;
+                }
+
+                if (!TryPlayCurrentAttempt(
+                        generation,
+                        key,
+                        cancellation,
+                        committedSession))
                 {
                     await CleanupAttemptAsync(session, source, runtimeSink)
                         .ConfigureAwait(false);
@@ -624,6 +640,24 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
             currentSource = source;
             currentSession = session;
             currentRuntimeSink = runtimeSink;
+            return true;
+        }
+    }
+
+    private bool TryPlayCurrentAttempt(
+        long generation,
+        PlaybackKey key,
+        CancellationTokenSource cancellation,
+        PlaybackSession session)
+    {
+        lock (stateGate)
+        {
+            if (!IsCurrentRequestNoLock(generation, key, cancellation))
+            {
+                return false;
+            }
+
+            playPlayback(session);
             return true;
         }
     }

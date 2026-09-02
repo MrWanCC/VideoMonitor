@@ -189,9 +189,11 @@ public sealed class FormalPlaybackCompositionTests
 
     private sealed class CountingFormalPlaybackEngine : IFormalPlaybackEngine, IDisposable
     {
+        private readonly Dictionary<PlaybackSession, IPlaybackRuntimeEventSink> eventSinks = [];
+
         public List<PlaybackSession> StartedSessions { get; } = [];
 
-        public PlaybackSession Start(
+        public PlaybackSession Prepare(
             FormalPlaybackSource source,
             IPlaybackRuntimeEventSink eventSink)
         {
@@ -203,9 +205,19 @@ public sealed class FormalPlaybackCompositionTests
             lock (StartedSessions)
             {
                 StartedSessions.Add(session);
+                eventSinks.Add(session, eventSink);
             }
 
             return session;
+        }
+
+        public void Play(PlaybackSession session)
+        {
+            lock (StartedSessions)
+            {
+                eventSinks[session].Publish(
+                    PlaybackRuntimeEvent.ForPlaying(session.CameraChannelId));
+            }
         }
 
         public void Stop(PlaybackSession session) => session.Dispose();

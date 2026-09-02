@@ -19,6 +19,8 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
     private string currentGroupName = "未配置";
     private readonly Func<VideoTileViewModel, FormalPlaybackCoordinator>? formalCoordinatorFactory;
     private readonly Dictionary<VideoTileViewModel, FormalPlaybackCoordinator> formalCoordinators = [];
+    private readonly SemaphoreSlim playbackLifecycleGate = new(1, 1);
+    private bool playbackActive;
 
     public SecondaryMonitorViewModel(
         MonitorSwitchService switchService,
@@ -88,14 +90,61 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
 
     public async ValueTask DisposeAsync()
     {
+        await DeactivatePlaybackAsync().ConfigureAwait(false);
         switchService.LayoutChanged -= OnLayoutChanged;
         catalog.Changed -= OnCatalogChanged;
-        foreach (var coordinator in formalCoordinators.Values)
-        {
-            await coordinator.DisposeAsync().ConfigureAwait(false);
-        }
 
-        formalCoordinators.Clear();
+        try
+        {
+            foreach (var coordinator in formalCoordinators.Values)
+            {
+                await coordinator.DisposeAsync().ConfigureAwait(false);
+            }
+
+            formalCoordinators.Clear();
+        }
+        finally
+        {
+            playbackLifecycleGate.Dispose();
+        }
+    }
+
+    public async Task ActivatePlaybackAsync()
+    {
+        await playbackLifecycleGate.WaitAsync();
+        try
+        {
+            if (playbackActive)
+            {
+                return;
+            }
+
+            playbackActive = true;
+            Render(switchService.Current);
+        }
+        finally
+        {
+            playbackLifecycleGate.Release();
+        }
+    }
+
+    public async Task DeactivatePlaybackAsync()
+    {
+        await playbackLifecycleGate.WaitAsync();
+        try
+        {
+            playbackActive = false;
+            await Task.WhenAll(
+                    formalCoordinators.Values.Select(coordinator => coordinator.StopAsync()));
+            foreach (var tile in Tiles)
+            {
+                tile.ShowPlaceholder();
+            }
+        }
+        finally
+        {
+            playbackLifecycleGate.Release();
+        }
     }
 
     public string CurrentGroupName
@@ -182,7 +231,7 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
             var device = catalog.GetDevice(camera.DeviceId);
             var channel = device?.Channels.SingleOrDefault(item => item.Id == camera.ChannelId);
             Tiles[index].Update(camera, device, channel, camera.Status);
-            if (channel is not null)
+            if (channel is not null && playbackActive)
             {
                 _ = StartFormalPlaybackAsync(
                     Tiles[index],
