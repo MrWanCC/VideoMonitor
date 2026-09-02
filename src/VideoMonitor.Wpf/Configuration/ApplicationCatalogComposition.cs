@@ -262,7 +262,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         var testPreview = new TestPreviewViewModel(
             testStreamApiClient,
             new LazyPlaybackEngine(dependencies.CentralPlaybackEngineFactory),
-            () => coordinator.Status.BaseUri);
+            () => coordinator.Status.BaseUri,
+            dispatcher);
 
         return new ApplicationCatalogComposition(
             true,

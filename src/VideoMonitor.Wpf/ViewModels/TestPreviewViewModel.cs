@@ -21,6 +21,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
     private readonly ITestStreamApiClient apiClient;
     private readonly IPlaybackEngine playbackEngine;
     private readonly Func<Uri?> baseUriProvider;
+    private readonly IUiDispatcher dispatcher;
     private PlaybackSession? playbackSession;
     private TestSessionDto? session;
     private TestPreviewState state;
@@ -30,13 +31,16 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
     public TestPreviewViewModel(
         ITestStreamApiClient apiClient,
         IPlaybackEngine playbackEngine,
-        Func<Uri?> baseUriProvider)
+        Func<Uri?> baseUriProvider,
+        IUiDispatcher dispatcher)
     {
         this.apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         this.playbackEngine = playbackEngine
             ?? throw new ArgumentNullException(nameof(playbackEngine));
         this.baseUriProvider = baseUriProvider
             ?? throw new ArgumentNullException(nameof(baseUriProvider));
+        this.dispatcher = dispatcher
+            ?? throw new ArgumentNullException(nameof(dispatcher));
         StopCommand = new AsyncRelayCommand(ExecuteStopCommandAsync, CanStop);
     }
 
@@ -70,8 +74,8 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         TestStreamStartRequest request,
         CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(disposed != 0, this);
-        if (IsActive)
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+        if (await ReadOnUiAsync(() => IsActive))
         {
             if (!await StopAsync(cancellationToken))
             {
@@ -79,13 +83,20 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
             }
         }
 
-        State = TestPreviewState.Starting;
-        StatusText = "正在启动测试视频…";
-        var baseUri = baseUriProvider();
+        Uri? baseUri = null;
+        await RunOnUiAsync(() =>
+        {
+            State = TestPreviewState.Starting;
+            StatusText = "正在启动测试视频…";
+            baseUri = baseUriProvider();
+        });
         if (baseUri is null)
         {
-            State = TestPreviewState.Failure;
-            StatusText = "服务器不可用。";
+            await RunOnUiAsync(() =>
+            {
+                State = TestPreviewState.Failure;
+                StatusText = "服务器不可用。";
+            });
             return;
         }
 
@@ -94,15 +105,18 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         {
             createdSession = await apiClient
                 .StartAsync(baseUri, request, cancellationToken);
-            SetSession(createdSession);
-            var source = new TestPreviewSource(
-                createdSession.ChannelId,
-                createdSession.StreamId,
-                createdSession.PlaybackUrl);
-            playbackSession = playbackEngine.Start(source.ToPlaybackSource());
-            OnPlaybackSessionChanged();
-            State = TestPreviewState.Playing;
-            StatusText = "测试视频播放中。";
+            await RunOnUiAsync(() =>
+            {
+                SetSession(createdSession);
+                var source = new TestPreviewSource(
+                    createdSession.ChannelId,
+                    createdSession.StreamId,
+                    createdSession.PlaybackUrl);
+                playbackSession = playbackEngine.Start(source.ToPlaybackSource());
+                OnPlaybackSessionChanged();
+                State = TestPreviewState.Playing;
+                StatusText = "测试视频播放中。";
+            });
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -111,8 +125,11 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
                 await ReleaseCreatedSessionAsync(baseUri, createdSession);
             }
 
-            State = TestPreviewState.Failure;
-            StatusText = "测试视频已取消。";
+            await RunOnUiAsync(() =>
+            {
+                State = TestPreviewState.Failure;
+                StatusText = "测试视频已取消。";
+            });
             throw;
         }
         catch (CatalogApiException exception)
@@ -122,8 +139,11 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
                 await ReleaseCreatedSessionAsync(baseUri, createdSession);
             }
 
-            State = TestPreviewState.Failure;
-            StatusText = ToSafeFailureStatus(exception.Code);
+            await RunOnUiAsync(() =>
+            {
+                State = TestPreviewState.Failure;
+                StatusText = ToSafeFailureStatus(exception.Code);
+            });
         }
         catch
         {
@@ -132,58 +152,84 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
                 await ReleaseCreatedSessionAsync(baseUri, createdSession);
             }
 
-            State = TestPreviewState.Failure;
-            StatusText = "播放准备失败。";
+            await RunOnUiAsync(() =>
+            {
+                State = TestPreviewState.Failure;
+                StatusText = "播放准备失败。";
+            });
         }
     }
 
     public async Task<bool> StopAsync(CancellationToken cancellationToken = default)
     {
-        var currentSession = session;
-        var currentPlayback = playbackSession;
-        if (currentSession is null && currentPlayback is null)
-        {
-            State = TestPreviewState.Idle;
-            StatusText = string.Empty;
-            return true;
-        }
-
-        State = TestPreviewState.Stopping;
-        var baseUri = baseUriProvider();
+        StopContext? context = null;
         try
         {
-            if (currentPlayback is not null)
+            await RunOnUiAsync(() =>
             {
-                playbackEngine.Stop(currentPlayback);
-                playbackSession = null;
-                OnPlaybackSessionChanged();
+                var currentSession = session;
+                var currentPlayback = playbackSession;
+                if (currentSession is null && currentPlayback is null)
+                {
+                    State = TestPreviewState.Idle;
+                    StatusText = string.Empty;
+                    return;
+                }
+
+                State = TestPreviewState.Stopping;
+                var baseUri = baseUriProvider();
+                if (currentPlayback is not null)
+                {
+                    playbackEngine.Stop(currentPlayback);
+                    playbackSession = null;
+                    OnPlaybackSessionChanged();
+                }
+
+                context = new StopContext(currentSession, baseUri);
+            });
+            if (context is null)
+            {
+                return true;
             }
 
-            if (currentSession is not null)
+            if (context.Session is not null)
             {
-                if (baseUri is null
-                    || !await StopServerSessionAsync(baseUri, currentSession.SessionId)
-                    )
+                if (context.BaseUri is null
+                    || !await StopServerSessionAsync(
+                        context.BaseUri,
+                        context.Session.SessionId))
                 {
-                    State = TestPreviewState.Failure;
-                    StatusText = "测试视频清理失败。";
+                    await RunOnUiAsync(() =>
+                    {
+                        State = TestPreviewState.Failure;
+                        StatusText = "测试视频清理失败。";
+                    });
                     return false;
                 }
 
-                if (ReferenceEquals(session, currentSession))
+                await RunOnUiAsync(() =>
                 {
-                    SetSession(null);
-                }
+                    if (ReferenceEquals(session, context.Session))
+                    {
+                        SetSession(null);
+                    }
+                });
             }
 
-            State = TestPreviewState.Idle;
-            StatusText = string.Empty;
+            await RunOnUiAsync(() =>
+            {
+                State = TestPreviewState.Idle;
+                StatusText = string.Empty;
+            });
             return true;
         }
         catch
         {
-            State = TestPreviewState.Failure;
-            StatusText = "测试视频清理失败。";
+            await RunOnUiAsync(() =>
+            {
+                State = TestPreviewState.Failure;
+                StatusText = "测试视频清理失败。";
+            });
             return false;
         }
     }
@@ -208,7 +254,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         await StopAsync();
         if (playbackEngine is IDisposable disposable)
         {
-            disposable.Dispose();
+            await RunOnUiAsync(disposable.Dispose);
         }
     }
 
@@ -226,19 +272,18 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         Uri? baseUri,
         TestSessionDto createdSession)
     {
-        if (baseUri is not null
-            && await StopServerSessionAsync(baseUri, createdSession.SessionId)
-            )
+        var stopped = baseUri is not null
+            && await StopServerSessionAsync(baseUri, createdSession.SessionId);
+        await RunOnUiAsync(() =>
         {
-            if (ReferenceEquals(session, createdSession))
+            if (stopped && ReferenceEquals(session, createdSession))
             {
                 SetSession(null);
+                return;
             }
 
-            return;
-        }
-
-        SetSession(createdSession);
+            SetSession(createdSession);
+        });
     }
 
     private async Task<bool> StopServerSessionAsync(Uri baseUri, Guid sessionId)
@@ -253,6 +298,20 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
             return false;
         }
     }
+
+    private Task RunOnUiAsync(Action action) =>
+        dispatcher.InvokeAsync(action, CancellationToken.None);
+
+    private async Task<T> ReadOnUiAsync<T>(Func<T> read)
+    {
+        T value = default!;
+        await RunOnUiAsync(() => value = read());
+        return value;
+    }
+
+    private sealed record StopContext(
+        TestSessionDto? Session,
+        Uri? BaseUri);
 
     private void SetSession(TestSessionDto? value)
     {

@@ -31,7 +31,8 @@ public sealed class TestPreviewViewModelTests
             var viewModel = new TestPreviewViewModel(
                 api,
                 new FakePlaybackEngine(),
-                () => new Uri("https://server/"));
+                () => new Uri("https://server/"),
+                new WpfUiDispatcher(dispatcher));
             var propertyChangedOnUi = new List<bool>();
             viewModel.PropertyChanged += OnPropertyChanged;
 
@@ -61,7 +62,8 @@ public sealed class TestPreviewViewModelTests
             var viewModel = new TestPreviewViewModel(
                 api,
                 engine,
-                () => new Uri("https://server/"));
+                () => new Uri("https://server/"),
+                new WpfUiDispatcher(dispatcher));
             var propertyChangedOnUi = new List<bool>();
             viewModel.PropertyChanged += (_, _) =>
                 propertyChangedOnUi.Add(dispatcher.CheckAccess());
@@ -89,7 +91,8 @@ public sealed class TestPreviewViewModelTests
             var viewModel = new TestPreviewViewModel(
                 api,
                 engine,
-                () => new Uri("https://server/"));
+                () => new Uri("https://server/"),
+                new WpfUiDispatcher(dispatcher));
             await viewModel.StartAsync(Request);
             var propertyChangedOnUi = new List<bool>();
             viewModel.PropertyChanged += (_, _) =>
@@ -118,7 +121,8 @@ public sealed class TestPreviewViewModelTests
             var viewModel = new TestPreviewViewModel(
                 api,
                 new ThreadRecordingPlaybackEngine(dispatcher),
-                () => new Uri("https://server/"));
+                () => new Uri("https://server/"),
+                new WpfUiDispatcher(dispatcher));
             await viewModel.StartAsync(Request);
             var propertyChangedOnUi = new List<bool>();
             viewModel.PropertyChanged += (_, _) =>
@@ -146,7 +150,8 @@ public sealed class TestPreviewViewModelTests
             var viewModel = new TestPreviewViewModel(
                 api,
                 engine,
-                () => new Uri("https://server/"));
+                () => new Uri("https://server/"),
+                new WpfUiDispatcher(dispatcher));
             await viewModel.StartAsync(Request);
             var propertyChangedOnUi = new List<bool>();
             viewModel.PropertyChanged += (_, _) =>
@@ -160,6 +165,98 @@ public sealed class TestPreviewViewModelTests
                 await disposeTask;
             }
 
+            Assert.True(engine.DisposedOnUi);
+            Assert.NotEmpty(propertyChangedOnUi);
+            Assert.All(propertyChangedOnUi, Assert.True);
+        });
+    }
+
+    [Fact]
+    public async Task StartFromBackgroundThreadUsesOwningDispatcher()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var api = new DeferredSuccessApi();
+            var engine = new ThreadRecordingPlaybackEngine(dispatcher);
+            var viewModel = new TestPreviewViewModel(
+                api,
+                engine,
+                () => new Uri("https://server/"),
+                new WpfUiDispatcher(dispatcher));
+            var propertyChangedOnUi = new List<bool>();
+            viewModel.PropertyChanged += (_, _) =>
+                propertyChangedOnUi.Add(dispatcher.CheckAccess());
+
+            var startTask = Task.Run(() => viewModel.StartAsync(Request));
+            await api.Started.Task;
+            await Task.Run(api.Complete);
+            await startTask;
+
+            Assert.Equal(TestPreviewState.Playing, viewModel.State);
+            Assert.True(engine.StartedOnUi);
+            Assert.NotEmpty(propertyChangedOnUi);
+            Assert.All(propertyChangedOnUi, Assert.True);
+        });
+    }
+
+    [Fact]
+    public async Task StopFromBackgroundThreadUsesOwningDispatcher()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var api = new DeferredStopApi();
+            var engine = new ThreadRecordingPlaybackEngine(dispatcher);
+            var viewModel = new TestPreviewViewModel(
+                api,
+                engine,
+                () => new Uri("https://server/"),
+                new WpfUiDispatcher(dispatcher));
+            await viewModel.StartAsync(Request);
+            var propertyChangedOnUi = new List<bool>();
+            viewModel.PropertyChanged += (_, _) =>
+                propertyChangedOnUi.Add(dispatcher.CheckAccess());
+
+            var stopTask = Task.Run(() => viewModel.StopAsync());
+            await api.StopStarted.Task;
+            await Task.Run(api.CompleteStop);
+            await stopTask;
+
+            Assert.Equal(TestPreviewState.Idle, viewModel.State);
+            Assert.Null(viewModel.Session);
+            Assert.True(engine.StoppedOnUi);
+            Assert.NotEmpty(propertyChangedOnUi);
+            Assert.All(propertyChangedOnUi, Assert.True);
+        });
+    }
+
+    [Fact]
+    public async Task DisposeFromBackgroundThreadUsesOwningDispatcher()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var api = new DeferredStopApi();
+            var engine = new ThreadRecordingPlaybackEngine(dispatcher);
+            var viewModel = new TestPreviewViewModel(
+                api,
+                engine,
+                () => new Uri("https://server/"),
+                new WpfUiDispatcher(dispatcher));
+            await viewModel.StartAsync(Request);
+            var propertyChangedOnUi = new List<bool>();
+            viewModel.PropertyChanged += (_, _) =>
+                propertyChangedOnUi.Add(dispatcher.CheckAccess());
+
+            var disposeTask = Task.Run(async () => await viewModel.DisposeAsync());
+            await api.StopStarted.Task;
+            await Task.Run(api.CompleteStop);
+            await disposeTask;
+
+            Assert.Equal(TestPreviewState.Idle, viewModel.State);
+            Assert.Null(viewModel.Session);
+            Assert.True(engine.StoppedOnUi);
             Assert.True(engine.DisposedOnUi);
             Assert.NotEmpty(propertyChangedOnUi);
             Assert.All(propertyChangedOnUi, Assert.True);
@@ -322,7 +419,8 @@ public sealed class TestPreviewViewModelTests
         public void RebuildViewModel() => ViewModel = new TestPreviewViewModel(
             Api,
             Engine,
-            () => new Uri("https://server/"));
+            () => new Uri("https://server/"),
+            new InlineDispatcher());
     }
 
     private sealed class FakeApi : ITestStreamApiClient
@@ -580,6 +678,18 @@ public sealed class TestPreviewViewModelTests
         finally
         {
             WpfGate.Release();
+        }
+    }
+
+    private sealed class InlineDispatcher : IUiDispatcher
+    {
+        public Task InvokeAsync(
+            Action action,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            action();
+            return Task.CompletedTask;
         }
     }
 }

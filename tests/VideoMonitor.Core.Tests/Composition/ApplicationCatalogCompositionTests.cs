@@ -1,4 +1,10 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Windows.Threading;
 using VideoMonitor.Core.Catalog;
+using VideoMonitor.Core.Media;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Core.Services;
 using VideoMonitor.Infrastructure.Persistence;
@@ -10,8 +16,11 @@ using VideoMonitor.Wpf.ViewModels;
 
 namespace VideoMonitor.Core.Tests.Composition;
 
+[Collection("Wpf")]
 public sealed class ApplicationCatalogCompositionTests
 {
+    private static readonly SemaphoreSlim WpfGate = new(1, 1);
+
     [Fact]
     public async Task FormalMode_DoesNotInstantiateJsonCompatibilityPath()
     {
@@ -221,6 +230,62 @@ public sealed class ApplicationCatalogCompositionTests
         Assert.Empty(deviceManagement.CatalogGroups);
     }
 
+    [Fact]
+    public async Task TestPreviewDisposalThroughApplicationCompositionStaysOnUiDispatcher()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var engine = new ThreadRecordingPlaybackEngine(dispatcher);
+            var httpClient = new HttpClient(
+                new TestPreviewHttpMessageHandler());
+            var dependencies = new TestDependencies
+            {
+                Settings = new TestClientSettingsStore(
+                    new ClientSettings(
+                        new ClientServerSettings("https://server-a"))),
+                CentralHttpClient = httpClient,
+                ConnectionClient = new CatalogApiClient(httpClient),
+                UiDispatcher = new WpfUiDispatcher(dispatcher),
+                CentralPlaybackEngine = engine
+            };
+
+            await using var composition = await CreateAsync(false, dependencies);
+            composition.StartCentralCoordinator();
+            await EventuallyAsync(() =>
+                composition.Coordinator!.Status.State
+                    == ServerConnectionState.Connected);
+
+            var propertyChangedOnUi = new List<bool>();
+            composition.TestPreview!.PropertyChanged += (_, _) =>
+                propertyChangedOnUi.Add(dispatcher.CheckAccess());
+
+            await composition.TestPreview.StartAsync(
+                new TestStreamStartRequest(
+                    null,
+                    null,
+                    new CameraDeviceDraftDto(
+                        "10.0.0.5",
+                        554,
+                        "admin",
+                        "secret",
+                        1,
+                        StreamType.Main,
+                        TransportMode.Auto),
+                    DateTimeOffset.UtcNow));
+
+            await Task.Run(async () => await composition.DisposeAsync());
+
+            Assert.True(engine.StartedOnUi);
+            Assert.True(engine.StoppedOnUi);
+            Assert.True(engine.DisposedOnUi);
+            Assert.NotEmpty(propertyChangedOnUi);
+            Assert.All(propertyChangedOnUi, Assert.True);
+            Assert.Equal(TestPreviewState.Idle, composition.TestPreview.State);
+            Assert.Null(composition.TestPreview.Session);
+        });
+    }
+
     private static Task<ApplicationCatalogComposition> CreateAsync(
         bool singleCameraEnabled,
         TestDependencies? dependencies = null) =>
@@ -261,6 +326,10 @@ public sealed class ApplicationCatalogCompositionTests
 
         public HttpClient? CentralHttpClient { get; init; }
 
+        public IUiDispatcher? UiDispatcher { get; init; }
+
+        public IPlaybackEngine? CentralPlaybackEngine { get; init; }
+
         public ApplicationCatalogComposition.Dependencies Build() =>
             new()
             {
@@ -276,7 +345,10 @@ public sealed class ApplicationCatalogCompositionTests
                     LocalStoreCreated = true;
                     return LocalStore = new TrackingDeviceCatalogStore();
                 },
-                UiDispatcherFactory = () => new InlineDispatcher(),
+                UiDispatcherFactory = () => UiDispatcher ?? new InlineDispatcher(),
+                CentralPlaybackEngineFactory = () => CentralPlaybackEngine
+                    ?? throw new InvalidOperationException(
+                        "Central playback engine was not configured."),
                 ConnectionClockFactory = () => new TestConnectionClock()
             };
     }
@@ -374,6 +446,152 @@ public sealed class ApplicationCatalogCompositionTests
             }
 
             base.Dispose(disposing);
+        }
+    }
+
+    private sealed class TestPreviewHttpMessageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri?.AbsolutePath;
+            if (path == "/health/ready")
+            {
+                return Task.FromResult(JsonResponse(HttpStatusCode.OK, "{}"));
+            }
+
+            if (path == "/api/v1/catalog")
+            {
+                return Task.FromResult(JsonResponse(
+                    HttpStatusCode.OK,
+                    JsonSerializer.Serialize(new CatalogSnapshotDto([], []))));
+            }
+
+            if (request.Method == HttpMethod.Post
+                && path == "/api/v1/test-streams")
+            {
+                return Task.FromResult(JsonResponse(
+                    HttpStatusCode.OK,
+                    JsonSerializer.Serialize(new TestSessionDto(
+                        Guid.Parse("94000000-0000-0000-0000-000000000001"),
+                        null,
+                        null,
+                        "videomonitor-test",
+                        "test_0123456789abcdef0123456789abcdef",
+                        new Uri("rtsp://playback.example/live"),
+                        DateTimeOffset.UtcNow.AddMinutes(2)))));
+            }
+
+            if (request.Method == HttpMethod.Delete
+                && path?.StartsWith("/api/v1/test-streams/", StringComparison.Ordinal)
+                    == true)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+
+        private static HttpResponseMessage JsonResponse(
+            HttpStatusCode statusCode,
+            string content) =>
+            new(statusCode)
+            {
+                Content = new StringContent(
+                    content,
+                    Encoding.UTF8,
+                    "application/json")
+            };
+    }
+
+    private sealed class ThreadRecordingPlaybackEngine : IPlaybackEngine, IDisposable
+    {
+        private readonly Dispatcher dispatcher;
+
+        public ThreadRecordingPlaybackEngine(Dispatcher dispatcher) =>
+            this.dispatcher = dispatcher;
+
+        public bool StartedOnUi { get; private set; }
+
+        public bool StoppedOnUi { get; private set; }
+
+        public bool DisposedOnUi { get; private set; }
+
+        public PlaybackSession Start(PlaybackSource source)
+        {
+            StartedOnUi = dispatcher.CheckAccess();
+            return new PlaybackSession(source, null, null);
+        }
+
+        public void Stop(PlaybackSession session)
+        {
+            StoppedOnUi = dispatcher.CheckAccess();
+            session.Dispose();
+        }
+
+        public void Dispose() => DisposedOnUi = dispatcher.CheckAccess();
+    }
+
+    private static async Task RunOnStaAsync(Func<Task> action)
+    {
+        await WpfGate.WaitAsync();
+        try
+        {
+            var completion = new TaskCompletionSource<object?>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var thread = new Thread(() =>
+            {
+                Exception? failure = null;
+                try
+                {
+                    var dispatcher = Dispatcher.CurrentDispatcher;
+                    SynchronizationContext.SetSynchronizationContext(
+                        new DispatcherSynchronizationContext(dispatcher));
+                    _ = RunAsync();
+                    Dispatcher.Run();
+
+                    if (failure is null)
+                    {
+                        completion.SetResult(null);
+                    }
+                    else
+                    {
+                        completion.SetException(failure);
+                    }
+
+                    async Task RunAsync()
+                    {
+                        try
+                        {
+                            await action();
+                        }
+                        catch (Exception exception)
+                        {
+                            failure = exception;
+                        }
+                        finally
+                        {
+                            dispatcher.BeginInvokeShutdown(DispatcherPriority.Normal);
+                        }
+                    }
+                }
+                catch (Exception exception)
+                {
+                    completion.SetException(exception);
+                }
+            })
+            {
+                IsBackground = true
+            };
+
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            await completion.Task;
+        }
+        finally
+        {
+            WpfGate.Release();
         }
     }
 }
