@@ -9,6 +9,15 @@ namespace VideoMonitor.Core.Tests.ViewModels;
 public sealed class SecondaryFormalPlaybackTests
 {
     [Fact]
+    public void LateWrapperFailureCannotOverwriteNewIdentity()
+    {
+        var source = ReadSource("SecondaryMonitorViewModel.cs");
+        var wrapper = ExtractFormalPlaybackWrapper(source);
+
+        Assert.DoesNotContain("tile.ShowError(", wrapper);
+    }
+
+    [Fact]
     public void CatalogRefreshPreservesSelectionByGuid()
     {
         var rootId = Guid.NewGuid();
@@ -54,5 +63,23 @@ public sealed class SecondaryFormalPlaybackTests
         public void Replace(IReadOnlyList<DeviceGroupDto> next) => groups = next;
 
         public void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static string ReadSource(string fileName) =>
+        File.ReadAllText(Path.Combine(
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..")),
+            "src",
+            "VideoMonitor.Wpf",
+            "ViewModels",
+            fileName));
+
+    private static string ExtractFormalPlaybackWrapper(string source)
+    {
+        const string startMarker = "private async Task StartFormalPlaybackAsync";
+        const string endMarker = "private async Task StopFormalPlaybackAsync";
+        var start = source.IndexOf(startMarker, StringComparison.Ordinal);
+        var end = source.IndexOf(endMarker, start, StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start);
+        return source[start..end];
     }
 }

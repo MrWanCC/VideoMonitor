@@ -238,10 +238,6 @@ public sealed class SecondaryMonitorViewModel : ObservableObject
         catch (OperationCanceledException)
         {
         }
-        catch
-        {
-            tile.ShowError("播放失败", "PLAYBACK_FAILED");
-        }
     }
 
     private async Task StopFormalPlaybackAsync(VideoTileViewModel tile)
