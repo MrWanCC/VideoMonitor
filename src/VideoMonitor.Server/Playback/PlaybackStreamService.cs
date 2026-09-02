@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Media;
 using VideoMonitor.Core.Models;
@@ -25,6 +27,7 @@ public sealed class PlaybackStreamService : IPlaybackStreamService
     private readonly IStreamManager streamManager;
     private readonly IPlaybackTicketIssuer ticketIssuer;
     private readonly IPlaybackUrlBuilder urlBuilder;
+    private readonly ILogger<PlaybackStreamService> logger;
 
     public PlaybackStreamService(
         ICentralCatalogRepository catalogRepository,
@@ -32,7 +35,8 @@ public sealed class PlaybackStreamService : IPlaybackStreamService
         IMediaRuntimeSettingsProvider settingsProvider,
         IStreamManager streamManager,
         IPlaybackTicketIssuer ticketIssuer,
-        IPlaybackUrlBuilder urlBuilder)
+        IPlaybackUrlBuilder urlBuilder,
+        ILogger<PlaybackStreamService>? logger = null)
     {
         this.catalogRepository = catalogRepository
             ?? throw new ArgumentNullException(nameof(catalogRepository));
@@ -46,6 +50,7 @@ public sealed class PlaybackStreamService : IPlaybackStreamService
             ?? throw new ArgumentNullException(nameof(ticketIssuer));
         this.urlBuilder = urlBuilder
             ?? throw new ArgumentNullException(nameof(urlBuilder));
+        this.logger = logger ?? NullLogger<PlaybackStreamService>.Instance;
     }
 
     public async Task<CatalogOperationResult<EnsurePlaybackStreamResponse>> EnsureAsync(
@@ -62,6 +67,7 @@ public sealed class PlaybackStreamService : IPlaybackStreamService
                 ValidationMessage);
         }
 
+        var stage = "ResolveCatalog";
         try
         {
             var device = await catalogRepository
@@ -100,6 +106,7 @@ public sealed class PlaybackStreamService : IPlaybackStreamService
                 device.Id,
                 channel.Id,
                 channel.StreamType);
+            stage = "ResolveSource";
             var resolvedSource = await sourceResolver
                 .ResolveAsync(key, cancellationToken)
                 .ConfigureAwait(false);
@@ -113,18 +120,22 @@ public sealed class PlaybackStreamService : IPlaybackStreamService
                 settings.FormalApp,
                 MediaStreamIdGenerator.GenerateFormal(key),
                 resolvedSource.SourceUri);
+            stage = "AddProxy";
             var ensured = await streamManager
                 .EnsureStreamAsync(mediaRequest, cancellationToken)
                 .ConfigureAwait(false);
             if (!ensured.IsSuccess || ensured.Stream is null)
             {
+                LogFailure(request, ensured.FailureCode ?? UnavailableCode, stage, "None");
                 return MapEnsureFailure(ensured.FailureCode);
             }
 
+            stage = "WaitRegistration";
             var runtime = streamManager.GetSnapshot().Streams.FirstOrDefault(
                 candidate => candidate.Key == key);
             if (runtime is null || runtime.RuntimeState != StreamRuntimeState.Ready)
             {
+                LogFailure(request, UnavailableCode, stage, "None");
                 return Failure<EnsurePlaybackStreamResponse>(
                     StatusCodes.Status503ServiceUnavailable,
                     UnavailableCode,
@@ -135,6 +146,7 @@ public sealed class PlaybackStreamService : IPlaybackStreamService
                 ensured.Stream.Vhost,
                 ensured.Stream.App,
                 ensured.Stream.Stream);
+            stage = "IssueTicket";
             var ticket = await ticketIssuer
                 .IssueAsync(identity, cancellationToken)
                 .ConfigureAwait(false);
@@ -155,13 +167,31 @@ public sealed class PlaybackStreamService : IPlaybackStreamService
         {
             throw;
         }
-        catch
+        catch (Exception exception)
         {
+            LogFailure(request, UnavailableCode, stage, exception.GetType().Name);
             return Failure<EnsurePlaybackStreamResponse>(
                 StatusCodes.Status503ServiceUnavailable,
                 UnavailableCode,
                 UnavailableMessage);
         }
+    }
+
+    private void LogFailure(
+        EnsurePlaybackStreamRequest request,
+        string failureCode,
+        string stage,
+        string exceptionType)
+    {
+        logger.LogError(
+            "Playback stream failed safely. Operation={Operation} FailureCode={FailureCode} Stage={Stage} DeviceId={DeviceId} ChannelId={ChannelId} StreamType={StreamType} ExceptionType={ExceptionType}",
+            "PlaybackStream.Ensure",
+            failureCode,
+            stage,
+            request.DeviceId,
+            request.ChannelId,
+            request.StreamType,
+            exceptionType);
     }
 
     private static CatalogOperationResult<EnsurePlaybackStreamResponse> MapEnsureFailure(

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Media;
 using VideoMonitor.Core.Models;
@@ -162,6 +163,87 @@ public sealed class PlaybackAuthorizationTests
         Assert.Equal(503, response.StatusCode);
         Assert.DoesNotContain("connectionString", response.Body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("zlm-secret", response.Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PlaybackFailureLogsSafeDiagnosticsWithoutSensitiveValues()
+    {
+        var deviceId = Guid.Parse("93000000-0000-0000-0000-000000000001");
+        var channelId = Guid.Parse("94000000-0000-0000-0000-000000000001");
+        var key = new MediaStreamKey(deviceId, channelId, StreamType.Main);
+        var logger = new RecordingLogger();
+        var service = new PlaybackStreamService(
+            new FixedCatalogRepository(new CameraDeviceDto(
+                deviceId,
+                Guid.NewGuid(),
+                "camera",
+                "192.0.2.10",
+                8000,
+                554,
+                "admin",
+                false,
+                "manufacturer",
+                "model",
+                TransportMode.Auto,
+                true,
+                "",
+                1,
+                new[]
+                {
+                    new CameraChannelDto(
+                        channelId,
+                        deviceId,
+                        1,
+                        "main",
+                        StreamType.Main,
+                        true)
+                })),
+            new ThrowingSourceResolver(),
+            new FixedRuntimeSettingsProvider(new MediaRuntimeSettings(
+                "http://zlm.example:1985",
+                "rtsp://playback.example:8554",
+                "vhost",
+                "videomonitor",
+                "videomonitor-test",
+                "zlm-secret",
+                30,
+                1)),
+            new ReadyStreamManager(key, new FormalStreamDescriptor(
+                "vhost",
+                "videomonitor",
+                key.ToFormalStreamId(),
+                key)),
+            new PlaybackTicketIssuer(new FixedSigningKeyProvider(GetKey())),
+            new PlaybackUrlBuilder(new FixedRuntimeSettingsProvider(new MediaRuntimeSettings(
+                "http://zlm.example:1985",
+                "rtsp://playback.example:8554",
+                "vhost",
+                "videomonitor",
+                "videomonitor-test",
+                "zlm-secret",
+                30,
+                1))),
+            logger);
+
+        var result = await service.EnsureAsync(new EnsurePlaybackStreamRequest(
+            deviceId,
+            channelId,
+            StreamType.Main));
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(503, result.StatusCode);
+        var message = Assert.Single(logger.Messages);
+        Assert.Contains("Playback stream failed safely.", message);
+        Assert.Contains("FailureCode=MEDIA_UNAVAILABLE", message);
+        Assert.Contains("Stage=ResolveSource", message);
+        Assert.Contains(deviceId.ToString(), message);
+        Assert.Contains(channelId.ToString(), message);
+        Assert.Contains("StreamType=Main", message);
+        Assert.Contains("ExceptionType=InvalidOperationException", message);
+        Assert.Null(logger.Exceptions.Single());
+        Assert.DoesNotContain("secret", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rtsp://", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("password", message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -421,6 +503,14 @@ public sealed class PlaybackAuthorizationTests
             Task.FromResult(source);
     }
 
+    private sealed class ThrowingSourceResolver : ICameraSourceResolver
+    {
+        public Task<ResolvedCameraSource> ResolveAsync(
+            MediaStreamKey key,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("rtsp://camera-password-secret");
+    }
+
     private sealed class FixedRuntimeSettingsProvider : IMediaRuntimeSettingsProvider
     {
         private readonly MediaRuntimeSettings settings;
@@ -504,6 +594,30 @@ public sealed class PlaybackAuthorizationTests
         public TrustPolicy(bool trusted) => this.trusted = trusted;
 
         public bool IsTrusted(IPAddress? remoteAddress) => trusted;
+    }
+
+    private sealed class RecordingLogger : ILogger<PlaybackStreamService>
+    {
+        public List<string> Messages { get; } = [];
+
+        public List<Exception?> Exceptions { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull =>
+            null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
+            Exceptions.Add(exception);
+        }
     }
 
 }

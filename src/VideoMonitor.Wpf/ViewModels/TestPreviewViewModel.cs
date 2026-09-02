@@ -73,7 +73,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         ObjectDisposedException.ThrowIf(disposed != 0, this);
         if (IsActive)
         {
-            if (!await StopAsync(cancellationToken).ConfigureAwait(false))
+            if (!await StopAsync(cancellationToken))
             {
                 return;
             }
@@ -93,8 +93,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         try
         {
             createdSession = await apiClient
-                .StartAsync(baseUri, request, cancellationToken)
-                .ConfigureAwait(false);
+                .StartAsync(baseUri, request, cancellationToken);
             SetSession(createdSession);
             var source = new TestPreviewSource(
                 createdSession.ChannelId,
@@ -109,8 +108,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         {
             if (createdSession is not null)
             {
-                await ReleaseCreatedSessionAsync(baseUri, createdSession)
-                    .ConfigureAwait(false);
+                await ReleaseCreatedSessionAsync(baseUri, createdSession);
             }
 
             State = TestPreviewState.Failure;
@@ -121,8 +119,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         {
             if (createdSession is not null)
             {
-                await ReleaseCreatedSessionAsync(baseUri, createdSession)
-                    .ConfigureAwait(false);
+                await ReleaseCreatedSessionAsync(baseUri, createdSession);
             }
 
             State = TestPreviewState.Failure;
@@ -132,8 +129,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         {
             if (createdSession is not null)
             {
-                await ReleaseCreatedSessionAsync(baseUri, createdSession)
-                    .ConfigureAwait(false);
+                await ReleaseCreatedSessionAsync(baseUri, createdSession);
             }
 
             State = TestPreviewState.Failure;
@@ -167,7 +163,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
             {
                 if (baseUri is null
                     || !await StopServerSessionAsync(baseUri, currentSession.SessionId)
-                        .ConfigureAwait(false))
+                    )
                 {
                     State = TestPreviewState.Failure;
                     StatusText = "测试视频清理失败。";
@@ -194,12 +190,12 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
 
     public async Task CloseAsync(CancellationToken cancellationToken = default)
     {
-        await StopAsync(cancellationToken).ConfigureAwait(false);
+        await StopAsync(cancellationToken);
     }
 
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
-        await StopAsync(cancellationToken).ConfigureAwait(false);
+        await StopAsync(cancellationToken);
     }
 
     public async ValueTask DisposeAsync()
@@ -209,7 +205,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        await StopAsync().ConfigureAwait(false);
+        await StopAsync();
         if (playbackEngine is IDisposable disposable)
         {
             disposable.Dispose();
@@ -223,7 +219,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
 
     private async Task ExecuteStopCommandAsync()
     {
-        await StopAsync().ConfigureAwait(false);
+        await StopAsync();
     }
 
     private async Task ReleaseCreatedSessionAsync(
@@ -232,7 +228,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
     {
         if (baseUri is not null
             && await StopServerSessionAsync(baseUri, createdSession.SessionId)
-                .ConfigureAwait(false))
+            )
         {
             if (ReferenceEquals(session, createdSession))
             {
@@ -249,7 +245,7 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
-            await apiClient.StopAsync(baseUri, sessionId).ConfigureAwait(false);
+            await apiClient.StopAsync(baseUri, sessionId);
             return true;
         }
         catch
@@ -275,18 +271,18 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
 
     private static string ToSafeFailureStatus(string code) => code switch
     {
-        "InvalidDraft"
-            or "MediaServerUnavailable"
-            or "AuthFailed"
-            or "ConnectFailed"
-            or "MediaRegistrationTimeout"
-            or "PlaybackPreparationFailed"
-            or "CatalogUnavailable"
-            or "IdentityConflict"
-            or "SessionNotFound"
-            or "CATALOG_UNAVAILABLE"
-            or "CATALOG_VALIDATION_FAILED"
-            => $"测试视频失败：{code}",
-        _ => "播放准备失败。"
+        "MediaServerUnavailable" or "CATALOG_UNAVAILABLE"
+            => "无法连接流媒体服务。",
+        "AuthFailed"
+            => "摄像头用户名或密码验证失败。",
+        "ConnectFailed"
+            => "无法连接摄像头。",
+        "MediaRegistrationTimeout"
+            => "视频流注册超时。",
+        "PlaybackPreparationFailed"
+            => "视频播放准备失败。",
+        "IdentityConflict"
+            => "视频流标识冲突，请重试。",
+        _ => "测试视频启动失败。"
     };
 }

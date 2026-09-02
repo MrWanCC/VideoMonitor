@@ -1,4 +1,5 @@
 using VideoMonitor.Core.Media;
+using Microsoft.Extensions.Logging;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Server.Catalog;
 using VideoMonitor.Server.Media;
@@ -177,6 +178,38 @@ public sealed class TestStreamServiceTests
     }
 
     [Fact]
+    public async Task FailureLogsSafeDiagnosticsWithoutSensitiveValues()
+    {
+        var fixture = new ServiceFixture
+        {
+            Proxy = new FakeProxy
+            {
+                Failure = new TestStreamOperationException(
+                    TestStreamErrorCode.MediaServerUnavailable,
+                    "camera password and rtsp://secret must not be logged")
+            }
+        };
+        fixture.RebuildService();
+
+        var result = await fixture.Service.StartAsync(
+            Request(DeviceId, ChannelId, "secret"));
+
+        Assert.False(result.IsSuccess);
+        var message = Assert.Single(fixture.Logger.Messages);
+        Assert.Contains("Test stream failed safely.", message);
+        Assert.Contains("FailureCode=MediaServerUnavailable", message);
+        Assert.Contains("Stage=AddProxy", message);
+        Assert.Contains(DeviceId.ToString(), message);
+        Assert.Contains(ChannelId.ToString(), message);
+        Assert.Contains("StreamType=Main", message);
+        Assert.Contains("ExceptionType=TestStreamOperationException", message);
+        Assert.Null(fixture.Logger.Exceptions.Single());
+        Assert.DoesNotContain("secret", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("rtsp://", message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("password", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PlaybackPreparationFailedIsMapped()
     {
         var fixture = new ServiceFixture
@@ -273,6 +306,8 @@ public sealed class TestStreamServiceTests
 
         public RecordingObservationRecorder Recorder { get; } = new();
 
+        public RecordingLogger Logger { get; } = new();
+
         public TestStreamService Service { get; private set; } = null!;
 
         public ServiceFixture() => RebuildService();
@@ -286,7 +321,8 @@ public sealed class TestStreamServiceTests
                 UrlBuilder,
                 Registry,
                 Recorder,
-                () => Now);
+                () => Now,
+                Logger);
         }
     }
 
@@ -393,6 +429,30 @@ public sealed class TestStreamServiceTests
             Observation = observation;
             ObservedAtUtc = observedAtUtc;
             ErrorCode = safeErrorCode;
+        }
+    }
+
+    private sealed class RecordingLogger : ILogger<TestStreamService>
+    {
+        public List<string> Messages { get; } = [];
+
+        public List<Exception?> Exceptions { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull =>
+            null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
+            Exceptions.Add(exception);
         }
     }
 }

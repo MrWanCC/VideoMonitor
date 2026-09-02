@@ -1,5 +1,7 @@
 using VideoMonitor.Core.Media;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Server.Playback;
 using VideoMonitor.Server.Catalog;
@@ -37,6 +39,7 @@ public sealed class TestStreamService : ITestStreamService
     private readonly TestSessionRegistry sessionRegistry;
     private readonly IMediaObservationRecorder observationRecorder;
     private readonly Func<DateTimeOffset> utcNow;
+    private readonly ILogger<TestStreamService> logger;
 
     public TestStreamService(
         ITestCameraSourceResolver sourceResolver,
@@ -45,7 +48,8 @@ public sealed class TestStreamService : ITestStreamService
         IPlaybackUrlBuilder urlBuilder,
         TestSessionRegistry sessionRegistry,
         IMediaObservationRecorder observationRecorder,
-        Func<DateTimeOffset>? utcNow = null)
+        Func<DateTimeOffset>? utcNow = null,
+        ILogger<TestStreamService>? logger = null)
     {
         this.sourceResolver = sourceResolver
             ?? throw new ArgumentNullException(nameof(sourceResolver));
@@ -60,6 +64,7 @@ public sealed class TestStreamService : ITestStreamService
         this.observationRecorder = observationRecorder
             ?? throw new ArgumentNullException(nameof(observationRecorder));
         this.utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
+        this.logger = logger ?? NullLogger<TestStreamService>.Instance;
     }
 
     public async Task<CatalogOperationResult<TestSessionDto>> StartAsync(
@@ -73,13 +78,16 @@ public sealed class TestStreamService : ITestStreamService
 
         ResolvedTestCameraSource? source = null;
         TestStreamProxyHandle? handle = null;
+        var stage = "ResolveSource";
         try
         {
             source = await sourceResolver.ResolveAsync(request, cancellationToken)
                 .ConfigureAwait(false);
+            stage = "AddProxy";
             handle = await proxyController.StartAsync(source, cancellationToken)
                 .ConfigureAwait(false);
 
+            stage = "IssueTicket";
             var identity = new PlaybackMediaIdentity(
                 handle.Vhost,
                 handle.App,
@@ -89,14 +97,21 @@ public sealed class TestStreamService : ITestStreamService
             Uri playbackUrl;
             try
             {
+                stage = "PlaybackPreparation";
                 playbackUrl = await urlBuilder
                     .BuildAsync(identity, ticket, cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch
+            catch (Exception exception)
             {
                 await CleanupAfterPreparationFailureAsync(handle).ConfigureAwait(false);
                 RecordFailure(request, source, TestStreamErrorCode.PlaybackPreparationFailed);
+                LogFailure(
+                    request,
+                    source,
+                    TestStreamErrorCode.PlaybackPreparationFailed,
+                    stage,
+                    exception.GetType().Name);
                 return Failure<TestSessionDto>(TestStreamErrorCode.PlaybackPreparationFailed);
             }
 
@@ -129,9 +144,15 @@ public sealed class TestStreamService : ITestStreamService
             }
 
             RecordFailure(request, source, exception.Code);
+            LogFailure(
+                request,
+                source,
+                exception.Code,
+                stage,
+                exception.GetType().Name);
             return Failure<TestSessionDto>(exception.Code);
         }
-        catch
+        catch (Exception exception)
         {
             if (handle is not null)
             {
@@ -142,6 +163,12 @@ public sealed class TestStreamService : ITestStreamService
                 ? TestStreamErrorCode.ConnectFailed
                 : TestStreamErrorCode.PlaybackPreparationFailed;
             RecordFailure(request, source, code);
+            LogFailure(
+                request,
+                source,
+                code,
+                stage,
+                exception.GetType().Name);
             return Failure<TestSessionDto>(code);
         }
     }
@@ -181,6 +208,24 @@ public sealed class TestStreamService : ITestStreamService
             null,
             StatusCodes.Status200OK,
             null);
+    }
+
+    private void LogFailure(
+        TestStreamStartRequest request,
+        ResolvedTestCameraSource? source,
+        TestStreamErrorCode code,
+        string stage,
+        string exceptionType)
+    {
+        logger.LogError(
+            "Test stream failed safely. Operation={Operation} FailureCode={FailureCode} Stage={Stage} DeviceId={DeviceId} ChannelId={ChannelId} StreamType={StreamType} ExceptionType={ExceptionType}",
+            "TestStream.Start",
+            code.ToString(),
+            stage,
+            source?.ExistingDeviceId?.ToString() ?? request.ExistingDeviceId?.ToString() ?? "None",
+            source?.ExistingChannelId?.ToString() ?? request.ExistingChannelId?.ToString() ?? "None",
+            source?.StreamType.ToString() ?? request.Draft.StreamType.ToString(),
+            exceptionType);
     }
 
     private async Task CleanupAfterPreparationFailureAsync(
