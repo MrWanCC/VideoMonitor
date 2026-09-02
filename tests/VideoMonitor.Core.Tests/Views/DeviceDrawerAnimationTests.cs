@@ -13,6 +13,7 @@ using VideoMonitor.Wpf.Views.Pages;
 
 namespace VideoMonitor.Core.Tests.Views;
 
+[Collection("Wpf")]
 public sealed class DeviceDrawerAnimationTests
 {
     [Fact]

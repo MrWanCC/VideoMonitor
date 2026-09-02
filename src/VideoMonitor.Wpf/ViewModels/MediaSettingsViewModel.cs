@@ -126,13 +126,12 @@ public sealed class MediaSettingsViewModel : ObservableObject
                 return;
             }
 
-            Apply(await apiClient.GetAsync(endpoint, cancellationToken)
-                .ConfigureAwait(false));
+            Apply(await apiClient.GetAsync(endpoint, cancellationToken));
             StatusText = "流媒体设置已加载。";
         }
         catch (CatalogApiException exception)
         {
-            StatusText = $"流媒体设置加载失败：{exception.Code}";
+            StatusText = $"流媒体设置加载失败：{MapFailureCode(exception.Code)}";
         }
         catch (OperationCanceledException)
         {
@@ -168,15 +167,14 @@ public sealed class MediaSettingsViewModel : ObservableObject
 
             var result = await apiClient.TestAsync(
                     endpoint,
-                    CreateTestRequest(secret))
-                .ConfigureAwait(false);
+                    CreateTestRequest(secret));
             StatusText = result.IsReachable
                 ? "配置测试成功。"
-                : $"配置测试失败：{result.FailureCode}";
+                : $"配置测试失败：{MapFailureCode(result.FailureCode)}";
         }
         catch (CatalogApiException exception)
         {
-            StatusText = $"配置测试失败：{exception.Code}";
+            StatusText = $"配置测试失败：{MapFailureCode(exception.Code)}";
         }
         catch (OperationCanceledException)
         {
@@ -221,14 +219,13 @@ public sealed class MediaSettingsViewModel : ObservableObject
                         TestApp,
                         secret,
                         NoReaderGraceSeconds,
-                        Revision))
-                .ConfigureAwait(false);
+                        Revision));
             Apply(saved);
             StatusText = "流媒体设置保存成功。";
         }
         catch (CatalogApiException exception)
         {
-            StatusText = $"流媒体设置保存失败：{exception.Code}";
+            StatusText = $"流媒体设置保存失败：{MapFailureCode(exception.Code)}";
         }
         catch (OperationCanceledException)
         {
@@ -254,6 +251,20 @@ public sealed class MediaSettingsViewModel : ObservableObject
             TestApp,
             secret,
             NoReaderGraceSeconds);
+
+    private static string MapFailureCode(string? code) => code switch
+    {
+        "ZLM_SECRET_REQUIRED" => "请输入 ZLM Secret。",
+        "AuthFailed" => "ZLM Secret 不正确。",
+        "MediaServerUnavailable" => "无法连接流媒体服务。",
+        "INVALID_ZLM_API_BASE_URL" => "ZLM API 地址无效。",
+        "INVALID_PLAYBACK_BASE_URL" => "播放地址无效。",
+        "CATALOG_UNAVAILABLE" => "中央服务器暂不可用。",
+        "CATALOG_READ_FAILED" => "流媒体设置读取失败，请重试。",
+        "CATALOG_WRITE_FAILED" => "流媒体设置保存失败，请重试。",
+        "CATALOG_VALIDATION_FAILED" => "流媒体设置不完整或格式不正确。",
+        _ => "操作失败，请重试。",
+    };
 
     private void Apply(MediaSettingsDto dto)
     {
