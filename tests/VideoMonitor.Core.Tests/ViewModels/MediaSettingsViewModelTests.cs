@@ -17,7 +17,7 @@ public sealed class MediaSettingsViewModelTests
                 "__defaultVhost__",
                 "videomonitor",
                 "videomonitor-test",
-                true,
+                false,
                 30,
                 4)
         };
@@ -32,9 +32,10 @@ public sealed class MediaSettingsViewModelTests
         Assert.Equal(1, api.TestCalls);
         Assert.Equal(0, api.UpdateCalls);
         Assert.Equal(0, api.CameraStartCalls);
-        Assert.Equal("配置测试成功。", viewModel.StatusText);
+        Assert.Equal("配置测试成功，Secret 尚未保存。", viewModel.StatusText);
         Assert.Equal(4, viewModel.Revision);
-        Assert.True(viewModel.HasSecret);
+        Assert.False(viewModel.HasSecret);
+        Assert.Equal("Candidate-Only-Secret", viewModel.ZlmSecret);
         Assert.DoesNotContain("Candidate-Only-Secret", viewModel.StatusText, StringComparison.Ordinal);
     }
 
@@ -61,6 +62,7 @@ public sealed class MediaSettingsViewModelTests
         await viewModel.TestCommand.ExecuteAsync(null);
 
         Assert.Equal($"配置测试失败：{safeMessage}", viewModel.StatusText);
+        Assert.Empty(viewModel.ZlmSecret);
         Assert.DoesNotContain(code, viewModel.StatusText, StringComparison.Ordinal);
     }
 

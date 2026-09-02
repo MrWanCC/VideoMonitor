@@ -19,7 +19,7 @@ public sealed class MediaViewPasswordBindingTests
     private static readonly SemaphoreSlim WpfGate = new(1, 1);
 
     [Fact]
-    public async Task TestCommandClearsRealMediaViewPasswordBox()
+    public async Task SuccessfulTestKeepsSecretUntilImmediateSave()
     {
         await RunOnStaAsync(async () =>
         {
@@ -77,12 +77,120 @@ public sealed class MediaViewPasswordBindingTests
             await commandTask;
 
             Assert.Equal("onsite-secret", api.LastTestRequest?.ZlmSecret);
-            Assert.True(
-                string.IsNullOrEmpty(viewModel.ZlmSecret),
-                "MediaSettingsViewModel did not clear ZlmSecret after Test.");
-            Assert.True(
-                string.IsNullOrEmpty(passwordBox.Password),
-                "The real MediaView PasswordBox did not clear after Test.");
+            Assert.Equal("onsite-secret", viewModel.ZlmSecret);
+            Assert.Equal("onsite-secret", passwordBox.Password);
+            Assert.Equal("配置测试成功，Secret 尚未保存。", viewModel.StatusText);
+            Assert.False(viewModel.HasSecret);
+            Assert.Equal(0, api.UpdateCalls);
+
+            var saveTask = viewModel.SaveCommand.ExecuteAsync(null);
+            api.CompleteSave();
+            await saveTask;
+
+            Assert.Equal("onsite-secret", api.LastUpdateRequest?.ZlmSecret);
+            Assert.Empty(viewModel.ZlmSecret);
+            Assert.Empty(passwordBox.Password);
+            Assert.True(viewModel.HasSecret);
+            Assert.Equal("流媒体设置保存成功。", viewModel.StatusText);
+
+            view.Visibility = Visibility.Collapsed;
+            view.UpdateLayout();
+            view.Visibility = Visibility.Visible;
+            view.UpdateLayout();
+            await Task.Yield();
+
+            Assert.True(viewModel.HasSecret);
+            Assert.Empty(viewModel.ZlmSecret);
+            Assert.Empty(passwordBox.Password);
+
+            host.Close();
+        });
+    }
+
+    [Fact]
+    public async Task FailedTestClearsTransientSecret()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var api = new RecordingMediaSettingsApiClient
+            {
+                TestFailure = new CatalogApiException("AuthFailed")
+            };
+            var viewModel = new MediaSettingsViewModel(
+                api,
+                new Uri("https://server.example/"));
+            var view = new MediaView
+            {
+                DataContext = viewModel,
+            };
+            var host = new Window
+            {
+                Width = 800,
+                Height = 600,
+                Opacity = 0,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.None,
+                Content = view,
+            };
+
+            host.Show();
+            view.UpdateLayout();
+
+            var passwordBox = FindVisualChild<PasswordBox>(view);
+            Assert.NotNull(passwordBox);
+            passwordBox!.Password = "onsite-secret";
+
+            var commandTask = viewModel.TestCommand.ExecuteAsync(null);
+            await commandTask;
+
+            Assert.Empty(viewModel.ZlmSecret);
+            Assert.Empty(passwordBox.Password);
+            Assert.Equal("配置测试失败：ZLM Secret 不正确。", viewModel.StatusText);
+
+            host.Close();
+        });
+    }
+
+    [Fact]
+    public async Task LeavingMediaViewClearsSuccessfulUnsavedSecret()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var api = new RecordingMediaSettingsApiClient();
+            var viewModel = new MediaSettingsViewModel(
+                api,
+                new Uri("https://server.example/"));
+            var view = new MediaView
+            {
+                DataContext = viewModel,
+            };
+            var host = new Window
+            {
+                Width = 800,
+                Height = 600,
+                Opacity = 0,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.None,
+                Content = view,
+            };
+
+            host.Show();
+            view.UpdateLayout();
+
+            var passwordBox = FindVisualChild<PasswordBox>(view);
+            Assert.NotNull(passwordBox);
+            passwordBox!.Password = "onsite-secret";
+
+            var commandTask = viewModel.TestCommand.ExecuteAsync(null);
+            api.CompleteTest();
+            await commandTask;
+            Assert.Equal("onsite-secret", passwordBox.Password);
+
+            view.Visibility = Visibility.Collapsed;
+            view.UpdateLayout();
+
+            Assert.Empty(viewModel.ZlmSecret);
+            Assert.Empty(passwordBox.Password);
 
             host.Close();
         });
@@ -265,6 +373,9 @@ public sealed class MediaViewPasswordBindingTests
 
         public TestMediaSettingsRequest? LastTestRequest { get; private set; }
         public UpdateMediaSettingsRequest? LastUpdateRequest { get; private set; }
+        public CatalogApiException? TestFailure { get; init; }
+        public bool StoredHasSecret { get; private set; }
+        public int UpdateCalls { get; private set; }
 
         public Task<MediaSettingsDto> GetAsync(
             Uri baseUri,
@@ -275,7 +386,7 @@ public sealed class MediaViewPasswordBindingTests
                 "__defaultVhost__",
                 "videomonitor",
                 "videomonitor-test",
-                false,
+                StoredHasSecret,
                 30,
                 1));
 
@@ -291,26 +402,35 @@ public sealed class MediaViewPasswordBindingTests
             CancellationToken cancellationToken = default)
         {
             LastTestRequest = request;
+            if (TestFailure is not null)
+            {
+                return Task.FromException<MediaSettingsTestResult>(TestFailure);
+            }
+
             return testCompletion.Task;
         }
 
         public void CompleteTest() =>
             testCompletion.TrySetResult(new MediaSettingsTestResult(true, null));
 
-        public void CompleteSave() =>
+        public void CompleteSave()
+        {
+            StoredHasSecret = true;
             updateCompletion.TrySetResult(new MediaSettingsDto(
-                string.Empty,
-                string.Empty,
-                "__defaultVhost__",
-                "videomonitor",
-                "videomonitor-test",
-                false,
-                30,
-                2));
+                    string.Empty,
+                    string.Empty,
+                    "__defaultVhost__",
+                    "videomonitor",
+                    "videomonitor-test",
+                    true,
+                    30,
+                    2));
+        }
 
         private Task<MediaSettingsDto> RecordUpdateRequest(
             UpdateMediaSettingsRequest request)
         {
+            UpdateCalls++;
             LastUpdateRequest = request;
             return updateCompletion.Task;
         }

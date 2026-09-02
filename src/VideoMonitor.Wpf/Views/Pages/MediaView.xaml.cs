@@ -11,12 +11,17 @@ public partial class MediaView
         object sender,
         System.Windows.DependencyPropertyChangedEventArgs e)
     {
-        if (e.NewValue is not true
-            || DataContext is not ViewModels.MediaSettingsViewModel viewModel)
+        if (DataContext is not ViewModels.MediaSettingsViewModel viewModel)
         {
             return;
         }
 
-        await viewModel.LoadAsync();
+        if (e.NewValue is true)
+        {
+            await viewModel.LoadAsync();
+            return;
+        }
+
+        viewModel.ClearTransientSecret();
     }
 }

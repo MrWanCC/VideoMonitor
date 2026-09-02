@@ -156,6 +156,7 @@ public sealed class MediaSettingsViewModel : ObservableObject
 
         IsBusy = true;
         var secret = ZlmSecret;
+        var testSucceeded = false;
         try
         {
             var endpoint = baseUriProvider();
@@ -168,9 +169,15 @@ public sealed class MediaSettingsViewModel : ObservableObject
             var result = await apiClient.TestAsync(
                     endpoint,
                     CreateTestRequest(secret));
-            StatusText = result.IsReachable
-                ? "配置测试成功。"
-                : $"配置测试失败：{MapFailureCode(result.FailureCode)}";
+            if (result.IsReachable)
+            {
+                testSucceeded = true;
+                StatusText = "配置测试成功，Secret 尚未保存。";
+            }
+            else
+            {
+                StatusText = $"配置测试失败：{MapFailureCode(result.FailureCode)}";
+            }
         }
         catch (CatalogApiException exception)
         {
@@ -186,10 +193,16 @@ public sealed class MediaSettingsViewModel : ObservableObject
         }
         finally
         {
-            ZlmSecret = string.Empty;
+            if (!testSucceeded)
+            {
+                ZlmSecret = string.Empty;
+            }
+
             IsBusy = false;
         }
     }
+
+    public void ClearTransientSecret() => ZlmSecret = string.Empty;
 
     private async Task SaveAsync()
     {
