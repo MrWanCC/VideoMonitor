@@ -1,3 +1,6 @@
+using System.Reflection;
+using VideoMonitor.Wpf.Playback;
+
 namespace VideoMonitor.Core.Tests.Playback;
 
 public sealed class VlcPlaybackDisplayStructureTests
@@ -70,5 +73,47 @@ public sealed class VlcPlaybackDisplayStructureTests
         Assert.DoesNotContain("--drop-late-frames", source);
         Assert.DoesNotContain("--skip-frames", source);
         Assert.DoesNotContain("--avcodec-hw", source);
+    }
+
+    [Fact]
+    public void VlcPlaybackService_UsesClockJitterZeroAndRecordsItInDiagnosticsHeader()
+    {
+        var repositoryRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var playbackSourcePath = Path.Combine(
+            repositoryRoot,
+            "src",
+            "VideoMonitor.Wpf",
+            "Playback",
+            "VlcPlaybackService.cs");
+        var diagnosticsSourcePath = Path.Combine(
+            repositoryRoot,
+            "src",
+            "VideoMonitor.Wpf",
+            "Playback",
+            "PlaybackDiagnostics.cs");
+        var playbackSource = File.ReadAllText(playbackSourcePath);
+        var diagnosticsSource = File.ReadAllText(diagnosticsSourcePath);
+
+        Assert.Contains("\"--clock-jitter=0\"", playbackSource);
+
+        var optionsField = typeof(VlcPlaybackService).GetField(
+            "LibVlcOptions",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(optionsField);
+        var actualOptions = Assert.IsType<string[]>(optionsField!.GetValue(null));
+        Assert.Equal(
+            [
+                "--no-video-title-show",
+                "--rtsp-tcp",
+                "--stats",
+                "--clock-jitter=0"
+            ],
+            actualOptions);
+
+        Assert.Contains(
+            "options=--no-video-title-show,--rtsp-tcp,--stats,--clock-jitter=0",
+            diagnosticsSource);
     }
 }

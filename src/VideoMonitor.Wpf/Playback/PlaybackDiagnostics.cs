@@ -105,7 +105,7 @@ public static class PlaybackDiagnosticsFormatter
             $"diagnosticsVersion=1 timestampUtc={timestampUtc} timestampLocal={timestampLocal}",
             $"processArchitecture={architecture} osVersion={os} dotnetVersion={dotnet}",
             $"libvlcVersion={safeVersion} samplingIntervalMs=1000",
-            "options=--no-video-title-show,--rtsp-tcp,--stats");
+            "options=--no-video-title-show,--rtsp-tcp,--stats,--clock-jitter=0");
     }
 
     public static string FormatEvent(
