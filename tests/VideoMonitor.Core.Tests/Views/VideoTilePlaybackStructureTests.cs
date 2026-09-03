@@ -64,6 +64,35 @@ public sealed class VideoTilePlaybackStructureTests
         Assert.Contains("HasPreparedPlaybackSession", xaml);
     }
 
+    [Fact]
+    public void VideoOverlay_DoesNotInheritPlaybackSessionBeforeLoadedBridge()
+    {
+        var repositoryRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var xamlPath = Path.Combine(
+            repositoryRoot,
+            "src",
+            "VideoMonitor.Wpf",
+            "Controls",
+            "VideoTile.xaml");
+        var xaml = File.ReadAllText(xamlPath);
+
+        var videoViewStart = xaml.IndexOf("<vlc:VideoView ", StringComparison.Ordinal);
+        var videoViewEnd = xaml.IndexOf("</vlc:VideoView>", videoViewStart, StringComparison.Ordinal);
+        Assert.True(videoViewStart >= 0 && videoViewEnd > videoViewStart);
+
+        var videoViewContent = xaml[videoViewStart..videoViewEnd];
+        var overlayStart = videoViewContent.IndexOf(
+            "<Grid x:Name=\"VideoViewContent\"",
+            StringComparison.Ordinal);
+        var overlayTagEnd = videoViewContent.IndexOf('>', overlayStart);
+        Assert.True(overlayStart >= 0 && overlayTagEnd > overlayStart);
+
+        var overlayTag = videoViewContent[overlayStart..overlayTagEnd];
+        Assert.Contains("DataContext=\"{x:Null}\"", overlayTag);
+    }
+
     private static int CountOccurrences(string source, string value)
     {
         var count = 0;

@@ -73,6 +73,7 @@
                                                Loaded="OnVideoHostLoaded"
                                                Unloaded="OnVideoHostUnloaded">
                         <Grid x:Name="VideoViewContent"
+                              DataContext="{x:Null}"
                               Loaded="OnVideoOverlayLoaded"
                               Unloaded="OnVideoOverlayUnloaded">
                             <Grid x:Name="VideoInteractionSurface" Background="#02000000"
