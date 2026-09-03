@@ -116,6 +116,7 @@ app.MapGet("/health/ready", (ServerReadinessState readiness) =>
 
 app.MapCatalogEndpoints();
 app.MapMediaSettingsEndpoints();
+app.MapMediaRuntimeEndpoints();
 app.MapMediaHookEndpoints();
 app.MapPlaybackAuthorizationEndpoints();
 app.MapTestStreamEndpoints();
