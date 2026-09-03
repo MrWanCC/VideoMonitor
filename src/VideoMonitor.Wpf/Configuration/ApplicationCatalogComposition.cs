@@ -377,7 +377,11 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             }
 
             formalPlaybackCoordinators.Clear();
-            if (formalPlaybackEngine is IDisposable formalEngineDisposable)
+            if (formalPlaybackEngine is IAsyncDisposable asyncFormalEngine)
+            {
+                await asyncFormalEngine.DisposeAsync().ConfigureAwait(false);
+            }
+            else if (formalPlaybackEngine is IDisposable formalEngineDisposable)
             {
                 formalEngineDisposable.Dispose();
             }

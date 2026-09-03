@@ -11,7 +11,8 @@ public sealed class PlaybackSession : IDisposable
         PlaybackSource source,
         Media? media,
         MediaPlayer? mediaPlayer,
-        Action? detachRuntimeEvents = null)
+        Action? detachRuntimeEvents = null,
+        IDisposable? diagnostics = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         CameraChannelId = source.CameraChannelId;
@@ -19,6 +20,7 @@ public sealed class PlaybackSession : IDisposable
         Media = media;
         MediaPlayer = mediaPlayer;
         this.detachRuntimeEvents = detachRuntimeEvents;
+        this.diagnostics = diagnostics;
     }
 
     public PlaybackSession(
@@ -26,13 +28,15 @@ public sealed class PlaybackSession : IDisposable
         string streamId,
         Media? media,
         MediaPlayer? mediaPlayer,
-        Action? detachRuntimeEvents = null)
+        Action? detachRuntimeEvents = null,
+        IDisposable? diagnostics = null)
     {
         CameraChannelId = channelId;
         StreamId = streamId ?? throw new ArgumentNullException(nameof(streamId));
         Media = media;
         MediaPlayer = mediaPlayer;
         this.detachRuntimeEvents = detachRuntimeEvents;
+        this.diagnostics = diagnostics;
     }
 
     public Guid CameraChannelId { get; }
@@ -43,6 +47,8 @@ public sealed class PlaybackSession : IDisposable
 
     public MediaPlayer? MediaPlayer { get; }
 
+    private readonly IDisposable? diagnostics;
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref disposed, 1) != 0)
@@ -51,6 +57,7 @@ public sealed class PlaybackSession : IDisposable
         }
 
         detachRuntimeEvents?.Invoke();
+        diagnostics?.Dispose();
         MediaPlayer?.Stop();
         MediaPlayer?.Dispose();
         Media?.Dispose();

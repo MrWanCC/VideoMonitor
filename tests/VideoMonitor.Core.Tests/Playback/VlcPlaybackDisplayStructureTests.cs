@@ -46,4 +46,29 @@ public sealed class VlcPlaybackDisplayStructureTests
         Assert.DoesNotContain("mediaPlayer.Play()", source[prepareStart..playStart]);
         Assert.Contains("session.MediaPlayer.Play()", source[playStart..]);
     }
+
+    [Fact]
+    public void VlcPlaybackService_EnablesOnlyStatsForDiagnostics()
+    {
+        var repositoryRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var sourcePath = Path.Combine(
+            repositoryRoot,
+            "src",
+            "VideoMonitor.Wpf",
+            "Playback",
+            "VlcPlaybackService.cs");
+        var source = File.ReadAllText(sourcePath);
+
+        Assert.Contains("\"--no-video-title-show\"", source);
+        Assert.Contains("\"--rtsp-tcp\"", source);
+        Assert.Contains("\"--stats\"", source);
+        Assert.DoesNotContain("--network-caching", source);
+        Assert.DoesNotContain("--live-caching", source);
+        Assert.DoesNotContain("--clock-synchro", source);
+        Assert.DoesNotContain("--drop-late-frames", source);
+        Assert.DoesNotContain("--skip-frames", source);
+        Assert.DoesNotContain("--avcodec-hw", source);
+    }
 }

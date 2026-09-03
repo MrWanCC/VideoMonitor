@@ -231,7 +231,10 @@ public partial class App
                 }
             }
 
-            vlcPlaybackService?.Dispose();
+            if (vlcPlaybackService is not null)
+            {
+                await vlcPlaybackService.DisposeAsync();
+            }
         }
 
         async Task StopApplicationResourcesAsync()
