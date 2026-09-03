@@ -171,17 +171,21 @@ public static class PlaybackDiagnosticsFormatter
 
 public sealed class PlaybackDiagnosticsWriter : IPlaybackDiagnosticsWriter
 {
-    private readonly Channel<string> lines = Channel.CreateUnbounded<string>(
-        new UnboundedChannelOptions
+    private const int QueueCapacity = 4096;
+
+    private readonly Channel<string> lines = Channel.CreateBounded<string>(
+        new BoundedChannelOptions(QueueCapacity)
         {
             SingleReader = true,
             SingleWriter = false,
-            AllowSynchronousContinuations = false
+            AllowSynchronousContinuations = false,
+            FullMode = BoundedChannelFullMode.Wait
         });
     private readonly StreamWriter writer;
     private readonly Task writeTask;
     private readonly object disposeGate = new();
     private int disposed;
+    private int writerFailed;
     private Task? disposeTask;
 
     public PlaybackDiagnosticsWriter(string filePath)
@@ -198,6 +202,17 @@ public sealed class PlaybackDiagnosticsWriter : IPlaybackDiagnosticsWriter
                 4096,
                 FileOptions.Asynchronous | FileOptions.SequentialScan));
         FilePath = fullPath;
+        writeTask = WriteLoopAsync();
+    }
+
+    internal PlaybackDiagnosticsWriter(Stream outputStream)
+    {
+        ArgumentNullException.ThrowIfNull(outputStream);
+        writer = new StreamWriter(outputStream)
+        {
+            AutoFlush = true
+        };
+        FilePath = string.Empty;
         writeTask = WriteLoopAsync();
     }
 
@@ -236,7 +251,8 @@ public sealed class PlaybackDiagnosticsWriter : IPlaybackDiagnosticsWriter
     public bool TryWrite(string line)
     {
         ArgumentNullException.ThrowIfNull(line);
-        if (Volatile.Read(ref disposed) != 0)
+        if (Volatile.Read(ref disposed) != 0
+            || Volatile.Read(ref writerFailed) != 0)
         {
             return false;
         }
@@ -280,12 +296,29 @@ public sealed class PlaybackDiagnosticsWriter : IPlaybackDiagnosticsWriter
         }
         catch
         {
-            Debug.WriteLine("Playback diagnostics unavailable.");
+            MarkWriterFailed();
         }
         finally
         {
-            writer.Dispose();
+            try
+            {
+                writer.Dispose();
+            }
+            catch
+            {
+                MarkWriterFailed();
+            }
         }
+    }
+
+    private void MarkWriterFailed()
+    {
+        if (Interlocked.Exchange(ref writerFailed, 1) == 0)
+        {
+            Debug.WriteLine("Playback diagnostics unavailable.");
+        }
+
+        lines.Writer.TryComplete();
     }
 }
 

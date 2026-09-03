@@ -130,6 +130,98 @@ public sealed class PlaybackDiagnosticsTests
     }
 
     [Fact]
+    public void Writer_UsesBoundedQueueWithImmediateNonBlockingTryWrite()
+    {
+        var repositoryRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var sourcePath = Path.Combine(
+            repositoryRoot,
+            "src",
+            "VideoMonitor.Wpf",
+            "Playback",
+            "PlaybackDiagnostics.cs");
+        var source = File.ReadAllText(sourcePath);
+
+        Assert.DoesNotContain("Channel.CreateUnbounded", source);
+        Assert.Contains("Channel.CreateBounded", source);
+        Assert.Contains("4096", source);
+        Assert.Contains("FullMode = BoundedChannelFullMode.Wait", source);
+        Assert.Contains("lines.Writer.TryWrite", source);
+        Assert.DoesNotContain("lines.Writer.WriteAsync", source);
+    }
+
+    [Fact]
+    public async Task Writer_BoundedQueueRejectsWhenCapacityIsFull()
+    {
+        var writerType = GetRequiredType("PlaybackDiagnosticsWriter");
+        var constructor = writerType.GetConstructor(
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+            binder: null,
+            types: [typeof(Stream)],
+            modifiers: null)
+            ?? throw new InvalidOperationException("Missing stream writer test seam.");
+        var tryWrite = GetRequiredMethod(writerType, "TryWrite");
+        var stream = new BlockingWriteStream();
+        var writer = constructor.Invoke([stream]);
+
+        try
+        {
+            Assert.True((bool)tryWrite.Invoke(writer, ["first"])!);
+            await stream.WriteAttempted.WaitAsync(TimeSpan.FromSeconds(2));
+
+            for (var index = 0; index < 4096; index++)
+            {
+                Assert.True((bool)tryWrite.Invoke(writer, [$"queued-{index}"])!);
+            }
+
+            Assert.False((bool)tryWrite.Invoke(writer, ["overflow"])!);
+        }
+        finally
+        {
+            stream.Release();
+            await ((IAsyncDisposable)writer).DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Writer_RejectsWritesAfterSinkFailure()
+    {
+        var writerType = GetRequiredType("PlaybackDiagnosticsWriter");
+        var constructor = writerType.GetConstructor(
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+            binder: null,
+            types: [typeof(Stream)],
+            modifiers: null)
+            ?? throw new InvalidOperationException("Missing stream writer test seam.");
+        var tryWrite = GetRequiredMethod(writerType, "TryWrite");
+        var stream = new FailingWriteStream();
+        var writer = constructor.Invoke([stream]);
+
+        try
+        {
+            Assert.True((bool)tryWrite.Invoke(writer, ["first"])!);
+            await stream.WriteAttempted.WaitAsync(TimeSpan.FromSeconds(2));
+
+            var rejected = false;
+            for (var attempt = 0; attempt < 200 && !rejected; attempt++)
+            {
+                rejected = !(bool)tryWrite.Invoke(writer, ["after-failure"])!;
+                if (!rejected)
+                {
+                    await Task.Delay(10);
+                }
+            }
+
+            Assert.True(rejected);
+        }
+        finally
+        {
+            await ((IAsyncDisposable)writer).DisposeAsync();
+        }
+    }
+
+    [Fact]
     public void NativeLogFilter_OnlyKeepsPerformanceKeywords()
     {
         var filterType = GetRequiredType("PlaybackDiagnosticsNativeLogFilter");
@@ -267,6 +359,134 @@ public sealed class PlaybackDiagnosticsTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class FailingWriteStream : Stream
+    {
+        private readonly TaskCompletionSource<bool> writeAttempted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task WriteAttempted => writeAttempted.Task;
+
+        public override bool CanRead => false;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => true;
+
+        public override long Length => 0;
+
+        public override long Position
+        {
+            get => 0;
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override Task FlushAsync(CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            writeAttempted.TrySetResult(true);
+            throw new IOException("test sink failure");
+        }
+
+        public override Task WriteAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            writeAttempted.TrySetResult(true);
+            return Task.FromException(new IOException("test sink failure"));
+        }
+
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            writeAttempted.TrySetResult(true);
+            return ValueTask.FromException(new IOException("test sink failure"));
+        }
+    }
+
+    private sealed class BlockingWriteStream : Stream
+    {
+        private readonly TaskCompletionSource<bool> writeAttempted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> released =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task WriteAttempted => writeAttempted.Task;
+
+        public override bool CanRead => false;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => true;
+
+        public override long Length => 0;
+
+        public override long Position
+        {
+            get => 0;
+            set => throw new NotSupportedException();
+        }
+
+        public void Release() => released.TrySetResult(true);
+
+        public override void Flush()
+        {
+        }
+
+        public override Task FlushAsync(CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            writeAttempted.TrySetResult(true);
+            released.Task.GetAwaiter().GetResult();
+        }
+
+        public override async Task WriteAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            await WriteAsync(buffer.AsMemory(offset, count), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        public override async ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            writeAttempted.TrySetResult(true);
+            await released.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 }
