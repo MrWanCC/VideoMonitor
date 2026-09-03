@@ -20,6 +20,14 @@ public sealed class PlaybackEngineException : Exception
 
 public sealed class VlcPlaybackService : IPlaybackEngine, IFormalPlaybackEngine, IDisposable, IAsyncDisposable
 {
+    private static readonly string[] LibVlcOptions =
+    [
+        "--no-video-title-show",
+        "--rtsp-tcp",
+        "--stats",
+        "--clock-synchro=0"
+    ];
+
     private readonly LibVLC libVlc;
     private readonly PlaybackDiagnosticsWriter? diagnosticsWriter;
     private int disposed;
@@ -27,7 +35,7 @@ public sealed class VlcPlaybackService : IPlaybackEngine, IFormalPlaybackEngine,
     public VlcPlaybackService()
     {
         LibVLCSharp.Shared.Core.Initialize();
-        libVlc = new LibVLC("--no-video-title-show", "--rtsp-tcp", "--stats");
+        libVlc = new LibVLC(LibVlcOptions);
         diagnosticsWriter = PlaybackDiagnosticsWriter.TryCreateDefault(libVlc.Version);
         libVlc.Log += OnLibVlcLog;
     }

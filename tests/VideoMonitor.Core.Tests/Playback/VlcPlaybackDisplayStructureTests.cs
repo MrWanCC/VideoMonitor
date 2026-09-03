@@ -1,3 +1,6 @@
+using System.Reflection;
+using VideoMonitor.Wpf.Playback;
+
 namespace VideoMonitor.Core.Tests.Playback;
 
 public sealed class VlcPlaybackDisplayStructureTests
@@ -48,7 +51,7 @@ public sealed class VlcPlaybackDisplayStructureTests
     }
 
     [Fact]
-    public void VlcPlaybackService_EnablesOnlyStatsForDiagnostics()
+    public void VlcPlaybackService_UsesOnlyApprovedExperimentOptionsForDiagnostics()
     {
         var repositoryRoot = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
@@ -64,11 +67,58 @@ public sealed class VlcPlaybackDisplayStructureTests
         Assert.Contains("\"--no-video-title-show\"", source);
         Assert.Contains("\"--rtsp-tcp\"", source);
         Assert.Contains("\"--stats\"", source);
+        Assert.Contains("\"--clock-synchro=0\"", source);
         Assert.DoesNotContain("--network-caching", source);
         Assert.DoesNotContain("--live-caching", source);
-        Assert.DoesNotContain("--clock-synchro", source);
+        Assert.DoesNotContain("--clock-jitter", source);
         Assert.DoesNotContain("--drop-late-frames", source);
         Assert.DoesNotContain("--skip-frames", source);
         Assert.DoesNotContain("--avcodec-hw", source);
+    }
+
+    [Fact]
+    public void VlcPlaybackService_UsesClockSynchroZeroWithoutClockJitter()
+    {
+        var repositoryRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var playbackSourcePath = Path.Combine(
+            repositoryRoot,
+            "src",
+            "VideoMonitor.Wpf",
+            "Playback",
+            "VlcPlaybackService.cs");
+        var diagnosticsSourcePath = Path.Combine(
+            repositoryRoot,
+            "src",
+            "VideoMonitor.Wpf",
+            "Playback",
+            "PlaybackDiagnostics.cs");
+        var playbackSource = File.ReadAllText(playbackSourcePath);
+        var diagnosticsSource = File.ReadAllText(diagnosticsSourcePath);
+
+        Assert.Contains("\"--clock-synchro=0\"", playbackSource);
+        Assert.DoesNotContain("--clock-jitter=0", playbackSource);
+
+        var optionsField = typeof(VlcPlaybackService).GetField(
+            "LibVlcOptions",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(optionsField);
+        var actualOptions = Assert.IsType<string[]>(optionsField!.GetValue(null));
+        Assert.Equal(
+            [
+                "--no-video-title-show",
+                "--rtsp-tcp",
+                "--stats",
+                "--clock-synchro=0"
+            ],
+            actualOptions);
+
+        Assert.Contains(
+            "options=--no-video-title-show,--rtsp-tcp,--stats,--clock-synchro=0",
+            diagnosticsSource);
+        Assert.DoesNotContain(
+            "options=--no-video-title-show,--rtsp-tcp,--stats,--clock-jitter=0",
+            diagnosticsSource);
     }
 }
