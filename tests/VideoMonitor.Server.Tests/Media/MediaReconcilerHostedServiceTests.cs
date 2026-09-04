@@ -24,19 +24,26 @@ public sealed class MediaReconcilerHostedServiceTests
             var current = Interlocked.Increment(ref active);
             InterlockedExtensions.Max(ref maximumActive, current);
             var call = Interlocked.Increment(ref calls);
-            if (call == 1)
+            try
             {
-                firstStarted.SetResult(null);
-                await releaseFirst.Task.WaitAsync(token);
+                if (call == 1)
+                {
+                    firstStarted.SetResult(null);
+                    await releaseFirst.Task.WaitAsync(token);
+                }
+                else if (call == 2)
+                {
+                    secondStarted.TrySetResult(null);
+                }
             }
-            else
+            finally
             {
-                secondStarted.SetResult(null);
+                Interlocked.Decrement(ref active);
             }
-
-            Interlocked.Decrement(ref active);
         });
-        var service = CreateService(contributor, (_, _) => Task.CompletedTask);
+        var service = CreateService(
+            contributor,
+            (_, token) => Task.Delay(Timeout.InfiniteTimeSpan, token));
         var run = service.RunAsync(cancellation.Token);
 
         await firstStarted.Task;
