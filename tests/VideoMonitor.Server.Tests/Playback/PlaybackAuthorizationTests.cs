@@ -38,37 +38,38 @@ public sealed class PlaybackAuthorizationTests
             30,
             1);
         var service = new PlaybackStreamService(
-            new FixedCatalogRepository(new CameraDeviceDto(
-                deviceId,
-                Guid.NewGuid(),
-                "camera",
-                "192.0.2.10",
-                8000,
-                554,
-                "admin",
-                false,
-                "manufacturer",
-                "model",
-                TransportMode.Auto,
-                true,
-                "",
-                1,
-                new[]
-                {
-                    new CameraChannelDto(
-                        channelId,
-                        deviceId,
-                        1,
-                        "main",
-                        StreamType.Main,
-                        true)
-                })),
-            new FixedSourceResolver(new ResolvedCameraSource(
-                mediaKey,
-                new Uri("rtsp://camera.example/live"),
-                "binding")),
-            new FixedRuntimeSettingsProvider(settings),
-            new ReadyStreamManager(mediaKey, stream),
+            new FormalStreamEnsureService(
+                new FixedCatalogRepository(new CameraDeviceDto(
+                    deviceId,
+                    Guid.NewGuid(),
+                    "camera",
+                    "192.0.2.10",
+                    8000,
+                    554,
+                    "admin",
+                    false,
+                    "manufacturer",
+                    "model",
+                    TransportMode.Auto,
+                    true,
+                    "",
+                    1,
+                    new[]
+                    {
+                        new CameraChannelDto(
+                            channelId,
+                            deviceId,
+                            1,
+                            "main",
+                            StreamType.Main,
+                            true)
+                    })),
+                new FixedSourceResolver(new ResolvedCameraSource(
+                    mediaKey,
+                    new Uri("rtsp://camera.example/live"),
+                    "binding")),
+                new FixedRuntimeSettingsProvider(settings),
+                new ReadyStreamManager(mediaKey, stream)),
             new PlaybackTicketIssuer(new FixedSigningKeyProvider(GetKey())),
             new PlaybackUrlBuilder(new FixedRuntimeSettingsProvider(settings)));
 
@@ -85,6 +86,79 @@ public sealed class PlaybackAuthorizationTests
         Assert.Contains(mediaKey.ToFormalStreamId(), response.Body, StringComparison.Ordinal);
         Assert.DoesNotContain("password", response.Body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("admin_params", response.Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task FormalPlaybackStillEnsuresThenIssuesTicketAndBuildsUrl()
+    {
+        var deviceId = Guid.Parse("95000000-0000-0000-0000-000000000001");
+        var channelId = Guid.Parse("96000000-0000-0000-0000-000000000001");
+        var mediaKey = new MediaStreamKey(deviceId, channelId, StreamType.Main);
+        var stream = new FormalStreamDescriptor(
+            "vhost",
+            "videomonitor",
+            mediaKey.ToFormalStreamId(),
+            mediaKey);
+        var settings = new MediaRuntimeSettings(
+            "http://zlm.example:1985",
+            "rtsp://playback.example:8554",
+            "vhost",
+            "videomonitor",
+            "videomonitor-test",
+            "zlm-secret",
+            30,
+            1);
+        var streamManager = new ReadyStreamManager(mediaKey, stream);
+        var ticketIssuer = new RecordingTicketIssuer();
+        var urlBuilder = new RecordingUrlBuilder();
+        var service = new PlaybackStreamService(
+            new FormalStreamEnsureService(
+                new FixedCatalogRepository(new CameraDeviceDto(
+                    deviceId,
+                    Guid.NewGuid(),
+                    "camera",
+                    "192.0.2.10",
+                    8000,
+                    554,
+                    "admin",
+                    false,
+                    "manufacturer",
+                    "model",
+                    TransportMode.Auto,
+                    true,
+                    "",
+                    1,
+                    new[]
+                    {
+                        new CameraChannelDto(
+                            channelId,
+                            deviceId,
+                            1,
+                            "main",
+                            StreamType.Main,
+                            true)
+                    })),
+                new FixedSourceResolver(new ResolvedCameraSource(
+                    mediaKey,
+                    new Uri("rtsp://camera.example/live"),
+                    "binding")),
+                new FixedRuntimeSettingsProvider(settings),
+                streamManager),
+            ticketIssuer,
+            urlBuilder);
+
+        var result = await service.EnsureAsync(new EnsurePlaybackStreamRequest(
+            deviceId,
+            channelId,
+            StreamType.Main));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, streamManager.EnsureCalls);
+        Assert.Equal(1, ticketIssuer.IssueCalls);
+        Assert.Equal(1, urlBuilder.BuildCalls);
+        Assert.NotNull(ticketIssuer.LastIssuedIdentity);
+        Assert.Equal(ticketIssuer.LastIssuedIdentity!.Stream, result.Value?.StreamId);
+        Assert.NotNull(result.Value?.PlaybackUrl);
     }
 
     [Fact]
@@ -171,8 +245,8 @@ public sealed class PlaybackAuthorizationTests
         var deviceId = Guid.Parse("93000000-0000-0000-0000-000000000001");
         var channelId = Guid.Parse("94000000-0000-0000-0000-000000000001");
         var key = new MediaStreamKey(deviceId, channelId, StreamType.Main);
-        var logger = new RecordingLogger();
-        var service = new PlaybackStreamService(
+        var logger = new RecordingLogger<FormalStreamEnsureService>();
+        var service = new FormalStreamEnsureService(
             new FixedCatalogRepository(new CameraDeviceDto(
                 deviceId,
                 Guid.NewGuid(),
@@ -213,19 +287,9 @@ public sealed class PlaybackAuthorizationTests
                 "videomonitor",
                 key.ToFormalStreamId(),
                 key)),
-            new PlaybackTicketIssuer(new FixedSigningKeyProvider(GetKey())),
-            new PlaybackUrlBuilder(new FixedRuntimeSettingsProvider(new MediaRuntimeSettings(
-                "http://zlm.example:1985",
-                "rtsp://playback.example:8554",
-                "vhost",
-                "videomonitor",
-                "videomonitor-test",
-                "zlm-secret",
-                30,
-                1))),
             logger);
 
-        var result = await service.EnsureAsync(new EnsurePlaybackStreamRequest(
+        var result = await service.EnsureAsync(new FormalStreamEnsureRequest(
             deviceId,
             channelId,
             StreamType.Main));
@@ -233,7 +297,8 @@ public sealed class PlaybackAuthorizationTests
         Assert.False(result.IsSuccess);
         Assert.Equal(503, result.StatusCode);
         var message = Assert.Single(logger.Messages);
-        Assert.Contains("Playback stream failed safely.", message);
+        Assert.Contains("Formal stream ensure failed safely.", message);
+        Assert.Contains("Operation=FormalStreamEnsure.Ensure", message);
         Assert.Contains("FailureCode=MEDIA_UNAVAILABLE", message);
         Assert.Contains("Stage=ResolveSource", message);
         Assert.Contains(deviceId.ToString(), message);
@@ -528,6 +593,8 @@ public sealed class PlaybackAuthorizationTests
         private readonly MediaStreamKey key;
         private readonly FormalStreamDescriptor stream;
 
+        public int EnsureCalls { get; private set; }
+
         public ReadyStreamManager(MediaStreamKey key, FormalStreamDescriptor stream)
         {
             this.key = key;
@@ -537,7 +604,13 @@ public sealed class PlaybackAuthorizationTests
         public Task<StreamEnsureResult> EnsureStreamAsync(
             MediaStreamRequest request,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult(new StreamEnsureResult(true, stream, null));
+            Task.FromResult(RecordEnsure());
+
+        private StreamEnsureResult RecordEnsure()
+        {
+            EnsureCalls++;
+            return new StreamEnsureResult(true, stream, null);
+        }
 
         public Task CleanupOwnedStreamIfEligibleAsync(
             MediaStreamKey key,
@@ -561,7 +634,43 @@ public sealed class PlaybackAuthorizationTests
                         null,
                         null,
                         false)
-                });
+                 });
+    }
+
+    private sealed class RecordingTicketIssuer : IPlaybackTicketIssuer
+    {
+        public int IssueCalls { get; private set; }
+
+        public PlaybackMediaIdentity? LastIssuedIdentity { get; private set; }
+
+        public Task<PlaybackTicket> IssueAsync(
+            PlaybackMediaIdentity media,
+            CancellationToken cancellationToken = default)
+        {
+            IssueCalls++;
+            LastIssuedIdentity = media;
+            return Task.FromResult(new PlaybackTicket(
+                "ticket",
+                media.Vhost,
+                media.App,
+                media.Stream,
+                DateTimeOffset.UtcNow.AddMinutes(1)));
+        }
+    }
+
+    private sealed class RecordingUrlBuilder : IPlaybackUrlBuilder
+    {
+        public int BuildCalls { get; private set; }
+
+        public Task<Uri> BuildAsync(
+            PlaybackMediaIdentity media,
+            PlaybackTicket ticket,
+            CancellationToken cancellationToken = default)
+        {
+            BuildCalls++;
+            return Task.FromResult(new Uri(
+                $"rtsp://playback.example/{media.App}/{media.Stream}"));
+        }
     }
 
     private sealed class FixedSigningKeyProvider : IPlaybackSigningKeyProvider
@@ -596,7 +705,7 @@ public sealed class PlaybackAuthorizationTests
         public bool IsTrusted(IPAddress? remoteAddress) => trusted;
     }
 
-    private sealed class RecordingLogger : ILogger<PlaybackStreamService>
+    private sealed class RecordingLogger<T> : ILogger<T>
     {
         public List<string> Messages { get; } = [];
 

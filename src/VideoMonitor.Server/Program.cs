@@ -89,6 +89,9 @@ builder.Services.AddSingleton<PlaybackTicketValidator>();
 builder.Services.AddSingleton<IPlaybackTicketValidator>(serviceProvider =>
     serviceProvider.GetRequiredService<PlaybackTicketValidator>());
 builder.Services.AddSingleton<IPlaybackUrlBuilder, PlaybackUrlBuilder>();
+builder.Services.AddSingleton<
+    IFormalStreamEnsureService,
+    FormalStreamEnsureService>();
 builder.Services.AddSingleton<IPlaybackStreamService, PlaybackStreamService>();
 builder.Services.AddSingleton<ServerReadinessState>();
 builder.Services.AddHostedService<ServerInitializationHostedService>();

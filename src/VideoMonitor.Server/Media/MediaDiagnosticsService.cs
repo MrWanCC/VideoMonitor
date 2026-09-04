@@ -1,21 +1,29 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using VideoMonitor.Core.Catalog;
 using VideoMonitor.Core.Media;
+using VideoMonitor.Server.Catalog;
+using VideoMonitor.Server.Playback;
 
 namespace VideoMonitor.Server.Media;
 
 public sealed class MediaDiagnosticsService
 {
     private readonly IStreamManager streamManager;
+    private readonly IFormalStreamEnsureService formalEnsureService;
     private readonly TimeProvider timeProvider;
     private readonly int freshnessSeconds;
 
     public MediaDiagnosticsService(
         IStreamManager streamManager,
+        IFormalStreamEnsureService formalEnsureService,
         IOptions<MediaDiagnosticsOptions> options,
         TimeProvider? timeProvider = null)
     {
         this.streamManager = streamManager
             ?? throw new ArgumentNullException(nameof(streamManager));
+        this.formalEnsureService = formalEnsureService
+            ?? throw new ArgumentNullException(nameof(formalEnsureService));
         ArgumentNullException.ThrowIfNull(options);
 
         freshnessSeconds = options.Value.FreshnessSeconds > 0
@@ -32,6 +40,40 @@ public sealed class MediaDiagnosticsService
         var snapshot = streamManager.GetSnapshot();
         var nowUtc = timeProvider.GetUtcNow();
         return Task.FromResult(Project(snapshot, nowUtc));
+    }
+
+    public async Task<CatalogOperationResult<FormalStreamEnsureResult>> RetryFaultedAsync(
+        MediaStreamKey key,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var runtime = streamManager.GetSnapshot().Streams
+            .FirstOrDefault(stream => stream.Key == key);
+        if (runtime is null)
+        {
+            return Failure<FormalStreamEnsureResult>(
+                StatusCodes.Status404NotFound,
+                "MEDIA_STREAM_NOT_FOUND",
+                "Media stream identity was not found.");
+        }
+
+        if (runtime.RuntimeState != StreamRuntimeState.Faulted)
+        {
+            return Failure<FormalStreamEnsureResult>(
+                StatusCodes.Status409Conflict,
+                "MEDIA_STREAM_NOT_FAULTED",
+                "Media stream is not faulted.");
+        }
+
+        return await formalEnsureService
+            .EnsureAsync(
+                new FormalStreamEnsureRequest(
+                    key.DeviceId,
+                    key.ChannelId,
+                    key.StreamType),
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public MediaDiagnosticsSnapshotDto Project(
@@ -84,4 +126,14 @@ public sealed class MediaDiagnosticsService
         return nowUtc - observedAtUtc.Value
             > TimeSpan.FromSeconds(freshnessSeconds);
     }
+
+    private static CatalogOperationResult<T> Failure<T>(
+        int statusCode,
+        string code,
+        string message) =>
+        new(
+            false,
+            default,
+            statusCode,
+            new CatalogErrorDto(code, message));
 }
