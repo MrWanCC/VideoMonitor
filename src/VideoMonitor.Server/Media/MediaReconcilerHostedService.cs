@@ -4,7 +4,8 @@ using VideoMonitor.Infrastructure.Persistence;
 
 namespace VideoMonitor.Server.Media;
 
-public sealed class MediaReconcilerHostedService : IHostedService
+public sealed class MediaReconcilerHostedService
+    : IHostedService, IMediaReconcileSignal
 {
     private static readonly TimeSpan NormalInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan[] UnavailableBackoff =
@@ -88,6 +89,24 @@ public sealed class MediaReconcilerHostedService : IHostedService
     }
 
     public void TriggerRecovery() => recoverySignals.Writer.TryWrite(true);
+
+    public ReconcileSignalResult TryRequestRecovery()
+    {
+        lock (lifecycleSync)
+        {
+            if (hostedRun is null
+                || hostedRun.IsCompleted
+                || hostedCancellation is null
+                || hostedCancellation.IsCancellationRequested)
+            {
+                return ReconcileSignalResult.Unavailable;
+            }
+
+            return recoverySignals.Writer.TryWrite(true)
+                ? ReconcileSignalResult.Accepted
+                : ReconcileSignalResult.Unavailable;
+        }
+    }
 
     public async Task WaitForNoReaderGraceAsync(
         CancellationToken cancellationToken = default)
