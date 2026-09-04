@@ -401,10 +401,13 @@ Stop for Sol review.
 
 **Files:**
 
+Exactly 8 files are in the Task 3 boundary:
+
 - Create: src/VideoMonitor.Server/Playback/IFormalStreamEnsureService.cs
 - Create: src/VideoMonitor.Server/Playback/FormalStreamEnsureService.cs
 - Modify: src/VideoMonitor.Server/Playback/PlaybackStreamService.cs
 - Modify: src/VideoMonitor.Server/Media/MediaDiagnosticsService.cs
+- Modify: src/VideoMonitor.Server/Program.cs
 - Create test: tests/VideoMonitor.Server.Tests/Playback/FormalStreamEnsureServiceTests.cs
 - Modify regression test: tests/VideoMonitor.Server.Tests/Playback/PlaybackAuthorizationTests.cs
 - Modify regression test: tests/VideoMonitor.Server.Tests/Media/MediaDiagnosticsServiceTests.cs
@@ -421,7 +424,7 @@ public sealed record FormalStreamEnsureResult(
     Guid DeviceId,
     Guid ChannelId,
     StreamType StreamType,
-    string StreamId,
+    PlaybackMediaIdentity MediaIdentity,
     StreamRuntimeState RuntimeState);
 
 public interface IFormalStreamEnsureService
@@ -431,6 +434,17 @@ public interface IFormalStreamEnsureService
         CancellationToken cancellationToken = default);
 }
 ~~~
+
+`PlaybackMediaIdentity` is the existing internal value containing only `Vhost`, `App`, and `Stream`. `FormalStreamEnsureService` must populate it directly from the ensured stream (`ensured.Stream.Vhost`, `ensured.Stream.App`, and `ensured.Stream.Stream`); `FormalStreamEnsureResult` must not contain `PlaybackUrl`, `PlaybackTicket`, or ticket expiry data.
+
+**DI registration:** Task 3 must add the formal ensure registration in `Program.cs` before the existing playback registration:
+
+~~~csharp
+builder.Services.AddSingleton<IFormalStreamEnsureService, FormalStreamEnsureService>();
+builder.Services.AddSingleton<IPlaybackStreamService, PlaybackStreamService>();
+~~~
+
+The exact existing registration syntax may be preserved, but the ordering and resolvable dependency graph are mandatory. Task 4 must not defer, repeat, or redesign this registration.
 
 **Retry responsibility:** `MediaDiagnosticsService` owns the diagnostics retry decision. It must find the exact `MediaStreamKey` from `IStreamManager.GetSnapshot()`; a missing identity returns a safe not-found result and does not call the formal ensure boundary. An existing non-`Faulted` stream returns `MEDIA_STREAM_NOT_FAULTED` and does not call the boundary. Only an exact currently `Faulted` key may be converted to `FormalStreamEnsureRequest` and passed to `IFormalStreamEnsureService.EnsureAsync`. This service must not call ZLMediaKit, read Camera credentials, construct an RTSP URI, issue a playback ticket, or build or return a playback URL.
 
@@ -450,9 +464,12 @@ public async Task FormalPlaybackStillEnsuresThenIssuesTicketAndBuildsUrl()
     Assert.Equal(1, fixture.StreamManager.EnsureCalls);
     Assert.Equal(1, fixture.TicketIssuer.IssueCalls);
     Assert.Equal(1, fixture.UrlBuilder.BuildCalls);
+    Assert.Equal(fixture.TicketIssuer.LastIssuedIdentity.Stream, result.Value?.StreamId);
     Assert.NotNull(result.Value?.PlaybackUrl);
 }
 ~~~
+
+The playback test double must record the `PlaybackMediaIdentity` passed to `IPlaybackTicketIssuer`; the assertion above verifies that the response `StreamId` is the same `MediaIdentity.Stream` used for ticket issuance, rather than a separately reconstructed value.
 
 - [ ] **Step 2: Add failing ticket-free retry tests.**
 
@@ -528,6 +545,10 @@ public async Task RetryDoesNotCallZlmDirectly()
 
 The retry tests belong in `MediaDiagnosticsServiceTests`, while `FormalPlaybackStillEnsuresThenIssuesTicketAndBuildsUrl` remains the `PlaybackAuthorizationTests` regression proving that the playback service still performs ticket issuance and URL construction after the shared ticket-free ensure succeeds.
 
+Task 3 must also preserve the existing `PlaybackFailureLogsSafeDiagnosticsWithoutSensitiveValues` regression. If the safe logging responsibility moves with the extracted boundary, move only the test ownership as needed; keep assertions for the safe failure code, safe stage/operation context, exception type only, and absence of `Exception.Message`, RTSP URI, password, and secret.
+
+The Task 3 verification must confirm the production DI graph before the task is complete: `Program.cs` registers `IFormalStreamEnsureService` to `FormalStreamEnsureService` as a singleton before the existing `IPlaybackStreamService` registration. Add a focused composition/registration test when the existing Server test structure supports it; otherwise verify that resolving `IPlaybackStreamService` resolves the complete formal-ensure dependency chain during the Server regression. This registration belongs to Task 3 and must not be deferred to Task 4.
+
 The diagnostics retry result is a safe result type with no URL or ticket properties. Serialize it in the test and assert that those names are absent.
 
 - [ ] **Step 3: Run RED.**
@@ -555,7 +576,7 @@ validate stable IDs and StreamType
 → return safe FormalStreamEnsureResult
 ~~~
 
-PlaybackStreamService then issues the ticket and builds the playback URL. Diagnostics retry checks the exact key's current Faulted state, calls the boundary, and returns only accepted/safe-error data. It never calls ZLM or reads credentials itself. Preserve existing playback status and error mappings.
+PlaybackStreamService then uses `FormalStreamEnsureResult.MediaIdentity` (without re-reading media settings or reconstructing identity) to issue the ticket and build the playback URL. Its returned `StreamId` must equal `MediaIdentity.Stream`. Diagnostics retry checks the exact key's current Faulted state, may receive the internal result, and returns only accepted/safe-error data; it never serializes that result, calls ZLM, or reads credentials itself. Preserve existing playback status and error mappings.
 
 - [ ] **Step 5: Run GREEN and playback regressions.**
 
@@ -692,7 +713,7 @@ Expected RED: missing diagnostics route registration and missing safe HTTP mappi
 
 Map readiness failure to 503 MEDIA_DIAGNOSTICS_UNAVAILABLE. Call only IMediaReconcileSignal.TryRequestRecovery() for refresh and return 202 for an accepted/coalesced signal. Parse GUIDs and enum values without name-based identity. The Task 3 `MediaDiagnosticsService` owns the exact-key/current-state retry decision and formal-ensure call; this task only maps its result to 202 for accepted retry, 404, 409 `MEDIA_STREAM_NOT_FAULTED`, or safe 503. The retry response must never serialize `FormalStreamEnsureResult`, tickets, URLs, source/origin, proxy, secrets, or raw exceptions.
 
-Register options and services in Program.cs and map the new routes beside existing runtime, hook, playback, and test-stream endpoints. Do not remove GET /api/v1/media/runtime.
+Register only `MediaDiagnosticsOptions`, `MediaDiagnosticsService`, `IMediaReconcileSignal`, and the endpoint dependencies in Program.cs. The `IFormalStreamEnsureService` → `FormalStreamEnsureService` registration is owned by Task 3 and must not be repeated or redesigned here. Map the new routes beside existing runtime, hook, playback, and test-stream endpoints. Do not remove GET /api/v1/media/runtime.
 
 - [ ] **Step 4: Run GREEN for the diagnostics API tests.**
 
