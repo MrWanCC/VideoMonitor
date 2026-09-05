@@ -264,6 +264,31 @@ public sealed class MediaDiagnosticsViewModelTests
         await disposalTask;
     }
 
+    [Fact]
+    public async Task StopBeforeStartDoesNotPoisonLaterStop()
+    {
+        var api = new TestDiagnosticsApiClient(SnapshotWithReadyStreams());
+        var delay = new PollDelay(blockUntilCancelled: true);
+        var viewModel = CreateViewModel(api, delay);
+
+        try
+        {
+            await viewModel.StopAsync();
+            await viewModel.StartAsync();
+
+            Assert.Equal(1, api.GetCalls);
+            Assert.Equal(1, delay.Waiters);
+
+            await viewModel.StopAsync();
+
+            Assert.True(delay.CancellationObserved);
+        }
+        finally
+        {
+            await viewModel.DisposeAsync();
+        }
+    }
+
     private static Fixture CreateFixture(
         MediaDiagnosticsSnapshotDto? snapshot = null)
     {

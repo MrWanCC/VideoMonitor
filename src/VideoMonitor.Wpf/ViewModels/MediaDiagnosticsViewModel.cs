@@ -135,6 +135,11 @@ public sealed class MediaDiagnosticsViewModel : ObservableObject, IAsyncDisposab
                 return stopTask;
             }
 
+            if (pollingCancellation is null)
+            {
+                return Task.CompletedTask;
+            }
+
             stopTask = StopCoreAsync(cancellationToken);
             return stopTask;
         }
