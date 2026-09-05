@@ -18,6 +18,8 @@ public sealed class MediaDiagnosticsViewModel : ObservableObject, IAsyncDisposab
     private readonly Func<TimeSpan, CancellationToken, Task> delayAsync;
     private readonly ObservableCollection<MediaDiagnosticsStreamRowViewModel> streams = [];
     private readonly SemaphoreSlim operationGate = new(1, 1);
+    private readonly CancellationTokenSource disposalCancellation = new();
+    private readonly CancellationToken disposalToken;
     private readonly object lifecycleGate = new();
     private CancellationTokenSource? pollingCancellation;
     private Task? startTask;
@@ -44,6 +46,7 @@ public sealed class MediaDiagnosticsViewModel : ObservableObject, IAsyncDisposab
         this.baseUriProvider = baseUriProvider
             ?? throw new ArgumentNullException(nameof(baseUriProvider));
         this.delayAsync = delayAsync ?? Task.Delay;
+        disposalToken = disposalCancellation.Token;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync);
         RetryCommand = new AsyncRelayCommand<MediaDiagnosticsStreamRowViewModel>(
             RetryAsync,
@@ -116,7 +119,8 @@ public sealed class MediaDiagnosticsViewModel : ObservableObject, IAsyncDisposab
             }
 
             pollingCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken);
+                cancellationToken,
+                disposalToken);
             startTask = StartCoreAsync(pollingCancellation);
             return startTask;
         }
@@ -412,7 +416,7 @@ public sealed class MediaDiagnosticsViewModel : ObservableObject, IAsyncDisposab
     {
         lock (lifecycleGate)
         {
-            return pollingCancellation?.Token ?? CancellationToken.None;
+            return pollingCancellation?.Token ?? disposalToken;
         }
     }
 
@@ -468,9 +472,14 @@ public sealed class MediaDiagnosticsViewModel : ObservableObject, IAsyncDisposab
         lock (lifecycleGate)
         {
             disposed = true;
+            disposalCancellation.Cancel();
         }
 
         await StopAsync();
+
+        await operationGate.WaitAsync();
+        operationGate.Release();
         operationGate.Dispose();
+        disposalCancellation.Dispose();
     }
 }

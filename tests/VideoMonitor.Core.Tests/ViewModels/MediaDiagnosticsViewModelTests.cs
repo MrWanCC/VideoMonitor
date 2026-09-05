@@ -198,6 +198,72 @@ public sealed class MediaDiagnosticsViewModelTests
         await viewModel.StopAsync();
     }
 
+    [Fact]
+    public async Task DeactivateDuringPendingActivateDoesNotLeaveDiagnosticsPolling()
+    {
+        var settingsApi = new BlockingMediaSettingsApiClient();
+        var settings = new MediaSettingsViewModel(settingsApi, () => ServerUri)
+        {
+            ZlmSecret = "transient-secret"
+        };
+        var diagnosticsApi = new TestDiagnosticsApiClient(SnapshotWithReadyStreams());
+        var diagnosticsDelay = new PollDelay(blockUntilCancelled: true);
+        var diagnostics = CreateViewModel(diagnosticsApi, diagnosticsDelay);
+        var page = new MediaPageViewModel(settings, diagnostics);
+
+        try
+        {
+            var activateTask = page.ActivateAsync();
+            await settingsApi.LoadStarted.Task;
+
+            var deactivateTask = page.DeactivateAsync();
+            settingsApi.ReleaseLoad();
+
+            await Task.WhenAll(activateTask, deactivateTask);
+
+            Assert.Equal(string.Empty, settings.ZlmSecret);
+            Assert.Equal(0, diagnosticsApi.GetCalls);
+            Assert.Equal(0, diagnosticsDelay.Waiters);
+        }
+        finally
+        {
+            await page.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task DisposeDuringInFlightRefreshWaitsForOperationToExit()
+    {
+        var api = new TestDiagnosticsApiClient(SnapshotWithReadyStreams());
+        var delay = new PollDelay(blockUntilCancelled: true);
+        var viewModel = CreateViewModel(api, delay);
+
+        await viewModel.StartAsync();
+        api.BlockNextRefresh();
+        var refreshTask = viewModel.RefreshCommand.ExecuteAsync(null);
+        await api.RefreshStarted.Task;
+
+        var disposalTask = viewModel.DisposeAsync().AsTask();
+        await api.RefreshCancellationObserved.Task;
+
+        Assert.False(disposalTask.IsCompleted);
+
+        api.ReleaseBlockedRefresh();
+        var exception = await Record.ExceptionAsync(async () =>
+        {
+            try
+            {
+                await refreshTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        });
+
+        Assert.Null(exception);
+        await disposalTask;
+    }
+
     private static Fixture CreateFixture(
         MediaDiagnosticsSnapshotDto? snapshot = null)
     {
@@ -428,7 +494,14 @@ public sealed class MediaDiagnosticsViewModelTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<object?> secondGetStarted =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<object?> refreshStarted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<object?> refreshCancellationObserved =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<object?> blockedRefresh =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int activeGetCalls;
+        private bool blockRefresh;
 
         public TestDiagnosticsApiClient(params object[] responses)
         {
@@ -445,6 +518,11 @@ public sealed class MediaDiagnosticsViewModelTests
         public int MessageBoxCalls { get; } = 0;
 
         public TaskCompletionSource<object?> SecondGetStarted => secondGetStarted;
+
+        public TaskCompletionSource<object?> RefreshStarted => refreshStarted;
+
+        public TaskCompletionSource<object?> RefreshCancellationObserved =>
+            refreshCancellationObserved;
 
         public ConcurrentQueue<string> Events { get; } = new();
 
@@ -471,7 +549,9 @@ public sealed class MediaDiagnosticsViewModelTests
             CancellationToken cancellationToken = default)
         {
             Events.Enqueue("POST");
-            return Task.CompletedTask;
+            return blockRefresh
+                ? BlockRefreshAsync(cancellationToken)
+                : Task.CompletedTask;
         }
 
         public Task RetryFaultedAsync(
@@ -488,6 +568,25 @@ public sealed class MediaDiagnosticsViewModelTests
         public void BlockNextGet() => responses.Enqueue(blockedGet);
 
         public void ReleaseBlockedGet() => blockedGet.TrySetResult(null);
+
+        public void BlockNextRefresh() => blockRefresh = true;
+
+        public void ReleaseBlockedRefresh() => blockedRefresh.TrySetResult(null);
+
+        private async Task BlockRefreshAsync(CancellationToken cancellationToken)
+        {
+            refreshStarted.TrySetResult(null);
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                refreshCancellationObserved.TrySetResult(null);
+                await blockedRefresh.Task;
+                throw;
+            }
+        }
 
         private async Task<MediaDiagnosticsSnapshotDto> CompleteGetAsync(
             int active,
@@ -520,6 +619,52 @@ public sealed class MediaDiagnosticsViewModelTests
             {
                 Interlocked.Decrement(ref activeGetCalls);
             }
+        }
+    }
+
+    private sealed class BlockingMediaSettingsApiClient : IMediaSettingsApiClient
+    {
+        private readonly TaskCompletionSource<object?> loadCompletion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<object?> LoadStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<MediaSettingsDto> GetAsync(
+            Uri baseUri,
+            CancellationToken cancellationToken = default)
+        {
+            LoadStarted.TrySetResult(null);
+            return CompleteLoadAsync(cancellationToken);
+        }
+
+        public Task<MediaSettingsDto> UpdateAsync(
+            Uri baseUri,
+            UpdateMediaSettingsRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<MediaSettingsTestResult> TestAsync(
+            Uri baseUri,
+            TestMediaSettingsRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public void ReleaseLoad() => loadCompletion.TrySetResult(null);
+
+        private async Task<MediaSettingsDto> CompleteLoadAsync(
+            CancellationToken cancellationToken)
+        {
+            await loadCompletion.Task.WaitAsync(cancellationToken);
+            return new MediaSettingsDto(
+                "",
+                "",
+                "__defaultVhost__",
+                "videomonitor",
+                "videomonitor-test",
+                false,
+                30,
+                1);
         }
     }
 }
