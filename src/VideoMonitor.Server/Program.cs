@@ -75,6 +75,8 @@ builder.Services.AddSingleton<MediaEventProcessor>();
 builder.Services.AddHostedService(serviceProvider =>
     serviceProvider.GetRequiredService<MediaEventProcessor>());
 builder.Services.AddSingleton<MediaReconcilerHostedService>();
+builder.Services.AddSingleton<IMediaReconcileSignal>(serviceProvider =>
+    serviceProvider.GetRequiredService<MediaReconcilerHostedService>());
 builder.Services.AddHostedService(serviceProvider =>
     serviceProvider.GetRequiredService<MediaReconcilerHostedService>());
 builder.Services.AddSingleton<CatalogApplicationService>();
@@ -93,6 +95,9 @@ builder.Services.AddSingleton<
     IFormalStreamEnsureService,
     FormalStreamEnsureService>();
 builder.Services.AddSingleton<IPlaybackStreamService, PlaybackStreamService>();
+builder.Services.Configure<MediaDiagnosticsOptions>(
+    builder.Configuration.GetSection("MediaDiagnostics"));
+builder.Services.AddSingleton<MediaDiagnosticsService>();
 builder.Services.AddSingleton<ServerReadinessState>();
 builder.Services.AddHostedService<ServerInitializationHostedService>();
 
@@ -120,6 +125,7 @@ app.MapGet("/health/ready", (ServerReadinessState readiness) =>
 app.MapCatalogEndpoints();
 app.MapMediaSettingsEndpoints();
 app.MapMediaRuntimeEndpoints();
+app.MapMediaDiagnosticsEndpoints();
 app.MapMediaHookEndpoints();
 app.MapPlaybackAuthorizationEndpoints();
 app.MapTestStreamEndpoints();
