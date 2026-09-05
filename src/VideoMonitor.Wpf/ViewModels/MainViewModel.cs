@@ -13,6 +13,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly ServerStatusViewModel? serverStatus;
     private readonly Func<ServerSettingsViewModel>? serverSettingsFactory;
     private readonly MediaSettingsViewModel? mediaSettings;
+    private readonly MediaPageViewModel? mediaPage;
 
     public MainViewModel(
         MonitorViewModel monitor,
@@ -41,6 +42,7 @@ public sealed class MainViewModel : ObservableObject
             serverStatus,
             serverSettingsFactory,
             null,
+            null,
             isSecondaryScreenVisible)
     {
     }
@@ -52,6 +54,25 @@ public sealed class MainViewModel : ObservableObject
         Func<ServerSettingsViewModel> serverSettingsFactory,
         MediaSettingsViewModel? mediaSettings,
         bool isSecondaryScreenVisible = false)
+        : this(
+            monitor,
+            deviceManagement,
+            serverStatus,
+            serverSettingsFactory,
+            mediaSettings,
+            null,
+            isSecondaryScreenVisible)
+    {
+    }
+
+    public MainViewModel(
+        MonitorViewModel monitor,
+        DeviceManagementViewModel deviceManagement,
+        ServerStatusViewModel serverStatus,
+        Func<ServerSettingsViewModel> serverSettingsFactory,
+        MediaSettingsViewModel? mediaSettings,
+        MediaPageViewModel? mediaPage,
+        bool isSecondaryScreenVisible = false)
         : this(monitor, deviceManagement, isSecondaryScreenVisible)
     {
         this.serverStatus = serverStatus
@@ -59,6 +80,7 @@ public sealed class MainViewModel : ObservableObject
         this.serverSettingsFactory = serverSettingsFactory
             ?? throw new ArgumentNullException(nameof(serverSettingsFactory));
         this.mediaSettings = mediaSettings;
+        this.mediaPage = mediaPage;
     }
 
     public MonitorViewModel Monitor { get; }
@@ -68,6 +90,8 @@ public sealed class MainViewModel : ObservableObject
     public ServerStatusViewModel? ServerStatus => serverStatus;
 
     public MediaSettingsViewModel? MediaSettings => mediaSettings;
+
+    public MediaPageViewModel? MediaPage => mediaPage;
 
     public bool IsMediaSettingsAvailable => mediaSettings is not null;
 

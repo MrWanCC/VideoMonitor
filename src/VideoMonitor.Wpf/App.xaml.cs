@@ -84,6 +84,21 @@ public partial class App
                 composition.ReadModel,
                 composition.CreateFormalPlaybackCoordinator);
         var screenService = new ScreenService();
+        MediaSettingsViewModel? mediaSettings = null;
+        MediaPageViewModel? mediaPage = null;
+        if (composition.IsFormalCentralMode)
+        {
+            mediaSettings = new MediaSettingsViewModel(
+                composition.MediaSettingsApiClient!,
+                () => composition.ServerStatus!.BaseUri);
+            mediaPage = new MediaPageViewModel(
+                mediaSettings,
+                new MediaDiagnosticsViewModel(
+                    composition.MediaDiagnosticsApiClient!,
+                    composition.ReadModel,
+                    () => composition.ServerStatus!.BaseUri));
+        }
+
         var mainViewModel = composition.IsFormalCentralMode
             ? new MainViewModel(
                 monitorViewModel,
@@ -93,9 +108,8 @@ public partial class App
                     composition.Coordinator!,
                     composition.ClientSettingsStore!,
                     () => deviceManagementViewModel.HasUnsavedDraft),
-                new MediaSettingsViewModel(
-                    composition.MediaSettingsApiClient!,
-                    () => composition.ServerStatus!.BaseUri),
+                mediaSettings,
+                mediaPage,
                 screenService.HasSecondaryScreen)
             : new MainViewModel(
                 monitorViewModel,
@@ -241,9 +255,24 @@ public partial class App
         {
             try
             {
+                async ValueTask DisposeApplicationCompositionAsync()
+                {
+                    try
+                    {
+                        if (mainViewModel.MediaPage is { } page)
+                        {
+                            await page.DisposeAsync();
+                        }
+                    }
+                    finally
+                    {
+                        await composition.DisposeAsync();
+                    }
+                }
+
                 await ShutdownCleanupCoordinator.ExecuteAsync(
                     StopPlaybackResourcesAsync,
-                    composition.DisposeAsync);
+                    DisposeApplicationCompositionAsync);
             }
             catch (Exception exception)
             {

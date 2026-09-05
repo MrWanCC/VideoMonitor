@@ -33,6 +33,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
             <TextBlock Grid.Row="0" Style="{StaticResource SecondaryTextStyle}" Text="ZLM API 地址" />
@@ -69,6 +70,63 @@
                 <TextBlock Margin="16,0,0,0" Style="{StaticResource SecondaryTextStyle}" Text="已保存 Secret：" />
                 <TextBlock Foreground="{StaticResource PrimaryTextBrush}" Text="{Binding HasSecret}" />
             </StackPanel>
+
+            <Border Grid.Row="8" Grid.ColumnSpan="2" Margin="0,20,0,0"
+                    Padding="14" Background="{StaticResource CardBackgroundBrush}"
+                    BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
+                    DataContext="{Binding PageViewModel.Diagnostics, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="媒体诊断" />
+                        <TextBlock Margin="18,2,0,0" Style="{StaticResource SecondaryTextStyle}" Text="服务：" />
+                        <TextBlock Margin="4,2,0,0" Text="{Binding ServerHealth}" />
+                        <TextBlock Margin="18,2,0,0" Style="{StaticResource SecondaryTextStyle}" Text="活动流：" />
+                        <TextBlock Margin="4,2,0,0" Text="{Binding ActiveStreamCount}" />
+                        <TextBlock Margin="18,2,0,0" Style="{StaticResource SecondaryTextStyle}" Text="观看者：" />
+                        <TextBlock Margin="4,2,0,0" Text="{Binding ViewerCount}" />
+                        <TextBlock Margin="18,2,0,0" Style="{StaticResource SecondaryTextStyle}" Text="故障：" />
+                        <TextBlock Margin="4,2,0,0" Text="{Binding FaultCount}" />
+                        <TextBlock Margin="18,2,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding StatusText}" />
+                        <Button Margin="18,0,0,0" Command="{Binding RefreshCommand}" Content="刷新诊断" />
+                    </StackPanel>
+
+                    <ScrollViewer Margin="0,12,0,0" MaxHeight="240" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Streams}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="6" BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="2*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock FontWeight="SemiBold" Text="{Binding DeviceName}" />
+                                                <TextBlock Margin="8,0,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding ChannelName}" />
+                                                <TextBlock Margin="8,0,0,0" Text="通道" />
+                                                <TextBlock Margin="4,0,0,0" Text="{Binding ChannelNo}" />
+                                                <TextBlock Margin="12,0,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding SafeLastErrorMessage}" />
+                                                <TextBlock Margin="12,0,0,0" Style="{StaticResource SecondaryTextStyle}" Text="陈旧：" />
+                                                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="{Binding IsStale}" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" Margin="16,0,0,0" Text="{Binding StreamTypeText}" />
+                                            <TextBlock Grid.Column="2" Margin="16,0,0,0" Text="{Binding RuntimeState}" />
+                                            <TextBlock Grid.Column="3" Margin="16,0,0,0" Text="{Binding ViewerCount}" />
+                                            <Button Grid.Column="4" Margin="16,0,0,0"
+                                                    Command="{Binding DataContext.RetryCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}" Content="重试"
+                                                    IsEnabled="{Binding CanRetry}" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
         </Grid>
 
         <Border Grid.Row="2" Padding="20,12" Background="{StaticResource PanelBackgroundBrush}"

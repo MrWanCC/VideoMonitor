@@ -184,6 +184,7 @@
                                   Visibility="{Binding DataContext.SelectedNavigation, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource NavigationVisibilityConverter}, ConverterParameter=设备管理}" />
                 <pages:MediaView x:Name="MediaContent" Grid.Column="1" Grid.ColumnSpan="2" Margin="8,0,8,0"
                                  DataContext="{Binding MediaSettings}"
+                                 PageViewModel="{Binding DataContext.MediaPage, RelativeSource={RelativeSource AncestorType=Window}}"
                                  Visibility="{Binding DataContext.SelectedNavigation, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource NavigationVisibilityConverter}, ConverterParameter=流媒体管理}" />
             </Grid>
             <controls:StatusBar x:Name="FooterChrome" Grid.Row="2" />

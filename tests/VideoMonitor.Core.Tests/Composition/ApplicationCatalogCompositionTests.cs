@@ -76,6 +76,16 @@ public sealed class ApplicationCatalogCompositionTests
     }
 
     [Fact]
+    public async Task CentralCompositionProvidesDiagnosticsButLocalModeDoesNot()
+    {
+        await using var central = await CreateAsync(false);
+        await using var local = await CreateAsync(true);
+
+        Assert.NotNull(central.MediaDiagnosticsApiClient);
+        Assert.Null(local.MediaDiagnosticsApiClient);
+    }
+
+    [Fact]
     public async Task FormalMode_DoesNotCreatePersistenceCoordinator()
     {
         await using var composition = await CreateAsync(false);
