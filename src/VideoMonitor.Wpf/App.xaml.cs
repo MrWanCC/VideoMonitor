@@ -147,7 +147,11 @@ public partial class App
             {
                 Debug.WriteLine(exception.GetType().Name);
                 playbackConfigurationError = "LibVLC初始化失败。";
-                vlcPlaybackService?.Dispose();
+                if (vlcPlaybackService is not null)
+                {
+                    await vlcPlaybackService.DisposeAsync();
+                }
+
                 vlcPlaybackService = null;
             }
         }

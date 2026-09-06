@@ -31,6 +31,7 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
     private readonly Func<FormalPlaybackSource, IPlaybackRuntimeEventSink, PlaybackSession> preparePlayback;
     private readonly Action<PlaybackSession> playPlayback;
     private readonly Action<PlaybackSession> stopPlayback;
+    private readonly Func<PlaybackSession, ValueTask>? stopPlaybackAsync;
     private readonly VideoTileViewModel tile;
     private readonly IUiDispatcher dispatcher;
     private readonly Func<TimeSpan, CancellationToken, Task> delay;
@@ -54,7 +55,8 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
         VideoTileViewModel tile,
         IUiDispatcher dispatcher,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
-        Action<PlaybackSession>? playPlayback = null)
+        Action<PlaybackSession>? playPlayback = null,
+        Func<PlaybackSession, ValueTask>? stopPlaybackAsync = null)
     {
         this.sourceProvider = sourceProvider
             ?? throw new ArgumentNullException(nameof(sourceProvider));
@@ -67,6 +69,7 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
             ?? throw new ArgumentNullException(nameof(dispatcher));
         this.delay = delay ?? Task.Delay;
         this.playPlayback = playPlayback ?? (_ => { });
+        this.stopPlaybackAsync = stopPlaybackAsync;
     }
 
     public PlaybackSession? CurrentSession
@@ -572,7 +575,7 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
     {
         if (session is not null)
         {
-            stopPlayback(session);
+            await StopPlaybackAsync(session).ConfigureAwait(false);
         }
 
         if (source is not null)
@@ -755,13 +758,24 @@ public sealed class FormalPlaybackCoordinator : IAsyncDisposable, IPlaybackRunti
 
         if (session is not null)
         {
-            stopPlayback(session);
+            await StopPlaybackAsync(session).ConfigureAwait(false);
         }
 
         if (source is not null)
         {
             await ReleaseSafelyAsync(source).ConfigureAwait(false);
         }
+    }
+
+    private async ValueTask StopPlaybackAsync(PlaybackSession session)
+    {
+        if (stopPlaybackAsync is not null)
+        {
+            await stopPlaybackAsync(session).ConfigureAwait(false);
+            return;
+        }
+
+        stopPlayback(session);
     }
 
     private void ClearCurrentIf(

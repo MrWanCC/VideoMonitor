@@ -112,6 +112,46 @@ public sealed class TestPreviewViewModelTests
     }
 
     [Fact]
+    public async Task StopPrefersAsyncPlaybackStopperWithoutBlockingDispatcher()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var api = new DeferredStopApi();
+            var engine = new AsyncStopPlaybackEngine(dispatcher);
+            var viewModel = new TestPreviewViewModel(
+                api,
+                engine,
+                () => new Uri("https://server/"),
+                new WpfUiDispatcher(dispatcher));
+            await viewModel.StartAsync(Request);
+            await Task.Yield();
+
+            var stopTask = Task.Run(() => viewModel.StopAsync());
+            await engine.StopStarted.Task;
+
+            var dispatcherProbe = new TaskCompletionSource<object?>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var probeOperation = dispatcher.BeginInvoke(
+                DispatcherPriority.Normal,
+                new Action(() => dispatcherProbe.TrySetResult(null)));
+            await probeOperation.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await dispatcherProbe.Task;
+
+            Assert.False(stopTask.IsCompleted);
+            Assert.False(engine.SyncStopCalled);
+
+            engine.ReleaseStop();
+            await api.StopStarted.Task;
+            api.CompleteStop();
+            await stopTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.Equal(TestPreviewState.Idle, viewModel.State);
+            Assert.Null(viewModel.Session);
+        });
+    }
+
+    [Fact]
     public async Task CloseDoesNotCrossThread()
     {
         await RunOnStaAsync(async () =>
@@ -168,6 +208,31 @@ public sealed class TestPreviewViewModelTests
             Assert.True(engine.DisposedOnUi);
             Assert.NotEmpty(propertyChangedOnUi);
             Assert.All(propertyChangedOnUi, Assert.True);
+        });
+    }
+
+    [Fact]
+    public async Task DisposePrefersAsyncPlaybackEngineDispose()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var engine = new AsyncDisposePlaybackEngine(dispatcher);
+            var viewModel = new TestPreviewViewModel(
+                new FakeApi(),
+                engine,
+                () => new Uri("https://server/"),
+                new WpfUiDispatcher(dispatcher));
+
+            var disposeTask = viewModel.DisposeAsync().AsTask();
+            await engine.DisposeStarted.Task;
+
+            Assert.False(disposeTask.IsCompleted);
+            Assert.False(engine.SyncDisposeCalled);
+            Assert.True(engine.AsyncDisposeOnUi);
+
+            engine.ReleaseDispose();
+            await disposeTask;
         });
     }
 
@@ -617,6 +682,76 @@ public sealed class TestPreviewViewModelTests
         }
 
         public void Dispose() => DisposedOnUi = dispatcher.CheckAccess();
+    }
+
+    private sealed class AsyncStopPlaybackEngine : IPlaybackEngine, IAsyncPlaybackStopper
+    {
+        private readonly Dispatcher dispatcher;
+        private readonly TaskCompletionSource<object?> releaseStop =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public AsyncStopPlaybackEngine(Dispatcher dispatcher) =>
+            this.dispatcher = dispatcher;
+
+        public TaskCompletionSource<object?> StopStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool SyncStopCalled { get; private set; }
+
+        public PlaybackSession Start(PlaybackSource source) =>
+            new(source, null, null);
+
+        public void Stop(PlaybackSession session)
+        {
+            SyncStopCalled = true;
+            throw new InvalidOperationException("Synchronous stop was used.");
+        }
+
+        public ValueTask StopAsync(PlaybackSession session)
+        {
+            Assert.True(dispatcher.CheckAccess());
+            StopStarted.TrySetResult(null);
+            return new ValueTask(releaseStop.Task);
+        }
+
+        public void ReleaseStop() => releaseStop.TrySetResult(null);
+    }
+
+    private sealed class AsyncDisposePlaybackEngine : IPlaybackEngine, IDisposable, IAsyncDisposable
+    {
+        private readonly Dispatcher dispatcher;
+        private readonly TaskCompletionSource<object?> releaseDispose =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public AsyncDisposePlaybackEngine(Dispatcher dispatcher) =>
+            this.dispatcher = dispatcher;
+
+        public TaskCompletionSource<object?> DisposeStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool SyncDisposeCalled { get; private set; }
+
+        public bool AsyncDisposeOnUi { get; private set; }
+
+        public PlaybackSession Start(PlaybackSource source) =>
+            new(source, null, null);
+
+        public void Stop(PlaybackSession session) => session.Dispose();
+
+        public void Dispose()
+        {
+            SyncDisposeCalled = true;
+            throw new InvalidOperationException("Synchronous engine disposal was used.");
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            AsyncDisposeOnUi = dispatcher.CheckAccess();
+            DisposeStarted.TrySetResult(null);
+            return new ValueTask(releaseDispose.Task);
+        }
+
+        public void ReleaseDispose() => releaseDispose.TrySetResult(null);
     }
 
     private static async Task RunOnStaAsync(Func<Task> action)

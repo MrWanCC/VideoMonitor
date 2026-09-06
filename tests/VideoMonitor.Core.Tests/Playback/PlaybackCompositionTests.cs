@@ -55,4 +55,76 @@ public sealed class PlaybackCompositionTests
 
         Assert.Contains("通道不存在", exception.Message);
     }
+
+    [Fact]
+    public async Task PlaybackSessionDisposeAsyncUsesAsyncDiagnostics()
+    {
+        var diagnostics = new AsyncOnlyDiagnostics();
+        var session = new PlaybackSession(
+            new PlaybackSource(
+                Guid.NewGuid(),
+                "stream-async-dispose",
+                new Uri("https://server/live/stream-async-dispose"),
+                null,
+                false),
+            null,
+            null,
+            diagnostics: diagnostics);
+
+        var disposeTask = session.DisposeAsync().AsTask();
+        await diagnostics.AsyncDisposeStarted.Task;
+
+        Assert.False(disposeTask.IsCompleted);
+        Assert.Equal(0, diagnostics.SyncDisposeCalls);
+
+        diagnostics.ReleaseAsyncDispose();
+        await disposeTask;
+
+        Assert.Equal(1, diagnostics.AsyncDisposeCalls);
+    }
+
+    [Fact]
+    public void AppStartupFailureUsesAsyncVlcCleanup()
+    {
+        var repositoryRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", ".."));
+        var sourcePath = Path.Combine(
+            repositoryRoot,
+            "src",
+            "VideoMonitor.Wpf",
+            "App.xaml.cs");
+        var source = File.ReadAllText(sourcePath);
+
+        Assert.DoesNotContain("vlcPlaybackService?.Dispose();", source);
+        Assert.Contains("await vlcPlaybackService.DisposeAsync();", source);
+    }
+
+    private sealed class AsyncOnlyDiagnostics : IDisposable, IAsyncDisposable
+    {
+        public TaskCompletionSource<object?> AsyncDisposeStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private readonly TaskCompletionSource<object?> release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int SyncDisposeCalls { get; private set; }
+
+        public int AsyncDisposeCalls { get; private set; }
+
+        public void Dispose()
+        {
+            SyncDisposeCalls++;
+            throw new InvalidOperationException("Synchronous diagnostics disposal was used.");
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            AsyncDisposeCalls++;
+            AsyncDisposeStarted.TrySetResult(null);
+            return new ValueTask(release.Task);
+        }
+
+        public void ReleaseAsyncDispose() => release.TrySetResult(null);
+    }
 }

@@ -163,6 +163,8 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
     public async Task<bool> StopAsync(CancellationToken cancellationToken = default)
     {
         StopContext? context = null;
+        PlaybackSession? capturedPlayback = null;
+        Task? playbackStopTask = null;
         try
         {
             await RunOnUiAsync(() =>
@@ -180,9 +182,19 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
                 var baseUri = baseUriProvider();
                 if (currentPlayback is not null)
                 {
-                    playbackEngine.Stop(currentPlayback);
-                    playbackSession = null;
-                    OnPlaybackSessionChanged();
+                    capturedPlayback = currentPlayback;
+                    if (playbackEngine is IAsyncPlaybackStopper asyncStopper)
+                    {
+                        playbackStopTask = asyncStopper
+                            .StopAsync(currentPlayback)
+                            .AsTask();
+                    }
+                    else
+                    {
+                        playbackEngine.Stop(currentPlayback);
+                        playbackSession = null;
+                        OnPlaybackSessionChanged();
+                    }
                 }
 
                 context = new StopContext(currentSession, baseUri);
@@ -190,6 +202,19 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
             if (context is null)
             {
                 return true;
+            }
+
+            if (playbackStopTask is not null)
+            {
+                await playbackStopTask;
+                await RunOnUiAsync(() =>
+                {
+                    if (ReferenceEquals(playbackSession, capturedPlayback))
+                    {
+                        playbackSession = null;
+                        OnPlaybackSessionChanged();
+                    }
+                });
             }
 
             if (context.Session is not null)
@@ -252,7 +277,16 @@ public sealed class TestPreviewViewModel : ObservableObject, IAsyncDisposable
         }
 
         await StopAsync();
-        if (playbackEngine is IDisposable disposable)
+        if (playbackEngine is IAsyncDisposable asyncDisposable)
+        {
+            Task? disposeTask = null;
+            await RunOnUiAsync(() =>
+            {
+                disposeTask = asyncDisposable.DisposeAsync().AsTask();
+            });
+            await disposeTask!;
+        }
+        else if (playbackEngine is IDisposable disposable)
         {
             await RunOnUiAsync(disposable.Dispose);
         }

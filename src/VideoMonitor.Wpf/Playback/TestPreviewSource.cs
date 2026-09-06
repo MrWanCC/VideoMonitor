@@ -9,7 +9,7 @@ public sealed record TestPreviewSource(
         new(ChannelId ?? Guid.Empty, StreamId, PlaybackUrl, null, false);
 }
 
-internal sealed class LazyPlaybackEngine : IPlaybackEngine, IDisposable
+internal sealed class LazyPlaybackEngine : IPlaybackEngine, IAsyncPlaybackStopper, IDisposable, IAsyncDisposable
 {
     private readonly Func<IPlaybackEngine> factory;
     private IPlaybackEngine? inner;
@@ -28,13 +28,48 @@ internal sealed class LazyPlaybackEngine : IPlaybackEngine, IDisposable
 
     public void Stop(PlaybackSession session) => inner?.Stop(session);
 
-    public void Dispose()
+    public async ValueTask StopAsync(PlaybackSession session)
     {
-        if (inner is IDisposable disposable)
+        if (inner is IAsyncPlaybackStopper asyncStopper)
         {
-            disposable.Dispose();
+            await asyncStopper.StopAsync(session).ConfigureAwait(false);
+            return;
         }
 
-        inner = null;
+        inner?.Stop(session);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (inner is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
+        finally
+        {
+            inner = null;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (inner is IAsyncDisposable asyncDisposable)
+            {
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+            }
+            else if (inner is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
+        finally
+        {
+            inner = null;
+        }
     }
 }

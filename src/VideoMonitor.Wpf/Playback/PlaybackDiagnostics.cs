@@ -437,7 +437,7 @@ public sealed class PlaybackDiagnosticsSampler : IDisposable, IAsyncDisposable
     }
 }
 
-public sealed class PlaybackDiagnosticsSession : IDisposable
+public sealed class PlaybackDiagnosticsSession : IDisposable, IAsyncDisposable
 {
     private readonly Guid channelId;
     private readonly string streamId;
@@ -486,6 +486,23 @@ public sealed class PlaybackDiagnosticsSession : IDisposable
         mediaPlayer.Stopped -= OnStopped;
         mediaPlayer.EncounteredError -= OnError;
         sampler.Dispose();
+        RecordEvent("SESSION_DISPOSE");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
+
+        RecordEvent("STOPPED");
+        mediaPlayer.Opening -= OnOpening;
+        mediaPlayer.Buffering -= OnBuffering;
+        mediaPlayer.Playing -= OnPlaying;
+        mediaPlayer.Stopped -= OnStopped;
+        mediaPlayer.EncounteredError -= OnError;
+        await sampler.DisposeAsync().ConfigureAwait(false);
         RecordEvent("SESSION_DISPOSE");
     }
 

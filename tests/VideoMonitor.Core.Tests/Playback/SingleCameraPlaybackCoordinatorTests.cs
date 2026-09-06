@@ -47,6 +47,35 @@ public sealed class SingleCameraPlaybackCoordinatorTests
     }
 
     [Fact]
+    public async Task DisposePrefersAsyncPlaybackStopper()
+    {
+        var source = new PlaybackSource(
+            Guid.Parse("60000000-0000-0000-0000-000000000001"),
+            "device_1_channel_1",
+            new Uri("rtsp://127.0.0.1/live/device_1_channel_1"),
+            "owned-key",
+            true);
+        var provider = new FakePlaybackSourceProvider(source);
+        var engine = new AsyncStopPlaybackEngine();
+        var coordinator = new SingleCameraPlaybackCoordinator(provider, engine);
+        var tile = new VideoTileViewModel();
+
+        await coordinator.StartAsync(Device(), Channel(), tile, CancellationToken.None);
+
+        var disposeTask = coordinator.DisposeAsync().AsTask();
+        await engine.StopStarted.Task;
+
+        Assert.False(disposeTask.IsCompleted);
+        Assert.Equal(0, provider.ReleaseCount);
+        Assert.Equal(0, engine.SyncStopCalls);
+
+        engine.ReleaseStop();
+        await disposeTask;
+
+        Assert.Equal(1, provider.ReleaseCount);
+    }
+
+    [Fact]
     public async Task Start_WhenProviderFails_ShowsStageSpecificError()
     {
         var provider = new FakePlaybackSourceProvider(
@@ -135,5 +164,33 @@ public sealed class SingleCameraPlaybackCoordinatorTests
             StopCount++;
             session.Dispose();
         }
+    }
+
+    private sealed class AsyncStopPlaybackEngine : IPlaybackEngine, IAsyncPlaybackStopper
+    {
+        public TaskCompletionSource<object?> StopStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private readonly TaskCompletionSource<object?> releaseStop =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int SyncStopCalls { get; private set; }
+
+        public PlaybackSession Start(PlaybackSource source) =>
+            new(source, null, null);
+
+        public void Stop(PlaybackSession session)
+        {
+            SyncStopCalls++;
+            throw new InvalidOperationException("Synchronous stop was used.");
+        }
+
+        public ValueTask StopAsync(PlaybackSession session)
+        {
+            StopStarted.TrySetResult(null);
+            return new ValueTask(releaseStop.Task);
+        }
+
+        public void ReleaseStop() => releaseStop.TrySetResult(null);
     }
 }

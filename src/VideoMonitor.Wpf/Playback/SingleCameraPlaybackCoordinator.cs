@@ -67,7 +67,15 @@ public sealed class SingleCameraPlaybackCoordinator : IAsyncDisposable
 
         if (CurrentSession is not null)
         {
-            playbackEngine.Stop(CurrentSession);
+            if (playbackEngine is IAsyncPlaybackStopper asyncStopper)
+            {
+                await asyncStopper.StopAsync(CurrentSession).ConfigureAwait(false);
+            }
+            else
+            {
+                playbackEngine.Stop(CurrentSession);
+            }
+
             CurrentSession = null;
         }
 

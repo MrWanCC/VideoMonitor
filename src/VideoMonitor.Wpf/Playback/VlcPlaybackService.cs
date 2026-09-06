@@ -10,6 +10,11 @@ public interface IPlaybackEngine
     void Stop(PlaybackSession session);
 }
 
+public interface IAsyncPlaybackStopper
+{
+    ValueTask StopAsync(PlaybackSession session);
+}
+
 public sealed class PlaybackEngineException : Exception
 {
     public PlaybackEngineException(string message)
@@ -18,7 +23,7 @@ public sealed class PlaybackEngineException : Exception
     }
 }
 
-public sealed class VlcPlaybackService : IPlaybackEngine, IFormalPlaybackEngine, IDisposable, IAsyncDisposable
+public sealed class VlcPlaybackService : IPlaybackEngine, IFormalPlaybackEngine, IAsyncPlaybackStopper, IDisposable, IAsyncDisposable
 {
     private readonly LibVLC libVlc;
     private readonly PlaybackDiagnosticsWriter? diagnosticsWriter;
@@ -118,6 +123,12 @@ public sealed class VlcPlaybackService : IPlaybackEngine, IFormalPlaybackEngine,
     {
         ArgumentNullException.ThrowIfNull(session);
         session.Dispose();
+    }
+
+    public ValueTask StopAsync(PlaybackSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        return session.DisposeAsync();
     }
 
     public async ValueTask DisposeAsync()

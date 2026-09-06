@@ -164,7 +164,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
                 StopFormalPlaybackSession,
                 tile,
                 formalPlaybackDispatcher,
-                playPlayback: session => GetOrCreateFormalPlaybackEngine().Play(session));
+                playPlayback: session => GetOrCreateFormalPlaybackEngine().Play(session),
+                stopPlaybackAsync: StopFormalPlaybackSessionAsync);
             formalPlaybackCoordinators.Add(coordinator);
             return coordinator;
         }
@@ -199,6 +200,30 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         if (engine is null)
         {
             session.Dispose();
+            return;
+        }
+
+        engine.Stop(session);
+    }
+
+    private async ValueTask StopFormalPlaybackSessionAsync(PlaybackSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        IFormalPlaybackEngine? engine;
+        lock (lifecycleGate)
+        {
+            engine = formalPlaybackEngine;
+        }
+
+        if (engine is IAsyncPlaybackStopper asyncStopper)
+        {
+            await asyncStopper.StopAsync(session).ConfigureAwait(false);
+            return;
+        }
+
+        if (engine is null)
+        {
+            await session.DisposeAsync().ConfigureAwait(false);
             return;
         }
 

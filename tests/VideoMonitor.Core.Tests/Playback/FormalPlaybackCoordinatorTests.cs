@@ -8,6 +8,49 @@ namespace VideoMonitor.Core.Tests.Playback;
 public sealed class FormalPlaybackCoordinatorTests
 {
     [Fact]
+    public async Task FormalStopAwaitsAsyncStopDelegate()
+    {
+        var provider = new FakeProvider(Source(1));
+        var stopStarted = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseStop = new TaskCompletionSource<object?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var syncStopCalls = 0;
+        await using var coordinator = CreateCoordinator(
+            provider,
+            (source, _) => new PlaybackSession(
+                new PlaybackSource(
+                    source.ChannelId,
+                    source.StreamId,
+                    source.PlaybackUrl,
+                    null,
+                    false),
+                null,
+                null),
+            stop: _ =>
+            {
+                syncStopCalls++;
+                throw new InvalidOperationException("Synchronous stop was used.");
+            },
+            stopAsync: _ =>
+            {
+                stopStarted.TrySetResult(null);
+                return new ValueTask(releaseStop.Task);
+            });
+
+        await coordinator.StartAsync(Guid.NewGuid(), provider.ChannelId, StreamType.Main);
+
+        var stopTask = coordinator.StopAsync();
+        await stopStarted.Task;
+
+        Assert.False(stopTask.IsCompleted);
+        Assert.Equal(0, syncStopCalls);
+
+        releaseStop.TrySetResult(null);
+        await stopTask;
+    }
+
+    [Fact]
     public async Task PlayHappensAfterSessionIsAttachedWhileTileIsLoading()
     {
         var provider = new FakeProvider(Source(1));
@@ -711,7 +754,8 @@ public sealed class FormalPlaybackCoordinatorTests
         IFormalPlaybackSourceProvider provider,
         Func<FormalPlaybackSource, IPlaybackRuntimeEventSink, PlaybackSession> start,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
-        Action<PlaybackSession>? stop = null)
+        Action<PlaybackSession>? stop = null,
+        Func<PlaybackSession, ValueTask>? stopAsync = null)
     {
         stop ??= session => session.Dispose();
         return new FormalPlaybackCoordinator(
@@ -723,7 +767,8 @@ public sealed class FormalPlaybackCoordinatorTests
             (duration, cancellationToken) =>
                 (delay ?? ((_, _) => Task.CompletedTask))(
                     duration,
-                    cancellationToken));
+                    cancellationToken),
+            stopPlaybackAsync: stopAsync);
     }
 
     private static FormalPlaybackSource Source(int offset) => new(

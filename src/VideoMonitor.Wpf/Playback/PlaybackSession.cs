@@ -2,7 +2,7 @@ using LibVLCSharp.Shared;
 
 namespace VideoMonitor.Wpf.Playback;
 
-public sealed class PlaybackSession : IDisposable
+public sealed class PlaybackSession : IDisposable, IAsyncDisposable
 {
     private int disposed;
     private readonly Action? detachRuntimeEvents;
@@ -58,6 +58,28 @@ public sealed class PlaybackSession : IDisposable
 
         detachRuntimeEvents?.Invoke();
         diagnostics?.Dispose();
+        MediaPlayer?.Stop();
+        MediaPlayer?.Dispose();
+        Media?.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
+
+        detachRuntimeEvents?.Invoke();
+        if (diagnostics is IAsyncDisposable asyncDiagnostics)
+        {
+            await asyncDiagnostics.DisposeAsync().ConfigureAwait(false);
+        }
+        else
+        {
+            diagnostics?.Dispose();
+        }
+
         MediaPlayer?.Stop();
         MediaPlayer?.Dispose();
         Media?.Dispose();
