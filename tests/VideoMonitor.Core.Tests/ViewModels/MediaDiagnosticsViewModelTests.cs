@@ -23,6 +23,55 @@ public sealed class MediaDiagnosticsViewModelTests
         Assert.Equal(MediaServerHealth.Healthy, fixture.ViewModel.ServerHealth);
     }
 
+    [Theory]
+    [InlineData("Healthy", "正常")]
+    [InlineData("Unavailable", "不可用")]
+    [InlineData("Unconfigured", "未配置")]
+    [InlineData("ConfigurationError", "未知")]
+    public async Task MediaDiagnosticsViewModelMapsServerHealthToChineseText(
+        string healthName,
+        string expectedText)
+    {
+        var health = Enum.Parse<MediaServerHealth>(healthName);
+        var api = new TestDiagnosticsApiClient(
+            new MediaDiagnosticsSnapshotDto(health, 0, 0, 0, []));
+        var viewModel = CreateViewModel(api, new PollDelay());
+
+        await viewModel.StartAsync();
+
+        Assert.Equal(expectedText, GetDisplayText(viewModel, "ServerHealthText"));
+        await viewModel.StopAsync();
+    }
+
+    [Theory]
+    [InlineData("Idle", "空闲")]
+    [InlineData("Starting", "启动中")]
+    [InlineData("Ready", "正常")]
+    [InlineData("Stopping", "停止中")]
+    [InlineData("Faulted", "故障")]
+    public async Task MediaDiagnosticsRowsMapRuntimeStateToChineseText(
+        string stateName,
+        string expectedText)
+    {
+        var state = Enum.Parse<StreamRuntimeState>(stateName);
+        var api = new TestDiagnosticsApiClient(
+            SnapshotWithReadyStreams(
+            [
+                CreateStream(
+                    "10000000-0000-0000-0000-000000000001",
+                    "20000000-0000-0000-0000-000000000001",
+                    state,
+                    0),
+            ]));
+        var viewModel = CreateViewModel(api, new PollDelay());
+
+        await viewModel.StartAsync();
+
+        var row = Assert.Single(viewModel.Streams);
+        Assert.Equal(expectedText, GetDisplayText(row, "RuntimeStateText"));
+        await viewModel.StopAsync();
+    }
+
     [Fact]
     public async Task MediaDiagnosticsViewModelPollDoesNotOverlap()
     {
@@ -296,6 +345,13 @@ public sealed class MediaDiagnosticsViewModelTests
             snapshot ?? SnapshotWithReadyStreams());
         var viewModel = CreateViewModel(api, new PollDelay());
         return new Fixture(api, viewModel);
+    }
+
+    private static string GetDisplayText(object viewModel, string propertyName)
+    {
+        var property = viewModel.GetType().GetProperty(propertyName);
+        Assert.NotNull(property);
+        return Assert.IsType<string>(property!.GetValue(viewModel));
     }
 
     private static MediaDiagnosticsViewModel CreateViewModel(

@@ -65,10 +65,21 @@ public sealed class MediaDiagnosticsStreamRowViewModel : ObservableObject
         {
             if (SetProperty(ref runtimeState, value))
             {
+                OnPropertyChanged(nameof(RuntimeStateText));
                 OnPropertyChanged(nameof(CanRetry));
             }
         }
     }
+
+    public string RuntimeStateText => RuntimeState switch
+    {
+        StreamRuntimeState.Idle => "空闲",
+        StreamRuntimeState.Starting => "启动中",
+        StreamRuntimeState.Ready => "正常",
+        StreamRuntimeState.Stopping => "停止中",
+        StreamRuntimeState.Faulted => "故障",
+        _ => "未知"
+    };
 
     public int ViewerCount
     {

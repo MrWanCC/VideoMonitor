@@ -56,8 +56,22 @@ public sealed class MediaDiagnosticsViewModel : ObservableObject, IAsyncDisposab
     public MediaServerHealth ServerHealth
     {
         get => serverHealth;
-        private set => SetProperty(ref serverHealth, value);
+        private set
+        {
+            if (SetProperty(ref serverHealth, value))
+            {
+                OnPropertyChanged(nameof(ServerHealthText));
+            }
+        }
     }
+
+    public string ServerHealthText => ServerHealth switch
+    {
+        MediaServerHealth.Healthy => "正常",
+        MediaServerHealth.Unavailable => "不可用",
+        MediaServerHealth.Unconfigured => "未配置",
+        _ => "未知"
+    };
 
     public int ActiveStreamCount
     {
