@@ -197,7 +197,6 @@
                                                                 <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
                                                             </Trigger>
                                                             <Trigger Property="IsChecked" Value="True">
-                                                                <Setter TargetName="HeaderChrome" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}" />
                                                                 <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
                                                             </Trigger>
                                                         </ControlTemplate.Triggers>
@@ -258,19 +257,88 @@
                                      Text="{Binding TestApp, UpdateSourceTrigger=PropertyChanged}" />
 
                             <TextBlock Grid.Row="5" Margin="0,12,0,0" Style="{StaticResource SecondaryTextStyle}" Text="ZLM Secret" />
-                            <PasswordBox Grid.Row="5" Grid.Column="1" Margin="0,12,0,0"
-                                         behaviors:PasswordBoxBinding.BoundPassword="{Binding ZlmSecret, Mode=TwoWay}" />
+                            <Grid Grid.Row="5" Grid.Column="1" Margin="0,12,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <PasswordBox Grid.Column="0" Margin="0,0,8,0"
+                                             behaviors:PasswordBoxBinding.BoundPassword="{Binding ZlmSecret, Mode=TwoWay}">
+                                    <PasswordBox.Style>
+                                        <Style TargetType="{x:Type PasswordBox}" BasedOn="{StaticResource IndustrialPasswordBoxStyle}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsZlmSecretVisible}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </PasswordBox.Style>
+                                </PasswordBox>
+                                <TextBox Grid.Column="0" Margin="0,0,8,0"
+                                         Text="{Binding ZlmSecret, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                    <TextBox.Style>
+                                        <Style TargetType="{x:Type TextBox}" BasedOn="{StaticResource IndustrialTextBoxStyle}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsZlmSecretVisible}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBox.Style>
+                                </TextBox>
+                                <ToggleButton Grid.Column="1"
+                                              IsChecked="{Binding IsZlmSecretVisible, Mode=TwoWay}"
+                                              AutomationProperties.Name="切换 Secret 显示">
+                                    <ToggleButton.Style>
+                                        <Style TargetType="{x:Type ToggleButton}">
+                                            <Setter Property="Width" Value="56" />
+                                            <Setter Property="Height" Value="36" />
+                                            <Setter Property="Padding" Value="8,0" />
+                                            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+                                            <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+                                            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+                                            <Setter Property="BorderThickness" Value="1" />
+                                            <Setter Property="Cursor" Value="Hand" />
+                                            <Setter Property="Content" Value="显示" />
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                                        <Border x:Name="SecretToggleChrome"
+                                                                Background="{TemplateBinding Background}"
+                                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                                CornerRadius="6">
+                                                            <ContentPresenter HorizontalAlignment="Center"
+                                                                              VerticalAlignment="Center"
+                                                                              ContentSource="Content" />
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="SecretToggleChrome" Property="Background" Value="{StaticResource PrimaryBlueMutedBrush}" />
+                                                                <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+                                                            </Trigger>
+                                                            <Trigger Property="IsChecked" Value="True">
+                                                                <Setter Property="Content" Value="隐藏" />
+                                                                <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </ToggleButton.Style>
+                                </ToggleButton>
+                            </Grid>
 
                             <TextBlock Grid.Row="6" Margin="0,12,0,0" Style="{StaticResource SecondaryTextStyle}" Text="无读者延迟（秒）" />
                             <TextBox Grid.Row="6" Grid.Column="1" Margin="0,12,0,0" Style="{StaticResource IndustrialTextBoxStyle}"
                                      Text="{Binding NoReaderGraceSeconds, UpdateSourceTrigger=PropertyChanged}" />
 
-                            <StackPanel Grid.Row="7" Grid.Column="1" Margin="0,16,0,0" Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="当前版本：" />
-                                <TextBlock Foreground="{StaticResource PrimaryTextBrush}" Text="{Binding Revision}" />
-                                <TextBlock Margin="16,0,0,0" Style="{StaticResource SecondaryTextStyle}" Text="已保存 Secret：" />
-                                <TextBlock Foreground="{StaticResource PrimaryTextBrush}" Text="{Binding HasSecret}" />
-                            </StackPanel>
+                            <TextBlock Grid.Row="7" Grid.Column="1" Margin="0,16,0,0"
+                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                       Text="{Binding SettingsSummaryText}" />
 
                             <DockPanel Grid.Row="8" Grid.Column="1" Margin="0,16,0,0">
                                 <TextBlock Margin="0,4,16,0" Style="{StaticResource SecondaryTextStyle}"

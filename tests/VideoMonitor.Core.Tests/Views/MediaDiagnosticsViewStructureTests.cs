@@ -56,8 +56,7 @@ public sealed class MediaDiagnosticsViewStructureTests
         Assert.Contains("TestApp", xaml, StringComparison.Ordinal);
         Assert.Contains("ZlmSecret", xaml, StringComparison.Ordinal);
         Assert.Contains("NoReaderGraceSeconds", xaml, StringComparison.Ordinal);
-        Assert.Contains("Revision", xaml, StringComparison.Ordinal);
-        Assert.Contains("HasSecret", xaml, StringComparison.Ordinal);
+        Assert.Contains("SettingsSummaryText", xaml, StringComparison.Ordinal);
         Assert.Contains("TestCommand", xaml, StringComparison.Ordinal);
         Assert.Contains("SaveCommand", xaml, StringComparison.Ordinal);
         Assert.Contains("测试连接", xaml, StringComparison.Ordinal);
@@ -72,6 +71,41 @@ public sealed class MediaDiagnosticsViewStructureTests
             "Command=\"\\{Binding RefreshCommand\\}\"\\s+Style=\"\\{StaticResource SecondaryButtonStyle\\}\"",
             xaml);
         Assert.Contains("Style=\"{StaticResource SecondaryButtonStyle}\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MediaViewUsesSafeSecretControlsAndProductizedSummary()
+    {
+        var xaml = ReadProjectFile("src/VideoMonitor.Wpf/Views/Pages/MediaView.xaml");
+
+        Assert.Contains(
+            "BasedOn=\"{StaticResource IndustrialPasswordBoxStyle}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains("IsZlmSecretVisible", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "Text=\"{Binding ZlmSecret, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains("显示", xaml, StringComparison.Ordinal);
+        Assert.Contains("隐藏", xaml, StringComparison.Ordinal);
+        Assert.Contains("SettingsSummaryText", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"{Binding HasSecret}\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MediaViewUsesNeutralAdvancedHeaderWhenExpanded()
+    {
+        var xaml = ReadProjectFile("src/VideoMonitor.Wpf/Views/Pages/MediaView.xaml");
+
+        Assert.DoesNotContain(
+            "<Setter TargetName=\"HeaderChrome\" Property=\"BorderBrush\" Value=\"{StaticResource PrimaryBlueBrush}\" />",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<Setter Property=\"Background\" Value=\"{StaticResource CardBackgroundBrush}\" />",
+            xaml,
+            StringComparison.Ordinal);
     }
 
     [Fact]

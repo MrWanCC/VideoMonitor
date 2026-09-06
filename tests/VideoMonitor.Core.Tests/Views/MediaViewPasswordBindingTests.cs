@@ -2,6 +2,7 @@ using System.Threading;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -104,6 +105,68 @@ public sealed class MediaViewPasswordBindingTests
             Assert.Empty(passwordBox.Password);
 
             host.Close();
+        });
+    }
+
+    [Fact]
+    public async Task SecretVisibilityToggleSwitchesBetweenMaskedAndPlainBoundInputs()
+    {
+        await RunOnStaAsync(async () =>
+        {
+            var viewModel = new MediaSettingsViewModel(
+                new RecordingMediaSettingsApiClient(),
+                new Uri("https://server.example/"));
+            var view = new MediaView
+            {
+                DataContext = viewModel,
+            };
+            var host = new Window
+            {
+                Width = 800,
+                Height = 600,
+                Opacity = 0,
+                ShowInTaskbar = false,
+                WindowStyle = WindowStyle.None,
+                Content = view,
+            };
+
+            host.Show();
+            view.UpdateLayout();
+            viewModel.ZlmSecret = "onsite-secret";
+            view.UpdateLayout();
+
+            var passwordBox = FindVisualChild<PasswordBox>(view);
+            var secretTextBox = FindVisualChildren<TextBox>(view)
+                .Single(control => control.GetBindingExpression(TextBox.TextProperty)
+                    ?.ParentBinding.Path.Path == nameof(MediaSettingsViewModel.ZlmSecret));
+            var visibilityToggle = FindVisualChildren<ToggleButton>(view)
+                .Single(control => control.GetBindingExpression(ToggleButton.IsCheckedProperty)
+                    ?.ParentBinding.Path.Path == nameof(MediaSettingsViewModel.IsZlmSecretVisible));
+
+            Assert.NotNull(passwordBox);
+            Assert.Equal(Visibility.Visible, passwordBox!.Visibility);
+            Assert.Equal(Visibility.Collapsed, secretTextBox.Visibility);
+            Assert.Equal("onsite-secret", passwordBox.Password);
+
+            visibilityToggle.IsChecked = true;
+            view.UpdateLayout();
+
+            Assert.Equal(Visibility.Collapsed, passwordBox.Visibility);
+            Assert.Equal(Visibility.Visible, secretTextBox.Visibility);
+            Assert.Equal("onsite-secret", secretTextBox.Text);
+
+            secretTextBox.Text = "updated-secret";
+            Assert.Equal("updated-secret", viewModel.ZlmSecret);
+
+            visibilityToggle.IsChecked = false;
+            view.UpdateLayout();
+
+            Assert.Equal(Visibility.Visible, passwordBox.Visibility);
+            Assert.Equal(Visibility.Collapsed, secretTextBox.Visibility);
+            Assert.Equal("updated-secret", passwordBox.Password);
+
+            host.Close();
+            await Task.CompletedTask;
         });
     }
 
@@ -262,6 +325,24 @@ public sealed class MediaViewPasswordBindingTests
         }
 
         return null;
+    }
+
+    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is T match)
+            {
+                yield return match;
+            }
+
+            foreach (var descendant in FindVisualChildren<T>(child))
+            {
+                yield return descendant;
+            }
+        }
     }
 
     private static Application CreateTestApplication()

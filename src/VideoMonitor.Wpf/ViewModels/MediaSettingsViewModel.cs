@@ -18,6 +18,7 @@ public sealed class MediaSettingsViewModel : ObservableObject
     private int noReaderGraceSeconds = 30;
     private long revision = 1;
     private bool hasSecret;
+    private bool isZlmSecretVisible;
     private bool isBusy;
     private string statusText = "尚未加载流媒体设置";
 
@@ -84,13 +85,31 @@ public sealed class MediaSettingsViewModel : ObservableObject
     public long Revision
     {
         get => revision;
-        private set => SetProperty(ref revision, value);
+        private set
+        {
+            if (SetProperty(ref revision, value))
+            {
+                OnPropertyChanged(nameof(SettingsSummaryText));
+            }
+        }
     }
 
     public bool HasSecret
     {
         get => hasSecret;
-        private set => SetProperty(ref hasSecret, value);
+        private set
+        {
+            if (SetProperty(ref hasSecret, value))
+            {
+                OnPropertyChanged(nameof(SettingsSummaryText));
+            }
+        }
+    }
+
+    public bool IsZlmSecretVisible
+    {
+        get => isZlmSecretVisible;
+        set => SetProperty(ref isZlmSecretVisible, value);
     }
 
     public bool IsBusy
@@ -104,6 +123,9 @@ public sealed class MediaSettingsViewModel : ObservableObject
         get => statusText;
         private set => SetProperty(ref statusText, value);
     }
+
+    public string SettingsSummaryText =>
+        $"配置版本 {Revision} · Secret {(HasSecret ? "已保存" : "未保存")}";
 
     public IAsyncRelayCommand TestCommand { get; }
 
@@ -202,7 +224,11 @@ public sealed class MediaSettingsViewModel : ObservableObject
         }
     }
 
-    public void ClearTransientSecret() => ZlmSecret = string.Empty;
+    public void ClearTransientSecret()
+    {
+        ZlmSecret = string.Empty;
+        IsZlmSecretVisible = false;
+    }
 
     private async Task SaveAsync()
     {
@@ -251,6 +277,7 @@ public sealed class MediaSettingsViewModel : ObservableObject
         finally
         {
             ZlmSecret = string.Empty;
+            IsZlmSecretVisible = false;
             IsBusy = false;
         }
     }
@@ -289,6 +316,6 @@ public sealed class MediaSettingsViewModel : ObservableObject
         NoReaderGraceSeconds = dto.NoReaderGraceSeconds;
         Revision = dto.Revision;
         HasSecret = dto.HasSecret;
-        ZlmSecret = string.Empty;
+        ClearTransientSecret();
     }
 }

@@ -39,6 +39,33 @@ public sealed class MediaSettingsViewModelTests
         Assert.DoesNotContain("Candidate-Only-Secret", viewModel.StatusText, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task SettingsSummaryTextUsesSafeChineseSecretState()
+    {
+        var api = new FakeMediaSettingsApiClient
+        {
+            Settings = new MediaSettingsDto(
+                "http://127.0.0.1:8080",
+                "rtsp://media.example.test:554",
+                "__defaultVhost__",
+                "videomonitor",
+                "videomonitor-test",
+                true,
+                30,
+                7)
+        };
+        var viewModel = new MediaSettingsViewModel(
+            api,
+            new Uri("https://server.example/"));
+
+        Assert.Equal("配置版本 1 · Secret 未保存", viewModel.SettingsSummaryText);
+
+        await viewModel.LoadAsync();
+
+        Assert.Equal("配置版本 7 · Secret 已保存", viewModel.SettingsSummaryText);
+        Assert.False(viewModel.IsZlmSecretVisible);
+    }
+
     [Theory]
     [InlineData("ZLM_SECRET_REQUIRED", "请输入 ZLM Secret。")]
     [InlineData("AuthFailed", "ZLM Secret 不正确。")]
