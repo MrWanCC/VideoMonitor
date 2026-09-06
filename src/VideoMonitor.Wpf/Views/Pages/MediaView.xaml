@@ -28,10 +28,13 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <DockPanel Grid.Row="0">
                             <Button DockPanel.Dock="Right" Command="{Binding RefreshCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    MinWidth="88" Height="32"
                                     Content="刷新诊断" />
                             <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="运行概览" />
                         </DockPanel>
@@ -42,7 +45,7 @@
                                 <TextBlock Margin="0,4,0,0" Text="{Binding ServerHealthText}" />
                             </StackPanel>
                             <StackPanel>
-                                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="活动流" />
+                                <TextBlock Style="{StaticResource SecondaryTextStyle}" Text="当前活动流" />
                                 <TextBlock Margin="0,4,0,0" Text="{Binding ActiveStreamCount}" />
                             </StackPanel>
                             <StackPanel>
@@ -57,6 +60,8 @@
 
                         <TextBlock Grid.Row="2" Margin="0,14,0,0" Style="{StaticResource SecondaryTextStyle}"
                                    Text="{Binding StatusText}" />
+                        <TextBlock Grid.Row="3" Margin="0,6,0,0" Style="{StaticResource SecondaryTextStyle}"
+                                   Text="正式布局：4 主 + 3 副" />
                     </Grid>
                 </Border>
 
@@ -70,7 +75,7 @@
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
-                        <TextBlock Grid.Row="0" Style="{StaticResource SectionTitleTextStyle}" Text="活动媒体流" />
+                        <TextBlock Grid.Row="0" Style="{StaticResource SectionTitleTextStyle}" Text="当前活动媒体流" />
                         <Grid Grid.Row="1" Margin="0,12,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="2*" />
@@ -134,7 +139,10 @@
                                                         Command="{Binding DataContext.RetryCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                         CommandParameter="{Binding}" Content="重试">
                                                     <Button.Style>
-                                                        <Style TargetType="Button">
+                                                        <Style TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
+                                                            <Setter Property="MinWidth" Value="56" />
+                                                            <Setter Property="Height" Value="28" />
+                                                            <Setter Property="Padding" Value="10,0" />
                                                             <Setter Property="Visibility" Value="Collapsed" />
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding CanRetry}" Value="True">
@@ -164,7 +172,41 @@
                                 <ToggleButton Grid.Row="0"
                                               HorizontalContentAlignment="Left"
                                               IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
-                                              Content="{TemplateBinding Header}" />
+                                              Content="{TemplateBinding Header}">
+                                    <ToggleButton.Style>
+                                        <Style TargetType="{x:Type ToggleButton}">
+                                            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+                                            <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+                                            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+                                            <Setter Property="BorderThickness" Value="1" />
+                                            <Setter Property="Padding" Value="12,8" />
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                                        <Border x:Name="HeaderChrome"
+                                                                Background="{TemplateBinding Background}"
+                                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                                Padding="{TemplateBinding Padding}">
+                                                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                                              VerticalAlignment="Center" />
+                                                        </Border>
+                                                        <ControlTemplate.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter TargetName="HeaderChrome" Property="Background" Value="{StaticResource PrimaryBlueMutedBrush}" />
+                                                                <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+                                                            </Trigger>
+                                                            <Trigger Property="IsChecked" Value="True">
+                                                                <Setter TargetName="HeaderChrome" Property="BorderBrush" Value="{StaticResource PrimaryBlueBrush}" />
+                                                                <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+                                                            </Trigger>
+                                                        </ControlTemplate.Triggers>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </ToggleButton.Style>
+                                </ToggleButton>
                                 <ContentPresenter x:Name="ExpandSite" Grid.Row="1"
                                                   ContentSource="Content"
                                                   Visibility="Visible" />
@@ -234,8 +276,8 @@
                                 <TextBlock Margin="0,4,16,0" Style="{StaticResource SecondaryTextStyle}"
                                            Text="{Binding StatusText}" />
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                    <Button MinWidth="88" Command="{Binding TestCommand}" Content="测试连接" />
-                                    <Button MinWidth="88" Margin="10,0,0,0" Command="{Binding SaveCommand}" Content="保存配置" />
+                                    <Button MinWidth="88" Command="{Binding TestCommand}" Style="{StaticResource SecondaryButtonStyle}" Content="测试连接" />
+                                    <Button MinWidth="88" Margin="10,0,0,0" Command="{Binding SaveCommand}" Style="{StaticResource PrimaryButtonStyle}" Content="保存配置" />
                                 </StackPanel>
                             </DockPanel>
                         </Grid>

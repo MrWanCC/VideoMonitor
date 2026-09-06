@@ -9,10 +9,16 @@ public sealed class MediaDiagnosticsViewStructureTests
 
         Assert.Contains("Text=\"流媒体管理\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"运行概览\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"活动媒体流\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"当前活动媒体流\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"高级设置\"", xaml, StringComparison.Ordinal);
         Assert.Contains("<Expander", xaml, StringComparison.Ordinal);
         Assert.Contains("IsExpanded=\"False\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ControlTemplate TargetType=\"{x:Type ToggleButton}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Property=\"Foreground\" Value=\"{StaticResource SecondaryTextBrush}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Property=\"Background\" Value=\"{StaticResource CardBackgroundBrush}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Property=\"BorderBrush\" Value=\"{StaticResource BorderBrush}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Property=\"BorderThickness\" Value=\"1\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("PrimaryBlueMutedBrush", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -35,6 +41,7 @@ public sealed class MediaDiagnosticsViewStructureTests
         Assert.Contains("状态数据已过期", xaml, StringComparison.Ordinal);
         Assert.Contains("Binding=\"{Binding CanRetry}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Property=\"Visibility\" Value=\"Collapsed\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("BasedOn=\"{StaticResource SecondaryButtonStyle}\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -55,6 +62,16 @@ public sealed class MediaDiagnosticsViewStructureTests
         Assert.Contains("SaveCommand", xaml, StringComparison.Ordinal);
         Assert.Contains("测试连接", xaml, StringComparison.Ordinal);
         Assert.Contains("保存配置", xaml, StringComparison.Ordinal);
+        Assert.Matches(
+            "Command=\"\\{Binding TestCommand\\}\"\\s+Style=\"\\{StaticResource SecondaryButtonStyle\\}\"",
+            xaml);
+        Assert.Matches(
+            "Command=\"\\{Binding SaveCommand\\}\"\\s+Style=\"\\{StaticResource PrimaryButtonStyle\\}\"",
+            xaml);
+        Assert.Matches(
+            "Command=\"\\{Binding RefreshCommand\\}\"\\s+Style=\"\\{StaticResource SecondaryButtonStyle\\}\"",
+            xaml);
+        Assert.Contains("Style=\"{StaticResource SecondaryButtonStyle}\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
