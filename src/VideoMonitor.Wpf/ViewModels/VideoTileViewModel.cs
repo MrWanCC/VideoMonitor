@@ -170,6 +170,8 @@ public sealed class VideoTileViewModel : ObservableObject
         Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
     }
 
+    public void UpdateRuntimeStatus(CameraStatus status) => Status = status;
+
     public void ResetUnconfigured()
     {
         CameraName = "未配置";

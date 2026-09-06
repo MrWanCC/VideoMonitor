@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VideoMonitor.Core.Catalog;
+using VideoMonitor.Core.Media;
 using VideoMonitor.Core.Models;
 using VideoMonitor.Core.Services;
 using VideoMonitor.Wpf.Catalog;
@@ -22,6 +23,8 @@ public sealed class MonitorViewModel : ObservableObject
     private VideoTileViewModel selectedVideoSlot = null!;
     private IReadOnlyList<MonitorGroup> groups = [];
     private readonly Func<VideoTileViewModel, FormalPlaybackCoordinator>? formalCoordinatorFactory;
+    private readonly MediaRuntimeStatusStore? runtimeStatusStore;
+    private readonly MediaRuntimeStatusCoordinator? runtimeStatusCoordinator;
     private readonly Dictionary<VideoTileViewModel, FormalPlaybackCoordinator> formalCoordinators = [];
     private readonly SemaphoreSlim playbackLifecycleGate = new(1, 1);
     private bool playbackActive;
@@ -29,13 +32,17 @@ public sealed class MonitorViewModel : ObservableObject
     public MonitorViewModel(
         MonitorSwitchService switchService,
         IDeviceCatalogReadModel catalog,
-        Func<VideoTileViewModel, FormalPlaybackCoordinator>? formalCoordinatorFactory = null)
+        Func<VideoTileViewModel, FormalPlaybackCoordinator>? formalCoordinatorFactory = null,
+        MediaRuntimeStatusStore? runtimeStatusStore = null,
+        MediaRuntimeStatusCoordinator? runtimeStatusCoordinator = null)
     {
         this.switchService = switchService
             ?? throw new ArgumentNullException(nameof(switchService));
         this.catalog = catalog
             ?? throw new ArgumentNullException(nameof(catalog));
         this.formalCoordinatorFactory = formalCoordinatorFactory;
+        this.runtimeStatusStore = runtimeStatusStore;
+        this.runtimeStatusCoordinator = runtimeStatusCoordinator;
         projectGroups = () => MonitorCatalogProjection.CreateGroups(this.catalog);
         var projectedGroups = projectGroups();
         this.switchService.ReplaceGroups(projectedGroups);
@@ -53,6 +60,8 @@ public sealed class MonitorViewModel : ObservableObject
         ArgumentNullException.ThrowIfNull(groups);
         ArgumentNullException.ThrowIfNull(deviceCatalog);
         formalCoordinatorFactory = null;
+        runtimeStatusStore = null;
+        runtimeStatusCoordinator = null;
         catalog = new LegacyDeviceCatalogReadModel(deviceCatalog);
         projectGroups = () => MonitorCatalogProjection.CreateGroups(deviceCatalog);
         this.switchService.ReplaceGroups(groups);
@@ -73,6 +82,10 @@ public sealed class MonitorViewModel : ObservableObject
 
         switchService.LayoutChanged += OnLayoutChanged;
         catalog.Changed += OnCatalogChanged;
+        if (runtimeStatusStore is not null)
+        {
+            runtimeStatusStore.Changed += OnRuntimeStatusChanged;
+        }
         Render(switchService.Current);
         var initialSelection = GetInitialSelection();
         RestoreSelectedTreeItem(initialSelection.Id, initialSelection.Type);
@@ -101,6 +114,10 @@ public sealed class MonitorViewModel : ObservableObject
         await DeactivatePlaybackAsync().ConfigureAwait(false);
         switchService.LayoutChanged -= OnLayoutChanged;
         catalog.Changed -= OnCatalogChanged;
+        if (runtimeStatusStore is not null)
+        {
+            runtimeStatusStore.Changed -= OnRuntimeStatusChanged;
+        }
 
         try
         {
@@ -129,6 +146,10 @@ public sealed class MonitorViewModel : ObservableObject
 
             playbackActive = true;
             Render(switchService.Current);
+            if (runtimeStatusCoordinator is not null)
+            {
+                await runtimeStatusCoordinator.StartAsync();
+            }
         }
         finally
         {
@@ -142,6 +163,11 @@ public sealed class MonitorViewModel : ObservableObject
         try
         {
             playbackActive = false;
+            if (runtimeStatusCoordinator is not null)
+            {
+                await runtimeStatusCoordinator.StopAsync();
+            }
+
             await Task.WhenAll(
                     formalCoordinators.Values.Select(coordinator => coordinator.StopAsync()));
             foreach (var tile in MainTiles)
@@ -272,6 +298,9 @@ public sealed class MonitorViewModel : ObservableObject
 
     private void OnLayoutChanged(object? sender, MonitorLayoutSnapshot snapshot) => Render(snapshot);
 
+    private void OnRuntimeStatusChanged(object? sender, EventArgs e) =>
+        ApplyRuntimeStatuses();
+
     private void OnCatalogChanged(object? sender, EventArgs e)
     {
         var expandedRoots = TreeSections
@@ -366,6 +395,8 @@ public sealed class MonitorViewModel : ObservableObject
             }
         }
 
+        ApplyRuntimeStatuses();
+
         CurrentChuteName = GetSelectedGroupName(
             switchService.SelectedChuteGroupId,
             MonitorGroupType.Chute);
@@ -438,5 +469,98 @@ public sealed class MonitorViewModel : ObservableObject
         {
             await coordinator.StopAsync().ConfigureAwait(false);
         }
+    }
+
+    private void ApplyRuntimeStatuses()
+    {
+        if (runtimeStatusStore is null)
+        {
+            return;
+        }
+
+        var snapshot = runtimeStatusStore.Snapshot;
+        foreach (var tile in MainTiles)
+        {
+            var status = tile.CurrentDeviceId is { } deviceId
+                && tile.CurrentChannelId is { } channelId
+                && tile.CurrentStreamType is { } streamType
+                ? ProjectStatus(
+                    snapshot,
+                    new MediaStreamKey(deviceId, channelId, streamType))
+                : CameraStatus.Unknown;
+            tile.UpdateRuntimeStatus(status);
+        }
+
+        foreach (var section in TreeSections)
+        {
+            foreach (var child in section.Children)
+            {
+                var childStatuses = child.Group?.Cameras
+                    .Select(camera => ProjectCatalogCameraStatus(snapshot, camera))
+                    ?? [];
+                child.UpdateStatus(AggregateStatuses(childStatuses));
+            }
+
+            section.UpdateStatus(AggregateStatuses(
+                section.Children.Select(child => child.Status)));
+        }
+    }
+
+    private CameraStatus ProjectCatalogCameraStatus(
+        MediaRuntimeSnapshot snapshot,
+        CameraInfo camera)
+    {
+        var channel = catalog.GetDevice(camera.DeviceId)?.Channels
+            .SingleOrDefault(candidate => candidate.Id == camera.ChannelId);
+        if (channel is null)
+        {
+            return CameraStatus.Unknown;
+        }
+
+        return ProjectStatus(
+            snapshot,
+            new MediaStreamKey(camera.DeviceId, camera.ChannelId, channel.StreamType));
+    }
+
+    private static CameraStatus ProjectStatus(
+        MediaRuntimeSnapshot snapshot,
+        MediaStreamKey key)
+    {
+        var runtime = snapshot.Streams.FirstOrDefault(stream => stream.Key == key);
+        return CameraRuntimeStatusProjection.Project(
+            snapshot.ServerHealth,
+            key,
+            runtime);
+    }
+
+    private static CameraStatus AggregateStatuses(
+        IEnumerable<CameraStatus> statuses)
+    {
+        var values = statuses.ToArray();
+        if (values.Length == 0)
+        {
+            return CameraStatus.Unknown;
+        }
+
+        if (values.All(status => status == CameraStatus.Online))
+        {
+            return CameraStatus.Online;
+        }
+
+        if (values.All(status => status == CameraStatus.Offline))
+        {
+            return CameraStatus.Offline;
+        }
+
+        if (values.Any(status => status == CameraStatus.Warning)
+            || (values.Contains(CameraStatus.Online)
+                && values.Contains(CameraStatus.Offline))
+            || (values.Contains(CameraStatus.Offline)
+                && values.Contains(CameraStatus.Unknown)))
+        {
+            return CameraStatus.Warning;
+        }
+
+        return CameraStatus.Unknown;
     }
 }

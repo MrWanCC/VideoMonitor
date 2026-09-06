@@ -86,6 +86,24 @@ public sealed class ApplicationCatalogCompositionTests
     }
 
     [Fact]
+    public async Task CentralCompositionProvidesRuntimeStatusFeed()
+    {
+        await using var composition = await CreateAsync(false);
+
+        Assert.NotNull(composition.MediaRuntimeStatusStore);
+        Assert.NotNull(composition.MediaRuntimeStatusCoordinator);
+    }
+
+    [Fact]
+    public async Task LocalCompositionDoesNotProvideRuntimeStatusFeed()
+    {
+        await using var composition = await CreateAsync(true);
+
+        Assert.Null(composition.MediaRuntimeStatusStore);
+        Assert.Null(composition.MediaRuntimeStatusCoordinator);
+    }
+
+    [Fact]
     public async Task FormalMode_DoesNotCreatePersistenceCoordinator()
     {
         await using var composition = await CreateAsync(false);

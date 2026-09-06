@@ -67,7 +67,9 @@ public partial class App
             : new MonitorViewModel(
                 switchService,
                 composition.ReadModel,
-                composition.CreateFormalPlaybackCoordinator);
+                composition.CreateFormalPlaybackCoordinator,
+                composition.MediaRuntimeStatusStore,
+                composition.MediaRuntimeStatusCoordinator);
         var deviceManagementViewModel = composition.LocalCatalog is { } localCatalogForManagement
             ? new DeviceManagementViewModel(localCatalogForManagement)
             : new DeviceManagementViewModel(

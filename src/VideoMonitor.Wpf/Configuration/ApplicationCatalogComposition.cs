@@ -31,6 +31,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         IDeviceCatalogCommandService commandService,
         IMediaSettingsApiClient? mediaSettingsApiClient,
         IMediaDiagnosticsApiClient? mediaDiagnosticsApiClient,
+        MediaRuntimeStatusStore? runtimeStatusStore,
+        MediaRuntimeStatusCoordinator? runtimeStatusCoordinator,
         IClientSettingsStore? clientSettings,
         ServerConnectionCoordinator? coordinator,
         ServerStatusViewModel? serverStatus,
@@ -53,6 +55,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
         CommandService = commandService;
         MediaSettingsApiClient = mediaSettingsApiClient;
         MediaDiagnosticsApiClient = mediaDiagnosticsApiClient;
+        MediaRuntimeStatusStore = runtimeStatusStore;
+        MediaRuntimeStatusCoordinator = runtimeStatusCoordinator;
         ClientSettingsStore = clientSettings;
         Coordinator = coordinator;
         ServerStatus = serverStatus;
@@ -116,6 +120,10 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
     public IMediaSettingsApiClient? MediaSettingsApiClient { get; }
 
     public IMediaDiagnosticsApiClient? MediaDiagnosticsApiClient { get; }
+
+    public MediaRuntimeStatusStore? MediaRuntimeStatusStore { get; }
+
+    public MediaRuntimeStatusCoordinator? MediaRuntimeStatusCoordinator { get; }
 
     public IClientSettingsStore? ClientSettingsStore { get; }
 
@@ -263,6 +271,12 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             cache,
             dispatcher,
             dependencies.ConnectionClockFactory());
+        var runtimeStatusStore = new MediaRuntimeStatusStore();
+        var runtimeStatusCoordinator = new MediaRuntimeStatusCoordinator(
+            mediaDiagnosticsApiClient,
+            runtimeStatusStore,
+            () => coordinator.Status.BaseUri,
+            dispatcher);
         var commandService = new RemoteDeviceCatalogCommandService(
             cache,
             apiClient,
@@ -281,6 +295,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             commandService,
             mediaSettingsApiClient,
             mediaDiagnosticsApiClient,
+            runtimeStatusStore,
+            runtimeStatusCoordinator,
             settingsStore,
             coordinator,
             serverStatus,
@@ -334,6 +350,8 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             false,
             readModel,
             commandService,
+            null,
+            null,
             null,
             null,
             null,
@@ -400,6 +418,11 @@ public sealed class ApplicationCatalogComposition : IAsyncDisposable
             if (TestPreview is not null)
             {
                 await TestPreview.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (MediaRuntimeStatusCoordinator is not null)
+            {
+                await MediaRuntimeStatusCoordinator.DisposeAsync().ConfigureAwait(false);
             }
 
             if (Coordinator is not null)

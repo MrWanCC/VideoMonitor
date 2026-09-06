@@ -8,6 +8,7 @@ public sealed class MonitorTreeItemViewModel : ObservableObject
 {
     private bool isSelected;
     private bool isExpanded;
+    private CameraStatus status;
     public MonitorTreeItemViewModel(
         string name,
         MonitorGroup? group = null,
@@ -22,7 +23,7 @@ public sealed class MonitorTreeItemViewModel : ObservableObject
         ItemId = itemId ?? group?.GroupId;
         Children = new ObservableCollection<MonitorTreeItemViewModel>(children ?? []);
         CountText = countText;
-        Status = status;
+        this.status = status;
         this.isExpanded = isExpanded;
     }
 
@@ -36,7 +37,9 @@ public sealed class MonitorTreeItemViewModel : ObservableObject
 
     public string CountText { get; }
 
-    public CameraStatus Status { get; }
+    public CameraStatus Status => status;
+
+    public void UpdateStatus(CameraStatus status) => SetProperty(ref this.status, status);
 
     public bool HasChildren => Children.Count > 0;
 
