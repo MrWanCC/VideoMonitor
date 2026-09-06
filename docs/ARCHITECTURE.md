@@ -4,7 +4,7 @@
 
 ## Current direction
 
-VideoMonitor 正从单机 WPF 直接控制 ZLMediaKit 的验证架构，演进为中心化多客户端架构。
+VideoMonitor V1 使用中心化多客户端架构：Server 是 Catalog 与媒体控制边界，WPF 是桌面客户端，ZLMediaKit 独立承载媒体代理。
 
 ```text
 Camera -> ZLMediaKit -> WPF                 视频数据链
@@ -55,7 +55,7 @@ Server:
   Camera Credentials
   Groups / Devices / Channels (ChannelNo + StreamType)
   Configuration Revision
-  Backup / Recovery
+  Same-host backup / restore
 
 WPF:
   ServerAddress
@@ -67,7 +67,7 @@ WPF 不保存正式 Camera Password、ZLM Secret 或自己的可编辑权威设�
 
 V1 keeps `StreamType` on `CameraChannel`; `StreamId` and `CameraStatus` are runtime-only.
 
-从 Stage 5B 起，正式 WPF 设备目录读写必须通过 Server。Server 不可用时不能自动退回本地 JSON 继续编辑。现有 JSON Catalog 只允许作为开发期单摄像头验证兼容路径，后续随 ServerPlaybackSourceResolver 完成而退出。
+从 Stage 5B 起，正式 WPF 设备目录读写必须通过 Server。Server 不可用时不能自动退回本地 JSON 继续编辑。现有 JSON Catalog 只允许作为开发期单摄像头验证兼容路径，不是正式生产数据源。
 
 Server 在线期间，WPF 通过带少量客户端 jitter 的 bounded 周期 `GET /api/v1/catalog` 低频刷新远端目录；刷新不可重叠，失败保留现有缓存并进入 bounded reconnect/backoff，不触发 JSON fallback。
 
@@ -170,7 +170,8 @@ Persistent data = ProgramData
 - Camera Password/ZLM Secret 不向普通 WPF 返回；
 - SQLite 中敏感字段使用应用层加密；
 - Windows Master Key 使用 DPAPI LocalMachine 保护；
-- 另有独立 Recovery 机制支持换机灾难恢复；
+- 支持 Server 数据目录的同机备份/恢复；
+- 当前不宣称 portable cross-machine disaster recovery 已完成；replacement-host recovery deferred；
 - 日志禁止输出完整带密码 RTSP URL、Camera Password、ZLM Secret；
 - ZLM 管理 API 优先 loopback/private，仅 Server 使用；
 - 未来若出现真实身份/权限需求，可以在现有 API 前增加认证授权，但不能改变 Server 作为唯一 Catalog 权威数据源的边界。

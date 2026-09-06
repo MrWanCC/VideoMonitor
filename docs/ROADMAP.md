@@ -1,6 +1,6 @@
 # VideoMonitor Roadmap
 
-**Updated:** 2026-08-29
+**Updated:** 2026-09-06
 
 ## Current state
 
@@ -43,9 +43,9 @@ backup foundation
 health/readiness foundation
 ```
 
-### Stage 5B — Central Catalog API and WPF data source
+### Stage 5B — Central Catalog API and WPF data source — DONE / superseded details as appropriate
 
-目标：
+已完成：
 
 ```text
 SQLite V2 configuration revisions
@@ -61,7 +61,7 @@ bounded periodic GET /api/v1/catalog refresh while Server is online
 Server unavailable/reconnect handling
 ```
 
-关键原则：
+保留的关键原则：
 
 ```text
 Server SQLite = single source of truth
@@ -74,9 +74,9 @@ no password returned by catalog reads
 
 旧 `JsonDeviceCatalogStore` 只允许暂时服务于开发期单摄像头验证兼容路径，不做 Legacy Migration API，也不做多客户端旧配置合并。
 
-### Stage 5C — ZLM Server integration and StreamManager
+### Stage 5C — ZLM Server integration and StreamManager — DONE
 
-目标：
+已完成：
 
 ```text
 ZlmClient moved behind Server/Infrastructure
@@ -89,9 +89,9 @@ ColdStartLimiter
 structured stream errors
 ```
 
-### Stage 5D — ZLM Hooks and reconciliation
+### Stage 5D — ZLM Hooks and reconciliation — DONE
 
-目标：
+已完成：
 
 ```text
 on_stream_changed
@@ -102,9 +102,11 @@ ZLM restart recovery
 stale proxy/media mismatch recovery
 ```
 
-### Stage 5E — WPF ServerPlaybackSourceResolver
+V1 accepts startup reconciliation as the equivalent recovery path. A dedicated `on_server_started` endpoint is not a V1 blocker.
 
-目标：
+### Stage 5E — WPF ServerPlaybackSourceResolver — DONE equivalent
+
+已完成：
 
 ```text
 WPF no longer owns production ZLM API calls
@@ -116,9 +118,9 @@ remove production dependency on local Camera credentials
 
 `LocalZlmPlaybackSourceProvider` 只保留开发/过渡路径，并在该路径失去必要性后删除。
 
-### Stage 5F — WPF 4+3 PlaybackManager
+### Stage 5F — WPF 4+3 PlaybackManager — DONE
 
-目标：
+已完成：
 
 ```text
 1 app-lifetime LibVLC
@@ -131,9 +133,11 @@ client-side bounded reconnect
 clean shutdown
 ```
 
-### Stage 5G — System status and client resilience
+V1 field topology is physical5 / formal7 / main4 / secondary3 / duplicated physical sources2.
 
-目标：
+### Stage 5G — System status and client resilience — DONE for V1 scope
+
+已完成：
 
 ```text
 System Status page
@@ -144,50 +148,52 @@ client diagnostics/version metadata as needed
 
 本阶段不重新引入可编辑本地 Catalog。
 
-### Stage 5H — Deployment packaging
+### Stage 5H — Deployment packaging — PARTIAL / V1 sufficient subset only
 
-目标：
+V1 已覆盖：
 
 ```text
 Windows Service hosting
 Server/ZLM separate lifecycle
-Program Files vs ProgramData
-HTTPS or equivalent authenticated encrypted intranet transport
-production config
-secret handling
-logging/retention
-backup destination
-upgrade flow
+ProgramData persistence
+SQLite foundation
+secret protection
+operational documentation
 ```
+
+V1 operational documentation and the Windows-first ProgramData layout are delivered. The following remain deferred:
+
+- installer;
+- automated HTTPS/certificate process;
+- automated ZLM lifecycle management;
+- full upgrade framework;
+- log retention automation.
 
 第一版部署不假设固定只有约 10 台 WPF。控制面、Catalog API 和共享 Stream 模型按约 100 台或更多受控内网客户端设计。
 
-### Stage 5I — Production validation
+### Stage 5I — REDUCED FIELD VALIDATION PENDING
 
-必须验证：
+V1 最终现场要求：
 
 ```text
-100-client control-plane/catalog load simulation
-multiple clients editing same aggregate -> conflict, not overwrite
-multiple clients reading same catalog
-many clients same stream -> one upstream
-representative clients same 7 streams
-unique-stream cold-start pressure
-rapid A->B->C
-100 group switches
-camera disconnect/reconnect
-client kill/network loss
-ZLM restart
-Server restart
-hook loss
-proxy exists/media missing
-backup + replacement-host recovery
-7 x real H.264/H.265 per representative WPF
-8h / 24h soak
-credential leak scan
+physical5 / formal7 / main4 / secondary3 / duplicated physical sources2
+real playback
+runtime status
+ZLM restart/recovery
+camera/network fault
+retry/recovery
+known latency/stutter accepted
 ```
 
-不要求第一版准备 100 台物理 WPF 做每项测试；控制面可使用自动化并发客户端模拟，实际视频解码使用代表性物理客户端和真实 Camera/ZLM 压测。
+以下目标保留为 Deferred / Future hardening，不是 V1 seal blocker：
+
+- 100-client full control-plane simulation;
+- full 100 group switches soak;
+- 8h / 24h soak;
+- full replacement-host recovery;
+- enterprise upgrade flow.
+
+V1 不要求准备 100 台物理 WPF 做每项测试。后续硬化可以使用自动化并发客户端模拟，实际视频解码使用代表性物理客户端和真实 Camera/ZLM 压测。
 
 ColdStartLimit、TTL、Retry Delay 等最终生产参数必须通过测试确定，不能提前拍脑袋写死。
 
