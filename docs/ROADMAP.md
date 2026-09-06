@@ -93,16 +93,12 @@ structured stream errors
 
 已完成：
 
-```text
-on_stream_changed
-on_stream_none_reader
-on_server_started
-StreamReconciler
-ZLM restart recovery
-stale proxy/media mismatch recovery
-```
-
-V1 accepts startup reconciliation as the equivalent recovery path. A dedicated `on_server_started` endpoint is not a V1 blocker.
+- `on_stream_changed` DONE；
+- `on_stream_none_reader` DONE；
+- startup reconciliation DONE equivalent；
+- ZLM restart recovery DONE；
+- stale proxy/media mismatch recovery DONE；
+- dedicated `on_server_started` endpoint not implemented and not a V1 blocker。
 
 ### Stage 5E — WPF ServerPlaybackSourceResolver — DONE equivalent
 
@@ -110,7 +106,7 @@ V1 accepts startup reconciliation as the equivalent recovery path. A dedicated `
 
 ```text
 WPF no longer owns production ZLM API calls
-POST /api/v1/playback/resolve
+formal ensure via `POST /api/v1/playback/streams/ensure`
 safe PlaybackDescriptor
 structured error mapping
 remove production dependency on local Camera credentials
@@ -140,10 +136,12 @@ V1 field topology is physical5 / formal7 / main4 / secondary3 / duplicated physi
 已完成：
 
 ```text
-System Status page
-Server/ZLM/Stream/Backup health
-optional non-sensitive read-only disk cache if real offline-start need is confirmed
-client diagnostics/version metadata as needed
+Media Diagnostics surface
+Server/ZLM/Stream safe runtime diagnostics
+real camera runtime-status projection
+Server reconnect/resilience
+Faulted stream retry
+stale/unavailable conservative status handling
 ```
 
 本阶段不重新引入可编辑本地 Catalog。

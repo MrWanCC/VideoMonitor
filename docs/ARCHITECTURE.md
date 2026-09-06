@@ -21,7 +21,7 @@ ZLM -> VideoMonitor.Server Hooks            媒体状态通知
 - WPF Client 数量不按固定 10 台设计，控制面和共享流模型应支持约 100 台或更多受控内网客户端；
 - 每台 Client 最多 4 主屏 + 3 副屏 = 7 路本地播放；
 - Stream 按需启动，而不是默认永久拉 100 路；
-- 同一个 `DeviceId + ChannelNo + StreamType` 在中心只允许一个共享上游启动流程；
+- 同一个 `DeviceId + ChannelId + StreamType` 在中心只允许一个共享上游启动流程；
 - 第一版接受单 VideoMonitor.Server + 单 ZLMediaKit，不做自动 HA。
 
 ## Projects
@@ -94,7 +94,7 @@ Revision 同时用于：
 Canonical StreamKey:
 
 ```text
-DeviceId + ChannelNo + StreamType
+DeviceId + ChannelId + StreamType
 ```
 
 关键规则：
