@@ -72,6 +72,54 @@ public sealed class MediaRuntimeStatusCoordinatorTests
     }
 
     [Fact]
+    public async Task CoordinatorStopClearsCachedRuntimeEvidence()
+    {
+        var api = new TestDiagnosticsApiClient(Snapshot());
+        var store = new MediaRuntimeStatusStore();
+        await using var coordinator = CreateCoordinator(api, store);
+
+        await coordinator.StartAsync();
+        Assert.Equal(MediaServerHealth.Healthy, store.Snapshot.ServerHealth);
+        Assert.Single(store.Snapshot.Streams);
+
+        await coordinator.StopAsync();
+
+        Assert.Equal(MediaServerHealth.Unconfigured, store.Snapshot.ServerHealth);
+        Assert.Empty(store.Snapshot.Streams);
+    }
+
+    [Fact]
+    public async Task RestartDoesNotExposePreviousOnlineBeforeFreshFetch()
+    {
+        var api = new TestDiagnosticsApiClient(Snapshot(), Snapshot())
+        {
+            BlockSecondGet = true
+        };
+        var delay = new ManualDelay();
+        var store = new MediaRuntimeStatusStore();
+        await using var coordinator = CreateCoordinator(api, store, delay.DelayAsync);
+
+        await coordinator.StartAsync();
+        await coordinator.StopAsync();
+
+        Assert.Equal(MediaServerHealth.Unconfigured, store.Snapshot.ServerHealth);
+        Assert.Empty(store.Snapshot.Streams);
+
+        var restart = coordinator.StartAsync();
+        await api.SecondGetStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(MediaServerHealth.Unconfigured, store.Snapshot.ServerHealth);
+        Assert.Empty(store.Snapshot.Streams);
+
+        api.ReleaseBlockedGet();
+        await restart;
+
+        Assert.Equal(MediaServerHealth.Healthy, store.Snapshot.ServerHealth);
+        Assert.Single(store.Snapshot.Streams);
+        await coordinator.StopAsync();
+    }
+
+    [Fact]
     public async Task CoordinatorFailurePublishesUnavailable()
     {
         var api = new TestDiagnosticsApiClient(

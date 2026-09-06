@@ -46,6 +46,13 @@ public sealed class MediaRuntimeStatusStore
             []));
     }
 
+    public void ClearEvidence()
+    {
+        Replace(new MediaRuntimeSnapshot(
+            MediaServerHealth.Unconfigured,
+            []));
+    }
+
     private void Replace(MediaRuntimeSnapshot next)
     {
         if (snapshot.ServerHealth == next.ServerHealth

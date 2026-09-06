@@ -230,6 +230,10 @@ public sealed class MediaRuntimeStatusCoordinator : IAsyncDisposable
             {
                 await polling.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
+
+            await dispatcher
+                .InvokeAsync(store.ClearEvidence, cancellationToken)
+                .ConfigureAwait(false);
         }
         finally
         {
